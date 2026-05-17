@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="client-page">
+    <main id="clientApp" class="cloud-shell">
+      <aside class="icon-rail">
+        <button class="icon-button" title="Menu" data-panel="historyPanel" aria-label="Menu">
+          <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+        </button>
+        <button class="icon-button active" title="Novo chat" data-panel="chatPanel" aria-label="Novo chat">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <button class="icon-button" title="Buscar" data-panel="searchPanel" aria-label="Buscar">
+          <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+        </button>
+        <button class="icon-button" title="Conversas" data-panel="historyPanel" aria-label="Conversas">
+          <svg viewBox="0 0 24 24"><path d="M5 17.5 3.5 21l4-1.2a8.7 8.7 0 0 0 4.5 1.2c4.7 0 8.5-3.4 8.5-7.6S16.7 5.8 12 5.8 3.5 9.2 3.5 13.4c0 1.5.5 2.9 1.5 4.1Z" /></svg>
+        </button>
+        <button class="icon-button" title="Projetos" data-panel="projectsPanel" aria-label="Projetos">
+          <svg viewBox="0 0 24 24"><path d="M4 7.5h6l1.6 2H20v8.8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7.5Z" /></svg>
+        </button>
+        <button class="icon-button" title="Artefatos" data-panel="artifactsPanel" aria-label="Artefatos">
+          <svg viewBox="0 0 24 24"><path d="M8 4h8l4 4v12H8V4Z" /><path d="M15.5 4v4.5H20M4 8v12h4" /></svg>
+        </button>
+        <button class="icon-button dimmed" title="Código" data-panel="chatPanel" aria-label="Código">
+          <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+        </button>
+        <button class="icon-button auth-only hidden" title="Claude Code API" data-panel="apiPanel" aria-label="Claude Code API">
+          <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
+        </button>
+        <button id="authOpen" class="icon-button rail-bottom login-corner-button" title="Entrar ou cadastrar" aria-label="Entrar ou cadastrar">
+          Entrar
+        </button>
+        <button id="clientLogout" class="icon-button rail-bottom avatar-button hidden" title="Sair" aria-label="Sair"></button>
+      </aside>
+
+      <section class="cloud-main">
+        <header class="cloud-top">
+          <div class="plan-pill">
+            <span id="planBadge">plano Gratuito</span>
+            <span>•</span>
+            <button data-panel="settingsPanel" type="button">Fazer Upgrade</button>
+          </div>
+          <div class="top-actions">
+            <button class="ghost-top" data-panel="settingsPanel" type="button" aria-label="Ajuda">
+              <svg viewBox="0 0 24 24"><path d="M6 19v-7a6 6 0 0 1 12 0v7M6 15h12M8 20l2-2 2 2 2-2 2 2 2-2" /></svg>
+            </button>
+          </div>
+        </header>
+
+        <section id="chatPanel" class="client-panel active">
+          <div id="emptyState" class="chat-empty">
+            <div class="spark">✱</div>
+            <h1 id="welcomeTitle">Bem-vindo ao Claude</h1>
+            <form id="heroComposer" class="hero-composer">
+              <textarea name="prompt" placeholder="Como posso ajudar você hoje?" required></textarea>
+              <div class="composer-row">
+                <button class="composer-icon auth-only hidden" type="button" data-panel="apiPanel" aria-label="Anexar">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                <div class="composer-right">
+                  <select id="heroModel"></select>
+                  <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
+                    <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
+                  </button>
+                  <button class="primary send-button" type="submit">Enviar</button>
+                </div>
+              </div>
+            </form>
+            <div class="quick-actions">
+              <button data-prompt="Crie uma API FastAPI com autenticação simples">
+                <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+                Código
+              </button>
+              <button data-prompt="Escreva um texto profissional para meu cliente">
+                <svg viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16v4ZM13 7l4 4" /></svg>
+                Escrever
+              </button>
+              <button data-prompt="Me ensine este erro passo a passo">
+                <svg viewBox="0 0 24 24"><path d="M4 9 12 5l8 4-8 4-8-4Z" /><path d="M7 11v4c0 1.5 2.2 3 5 3s5-1.5 5-3v-4" /></svg>
+                Aprender
+              </button>
+              <button data-prompt="Organize minhas tarefas de hoje">
+                <svg viewBox="0 0 24 24"><path d="M5 10h14v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-7ZM8 10V6M16 10V6M9 6h6" /></svg>
+                Assuntos pessoais
+              </button>
+              <button data-prompt="Escolha o melhor modelo para esta tarefa">
+                <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-3 11.2V17h6v-2.8A6 6 0 0 0 12 3ZM10 21h4" /></svg>
+                Escolha do Claude
+              </button>
+            </div>
+            <div id="previewNotice" class="preview-notice">
+              Você está vendo uma prévia. Para usar o chat, entre em uma conta com plano ativo.
+            </div>
+          </div>
+
+          <div id="chatThread" class="chat-thread hidden"></div>
+
+          <form id="bottomComposer" class="bottom-composer hidden">
+            <textarea name="prompt" placeholder="Responder ao Claude..." required></textarea>
+            <div class="composer-row">
+              <button class="composer-icon auth-only hidden" type="button" data-panel="apiPanel" aria-label="Anexar">
+                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+              <div class="composer-right">
+                <select id="bottomModel"></select>
+                <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
+                  <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
+                </button>
+                <button class="primary send-button" type="submit">Enviar</button>
+              </div>
+            </div>
+          </form>
+          <div id="chatError" class="form-error chat-error"></div>
+        </section>
+
+        <section id="searchPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">Busca</span>
+            <h2>Pesquisar conversas locais</h2>
+          </div>
+          <input id="searchInput" placeholder="Buscar no historico..." />
+          <div id="searchResults" class="result-list"></div>
+        </section>
+
+        <section id="historyPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">Conversas</span>
+            <h2>Historico local</h2>
+          </div>
+          <button id="newChat" class="primary">Nova conversa</button>
+          <div id="historyList" class="result-list"></div>
+        </section>
+
+        <section id="projectsPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">Projetos</span>
+            <h2>Contextos salvos</h2>
+          </div>
+          <form id="projectForm" class="mini-form">
+            <input name="name" placeholder="Nome do projeto" required />
+            <textarea name="context" placeholder="Instruções ou contexto do projeto"></textarea>
+            <button class="primary" type="submit">Salvar projeto</button>
+          </form>
+          <div id="projectList" class="result-list"></div>
+        </section>
+
+        <section id="artifactsPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">Artefatos</span>
+            <h2>Arquivos gerados localmente</h2>
+          </div>
+          <div id="artifactList" class="result-list"></div>
+        </section>
+
+        <section id="apiPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">API</span>
+            <h2>Claude Code API</h2>
+          </div>
+          <form id="apiForm" class="settings-form">
+            <label>
+              Base URL
+              <input name="baseUrl" placeholder="http://127.0.0.1:8787" />
+            </label>
+            <label>
+              Token
+              <input name="token" placeholder="local-dev-token" />
+            </label>
+            <label class="switch-line">
+              <input name="demoMode" type="checkbox" />
+              Usar modo demo quando a API nao responder
+            </label>
+            <button class="primary" type="submit">Salvar API</button>
+          </form>
+          <div class="api-routes">
+            <code>POST /v1/messages</code>
+            <code>GET /v1/models</code>
+            <code>GET /v1/budget</code>
+          </div>
+        </section>
+
+        <section id="settingsPanel" class="client-panel side-panel">
+          <div class="panel-header">
+            <span class="overline">Conta</span>
+            <h2>Uso e configurações</h2>
+          </div>
+          <div class="usage-card">
+            <strong id="usageTitle">0 de 0 tokens</strong>
+            <div class="usage-bar"><div id="usageFill"></div></div>
+            <p id="usageText">Limite diario do plano.</p>
+          </div>
+          <div id="accountDetails" class="details-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <section id="authModal" class="auth-modal hidden" aria-modal="true" role="dialog">
+      <div class="auth-dialog dark-card">
+        <div class="modal-header">
+          <div class="product-lockup">
+            <div class="product-mark">✱</div>
+            <div>
+              <strong>Claude</strong>
+              <span>Entrar ou cadastrar</span>
+            </div>
+          </div>
+          <button id="authClose" type="button">Fechar</button>
+        </div>
+
+        <div class="auth-tabs">
+          <button class="active" type="button" data-auth-tab="loginPane">Login</button>
+          <button type="button" data-auth-tab="signupPane">Cadastro</button>
+        </div>
+
+        <form id="clientLoginForm" class="auth-pane active">
+          <p>Use o login e senha liberados no painel Admin depois do pagamento.</p>
+          <label>
+            Login
+            <input name="login" autocomplete="username" required />
+          </label>
+          <label>
+            Senha
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary" type="submit">Entrar</button>
+          <div id="clientLoginError" class="form-error"></div>
+        </form>
+
+        <form id="clientSignupForm" class="auth-pane">
+          <p>O cadastro cria uma conta pendente. O Admin ativa depois que o pagamento for confirmado.</p>
+          <label>
+            Como você quer ser chamado?
+            <input name="displayName" autocomplete="nickname" placeholder="Ex: Allan" required />
+          </label>
+          <label>
+            Nome completo
+            <input name="name" autocomplete="name" placeholder="Seu nome completo" required />
+          </label>
+          <label>
+            Login
+            <input name="login" autocomplete="username" required />
+          </label>
+          <label>
+            Senha
+            <input name="password" type="password" autocomplete="new-password" required />
+          </label>
+          <label>
+            Plano desejado
+            <select name="model">
+              <option value="sonnet">Claude Sonnet 4.6</option>
+              <option value="opus">Claude Opus 4.7</option>
+              <option value="haiku">Claude Haiku 4.5</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">Cadastrar e aguardar pagamento</button>
+          <div id="clientSignupMessage" class="form-error neutral"></div>
+        </form>
+      </div>
+    </section>
+
+    <script src="./shared.js"></script>
+    <script src="./client.js"></script>
+  </body>
+</html>

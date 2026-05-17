@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Admin</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="admin-page">
+    <main id="adminLogin" class="auth-screen">
+      <form id="adminLoginForm" class="auth-card">
+        <div class="product-lockup">
+          <div class="product-mark">✱</div>
+          <div>
+            <strong>Claude</strong>
+            <span>Admin</span>
+          </div>
+        </div>
+        <h1>Painel administrativo</h1>
+        <p>Entre para criar contas, definir planos personalizados e controlar limites diarios.</p>
+        <label>
+          Login
+          <input name="login" autocomplete="username" value="admin" required />
+        </label>
+        <label>
+          Senha
+          <input name="password" type="password" autocomplete="current-password" value="admin" required />
+        </label>
+        <button class="primary" type="submit">Entrar</button>
+        <div id="adminLoginError" class="form-error"></div>
+      </form>
+    </main>
+
+    <main id="adminApp" class="admin-shell hidden">
+      <aside class="admin-sidebar">
+        <div class="product-lockup">
+          <div class="product-mark">✱</div>
+          <div>
+            <strong>Claude</strong>
+            <span>Admin Console</span>
+          </div>
+        </div>
+        <nav class="admin-nav">
+          <button class="active" data-admin-tab="accountsPanel">Contas</button>
+          <button data-admin-tab="financePanel">Financeiro</button>
+          <button data-admin-tab="gatewayPanel">Gateway</button>
+        </nav>
+        <a class="side-link" href="./app.html" target="_blank">Abrir app do cliente</a>
+        <button id="adminLogout" class="ghost">Sair</button>
+      </aside>
+
+      <section class="admin-workspace">
+        <header class="admin-topbar">
+          <div>
+            <span class="overline">Frontier Admin</span>
+            <h1>Clientes e planos</h1>
+          </div>
+          <button id="seedDemo" type="button">Criar demo</button>
+        </header>
+
+        <section class="admin-metrics">
+          <article>
+            <span>Receita mensal</span>
+            <strong id="metricRevenue">R$ 0,00</strong>
+          </article>
+          <article>
+            <span>Lucro minimo</span>
+            <strong id="metricProfit">R$ 0,00</strong>
+          </article>
+          <article>
+            <span>Tokens diarios vendidos</span>
+            <strong id="metricLimit">0</strong>
+          </article>
+          <article>
+            <span>Uso hoje</span>
+            <strong id="metricUsage">0</strong>
+          </article>
+        </section>
+
+        <section id="accountsPanel" class="admin-panel active">
+          <div class="admin-grid">
+            <form id="accountForm" class="panel form-stack">
+              <div class="panel-heading">
+                <span class="overline">Nova conta</span>
+                <h2>Gerar acesso do cliente</h2>
+              </div>
+              <div class="field-grid">
+                <label>
+                  Nome
+                  <input name="name" placeholder="Nome do cliente" required />
+                </label>
+                <label>
+                  Login
+                  <input name="login" placeholder="cliente@empresa.com" required />
+                </label>
+                <label>
+                  Senha
+                  <input name="password" placeholder="Senha inicial" required />
+                </label>
+                <label>
+                  Plano personalizado
+                  <input name="plan" value="Claude Sonnet 4.6" required />
+                </label>
+                <label>
+                  Valor mensal em R$
+                  <input name="price" type="number" min="0" step="0.01" value="149.90" required />
+                </label>
+                <label>
+                  Modelo permitido
+                  <select name="model">
+                    <option value="sonnet">Claude Sonnet 4.6</option>
+                    <option value="opus">Claude Opus 4.7</option>
+                    <option value="haiku">Claude Haiku 4.5</option>
+                  </select>
+                </label>
+                <label>
+                  Limite diario manual
+                  <input name="manualLimit" type="number" min="0" placeholder="Opcional" />
+                </label>
+                <label>
+                  Status
+                  <select name="active">
+                    <option value="true">Ativo</option>
+                    <option value="false">Pausado</option>
+                  </select>
+                </label>
+              </div>
+              <div class="limit-box">
+                <div>
+                  <span>Limite aplicado</span>
+                  <strong id="previewTokens">0 tokens/dia</strong>
+                </div>
+                <div>
+                  <span>Custo maximo</span>
+                  <strong id="previewCost">US$ 0,00/mês</strong>
+                </div>
+              </div>
+              <button class="primary" type="submit">Criar conta</button>
+              <div id="accountError" class="form-error"></div>
+            </form>
+
+            <section class="panel table-panel">
+              <div class="panel-heading inline">
+                <div>
+                  <span class="overline">Acessos</span>
+                  <h2>Contas dos clientes</h2>
+                </div>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Plano</th>
+                      <th>Limite</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="accountsTable"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="financePanel" class="admin-panel">
+          <section class="panel">
+            <div class="panel-heading">
+              <span class="overline">Margem</span>
+              <h2>Como o limite e calculado</h2>
+            </div>
+            <div class="explain-grid">
+              <div>
+                <strong>1. Receita do cliente</strong>
+                <p>Voce informa quanto ele paga por mes em reais.</p>
+              </div>
+              <div>
+                <strong>2. Custo maximo</strong>
+                <p>O app reserva no maximo 50% desse valor para custo de API.</p>
+              </div>
+              <div>
+                <strong>3. Limite diario</strong>
+                <p>O custo mensal permitido e dividido por 30 e convertido em tokens.</p>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="gatewayPanel" class="admin-panel">
+          <section class="panel">
+            <div class="panel-heading">
+              <span class="overline">Projeto atual</span>
+              <h2>Claude Code API usada pelo app</h2>
+            </div>
+            <div class="code-list">
+              <code>POST /v1/messages</code>
+              <code>GET /v1/models</code>
+              <code>GET /v1/budget</code>
+              <code>POST /v1/router/debug</code>
+            </div>
+            <p class="muted">
+              A tela do cliente permite configurar URL, token e modelo. Se a Claude Code API
+              aceitar a origem do navegador, o chat do Claude chama a API real; senao, o modo
+              demo continua ativo.
+            </p>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="./shared.js"></script>
+    <script src="./admin.js"></script>
+  </body>
+</html>
