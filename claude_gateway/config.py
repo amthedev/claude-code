@@ -57,11 +57,11 @@ class Settings:
     usd_to_brl: float = 5.50
     cost_reserve_multiplier: float = 2.0
 
-    economy_public_model: str = "allan-code-economy"
-    pro_public_model: str = "allan-code-pro"
-    ultra_public_model: str = "allan-code-ultra"
-    ui_public_model: str = "allan-code-ui"
-    auto_public_model: str = "allan-code-auto"
+    economy_public_model: str = "claude-code-economy"
+    pro_public_model: str = "claude-code-pro"
+    ultra_public_model: str = "claude-code-ultra"
+    ui_public_model: str = "claude-code-ui"
+    auto_public_model: str = "claude-code-auto"
 
     router_agent: str = "tencent/hy3-preview"
     cheap_code_agent: str = "deepseek/deepseek-v4-flash"
@@ -73,7 +73,7 @@ class Settings:
     ultra_fallback: str = "deepseek/deepseek-v4-pro"
 
     openrouter_site_url: str = "http://localhost:8787"
-    openrouter_app_name: str = "Claude Code OpenRouter Gateway"
+    openrouter_app_name: str = "Claude Code"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -95,11 +95,11 @@ class Settings:
             customer_profit_margin=float(os.getenv("CUSTOMER_PROFIT_MARGIN", "0.50")),
             usd_to_brl=float(os.getenv("USD_TO_BRL", "5.50")),
             cost_reserve_multiplier=float(os.getenv("COST_RESERVE_MULTIPLIER", "2.0")),
-            economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "allan-code-economy"),
-            pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "allan-code-pro"),
-            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "allan-code-ultra"),
-            ui_public_model=os.getenv("UI_PUBLIC_MODEL", "allan-code-ui"),
-            auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "allan-code-auto"),
+            economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "claude-code-economy"),
+            pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "claude-code-pro"),
+            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-code-ultra"),
+            ui_public_model=os.getenv("UI_PUBLIC_MODEL", "claude-code-ui"),
+            auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "claude-code-auto"),
             router_agent=os.getenv("ROUTER_AGENT", "tencent/hy3-preview"),
             cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "deepseek/deepseek-v4-flash"),
             code_agent=os.getenv("CODE_AGENT", "deepseek/deepseek-v4-pro"),
@@ -111,7 +111,7 @@ class Settings:
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",
-                "Claude Code OpenRouter Gateway",
+                "Claude Code",
             ),
         )
 

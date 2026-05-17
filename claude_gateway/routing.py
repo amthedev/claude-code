@@ -111,31 +111,31 @@ def model_profiles(settings: Settings) -> list[ModelProfile]:
     return [
         ModelProfile(
             id=settings.economy_public_model,
-            display_name="Allan Code Economy",
+            display_name="Claude Code Economy",
             mode="economy",
             description="Cheap coding path for simple tasks.",
         ),
         ModelProfile(
             id=settings.pro_public_model,
-            display_name="Allan Code Pro",
+            display_name="Claude Code Pro",
             mode="pro",
             description="Stronger coding and reasoning path.",
         ),
         ModelProfile(
             id=settings.ultra_public_model,
-            display_name="Allan Code Ultra",
+            display_name="Claude Code Ultra",
             mode="ultra",
             description="Critical path with premium fallback available.",
         ),
         ModelProfile(
             id=settings.ui_public_model,
-            display_name="Allan Code UI",
+            display_name="Claude Code UI",
             mode="ui",
             description="Frontend and visual application path.",
         ),
         ModelProfile(
             id=settings.auto_public_model,
-            display_name="Allan Code Auto",
+            display_name="Claude Code Auto",
             mode="auto",
             description="Heuristic router across economy, pro, ultra, and UI.",
         ),

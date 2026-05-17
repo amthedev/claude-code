@@ -1,6 +1,6 @@
-# Claude Code OpenRouter Gateway
+# Claude Code
 
-FastAPI gateway compatible with the Anthropic Messages API shape used by Claude Code. It exposes local model names like `allan-code-pro`, routes them to OpenRouter models, and keeps Claude Code tool use safe by proxying tool and streaming calls directly upstream.
+FastAPI gateway compatible with the Anthropic Messages API shape used by Claude Code. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, and keeps Claude Code tool use safe by proxying tool and streaming calls directly upstream.
 
 ## Quick Start
 
@@ -25,10 +25,10 @@ Configure Claude Code:
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 export ANTHROPIC_API_KEY=""
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="allan-code-economy"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="allan-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="allan-code-ultra"
-export CLAUDE_CODE_SUBAGENT_MODEL="allan-code-pro"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
+export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
 Open the web app:
@@ -38,11 +38,11 @@ Open the web app:
 
 ## Public Models
 
-- `allan-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
-- `allan-code-pro`: stronger code/reasoning path, usually DeepSeek V4 Pro.
-- `allan-code-ultra`: strong path with optional premium review.
-- `allan-code-ui`: frontend/UI path, usually Kimi K2.6.
-- `allan-code-auto`: heuristically chooses between the above.
+- `claude-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
+- `claude-code-pro`: stronger code/reasoning path, usually DeepSeek V4 Pro.
+- `claude-code-ultra`: strong path with optional premium review.
+- `claude-code-ui`: frontend/UI path, usually Kimi K2.6.
+- `claude-code-auto`: heuristically chooses between the above.
 
 You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-17.
 
@@ -62,7 +62,7 @@ With the default model set, the main paths stay well under that budget:
 - DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
 - Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.
 
-`allan-code-ultra` improves quality through extra cheap candidates and review instead of calling Claude by default. Set `ALLOW_PREMIUM_FALLBACK=true` only if you intentionally want to permit premium fallback models that still pass the budget guard.
+`claude-code-ultra` improves quality through extra cheap candidates and review instead of calling Claude by default. Set `ALLOW_PREMIUM_FALLBACK=true` only if you intentionally want to permit premium fallback models that still pass the budget guard.
 
 External model ids such as `anthropic/claude-opus-4.7` are not used directly by default. They are routed back into the budget-safe internal model set unless `ALLOW_DIRECT_EXTERNAL_MODELS=true` is explicitly enabled.
 
@@ -71,7 +71,7 @@ External model ids such as `anthropic/claude-opus-4.7` are not used directly by 
 For selling API access, use customer-scoped tokens instead of sharing the admin token:
 
 ```env
-CUSTOMER_ACCOUNTS=cus_live_abc|Allan|149.90|60000|allan-code-pro|true
+CUSTOMER_ACCOUNTS=cus_live_abc|Cliente|149.90|60000|claude-code-pro|true
 CUSTOMER_PROFIT_MARGIN=0.50
 USD_TO_BRL=5.50
 COST_RESERVE_MULTIPLIER=2.0
@@ -138,5 +138,5 @@ curl -s http://127.0.0.1:8787/health | jq
 curl -s http://127.0.0.1:8787/v1/router/debug \
   -H "Authorization: Bearer local-dev-token" \
   -H "Content-Type: application/json" \
-  -d '{"model":"allan-code-auto","max_tokens":256,"messages":[{"role":"user","content":"Crie um dashboard React bonito"}]}' | jq
+  -d '{"model":"claude-code-auto","max_tokens":256,"messages":[{"role":"user","content":"Crie um dashboard React bonito"}]}' | jq
 ```

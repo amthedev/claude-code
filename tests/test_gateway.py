@@ -55,14 +55,14 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
-        self.assertIn("allan-code-pro", model_ids)
+        self.assertIn("claude-code-pro", model_ids)
 
     def test_auto_routes_frontend_to_ui(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
             json={
-                "model": "allan-code-auto",
+                "model": "claude-code-auto",
                 "max_tokens": 256,
                 "messages": [{"role": "user", "content": "Crie um dashboard React bonito"}],
             },
@@ -82,7 +82,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/messages",
             headers=self.headers,
             json={
-                "model": "allan-code-pro",
+                "model": "claude-code-pro",
                 "max_tokens": 256,
                 "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
                 "messages": [{"role": "user", "content": "Leia um arquivo"}],
@@ -97,13 +97,13 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/messages",
             headers=self.headers,
             json={
-                "model": "allan-code-pro",
+                "model": "claude-code-pro",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": "Corrija esse bug difícil"}],
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "allan-code-pro")
+        self.assertEqual(response.json()["model"], "claude-code-pro")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
 
     def test_ultra_pipeline_uses_extra_budget_safe_candidate(self) -> None:
@@ -111,13 +111,13 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/messages",
             headers=self.headers,
             json={
-                "model": "allan-code-ultra",
+                "model": "claude-code-ultra",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": "Corrija esse bug crítico de auth"}],
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "allan-code-ultra")
+        self.assertEqual(response.json()["model"], "claude-code-ultra")
         called_models = [model for model, _payload in self.app.state.openrouter.calls]
         self.assertGreaterEqual(len(called_models), 6)
         self.assertNotIn("anthropic/claude-sonnet-4.6", called_models)
@@ -142,7 +142,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/router/debug",
             headers=self.headers,
             json={
-                "model": "allan-code-pro",
+                "model": "claude-code-pro",
                 "max_tokens": 256,
                 "messages": [{"role": "user", "content": "Implemente uma API"}],
             },
@@ -191,7 +191,7 @@ class GatewayTestCase(unittest.TestCase):
         with TemporaryDirectory() as tmpdir:
             settings = make_settings()
             settings.customer_accounts = (
-                "customer-token|Maria|149.90|60000|allan-code-economy|true"
+                "customer-token|Maria|149.90|60000|claude-code-economy|true"
             )
             settings.quota_data_file = f"{tmpdir}/usage.json"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
@@ -212,13 +212,13 @@ class GatewayTestCase(unittest.TestCase):
 
             usage = client.get("/v1/usage", headers=customer_headers)
             self.assertEqual(usage.status_code, 200)
-            self.assertEqual(usage.json()["customer"]["allowed_model"], "allan-code-economy")
+            self.assertEqual(usage.json()["customer"]["allowed_model"], "claude-code-economy")
             self.assertGreater(usage.json()["today"]["requests"], 0)
 
     def test_customer_quota_blocks_before_upstream_call(self) -> None:
         with TemporaryDirectory() as tmpdir:
             settings = make_settings()
-            settings.customer_accounts = "tiny-token|Tiny|49.90|10|allan-code-pro|true"
+            settings.customer_accounts = "tiny-token|Tiny|49.90|10|claude-code-pro|true"
             settings.quota_data_file = f"{tmpdir}/usage.json"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
             client = TestClient(app)
@@ -227,7 +227,7 @@ class GatewayTestCase(unittest.TestCase):
                 "/v1/messages",
                 headers={"Authorization": "Bearer tiny-token"},
                 json={
-                    "model": "allan-code-pro",
+                    "model": "claude-code-pro",
                     "max_tokens": 128,
                     "messages": [{"role": "user", "content": "Crie uma funcao"}],
                 },
@@ -241,7 +241,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/messages",
             headers=self.headers,
             json={
-                "model": "allan-code-economy",
+                "model": "claude-code-economy",
                 "stream": True,
                 "max_tokens": 128,
                 "messages": [{"role": "user", "content": "Explique a função"}],

@@ -26,7 +26,7 @@ def create_app(
     client_factory: Callable[[Settings], OpenRouterClient] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
-    app = FastAPI(title="Claude Code OpenRouter Gateway", version="0.1.0")
+    app = FastAPI(title="Claude Code", version="0.1.0")
     app.state.settings = resolved_settings
     app.state.usage = UsageStore()
     app.state.customer_usage = CustomerUsageStore(resolved_settings)

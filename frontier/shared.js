@@ -78,15 +78,15 @@ const ClaudeApp = (() => {
 
   function backendModelForPlan(modelKey) {
     const aliases = {
-      haiku: "allan-code-economy",
-      economy: "allan-code-economy",
-      sonnet: "allan-code-pro",
-      pro: "allan-code-pro",
-      opus: "allan-code-ultra",
-      ultra: "allan-code-ultra",
-      ui: "allan-code-ui",
+      haiku: "claude-code-economy",
+      economy: "claude-code-economy",
+      sonnet: "claude-code-pro",
+      pro: "claude-code-pro",
+      opus: "claude-code-ultra",
+      ultra: "claude-code-ultra",
+      ui: "claude-code-ui",
     };
-    return aliases[modelKey] || "allan-code-pro";
+    return aliases[modelKey] || "claude-code-pro";
   }
 
   function apiSettings() {

@@ -4,7 +4,7 @@ Data da revisao: 2026-05-17.
 
 ## Estado atual
 
-O projeto e um gateway FastAPI compativel com o formato da Anthropic Messages API. Ele deixa Claude Code e o chat web chamarem nomes publicos como `allan-code-pro`, enquanto o backend roteia para modelos OpenRouter mais baratos.
+O projeto e um gateway FastAPI compativel com o formato da Anthropic Messages API. Ele deixa Claude Code e o chat web chamarem nomes publicos como `claude-code-pro`, enquanto o backend roteia para modelos OpenRouter mais baratos.
 
 O `frontier` e uma interface HTML/CSS/JS estatica com app de cliente e Admin. Ela serve bem como prototipo e painel operacional local, mas a protecao real precisa ficar no backend. Por isso agora o backend tem tokens de cliente e reserva diaria de custo por token.
 
@@ -50,7 +50,7 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 Defina clientes em `CUSTOMER_ACCOUNTS` no ambiente da Square Cloud:
 
 ```env
-CUSTOMER_ACCOUNTS=cus_live_abc|Allan|149.90|60000|allan-code-pro|true;cus_live_xyz|Maria|299.90|120000|allan-code-ultra|true
+CUSTOMER_ACCOUNTS=cus_live_abc|Cliente|149.90|60000|claude-code-pro|true;cus_live_xyz|Maria|299.90|120000|claude-code-ultra|true
 ```
 
 Formato:
@@ -61,11 +61,11 @@ token|nome|preco_mensal_brl|limite_diario_tokens|modelo_publico_permitido|ativo
 
 Modelos publicos recomendados:
 
-- `allan-code-economy`: barato, tarefas simples.
-- `allan-code-pro`: melhor equilibrio para Claude Code.
-- `allan-code-ultra`: raciocinio extra, ainda sem chamar Claude direto.
-- `allan-code-ui`: tarefas de frontend.
-- `allan-code-auto`: roteador automatico.
+- `claude-code-economy`: barato, tarefas simples.
+- `claude-code-pro`: melhor equilibrio para Claude Code.
+- `claude-code-ultra`: raciocinio extra, ainda sem chamar Claude direto.
+- `claude-code-ui`: tarefas de frontend.
+- `claude-code-auto`: roteador automatico.
 
 Para o cliente usar no Claude Code:
 
@@ -73,10 +73,10 @@ Para o cliente usar no Claude Code:
 export ANTHROPIC_BASE_URL="https://SEU-SUBDOMINIO.squareweb.app"
 export ANTHROPIC_AUTH_TOKEN="TOKEN_DO_CLIENTE"
 export ANTHROPIC_API_KEY=""
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="allan-code-economy"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="allan-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="allan-code-ultra"
-export CLAUDE_CODE_SUBAGENT_MODEL="allan-code-pro"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
+export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
 ## Square Cloud
@@ -92,7 +92,7 @@ Variaveis obrigatorias no painel da Square Cloud:
 OPENROUTER_API_KEY=sk-or-v1-...
 GATEWAY_API_KEYS=um-token-admin-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
-OPENROUTER_APP_NAME=Claude Code OpenRouter Gateway
+OPENROUTER_APP_NAME=Claude Code
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
