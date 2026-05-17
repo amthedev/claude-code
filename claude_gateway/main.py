@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Callable
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
-from .auth import require_gateway_auth
+from .auth import AuthContext, require_gateway_auth
 from .config import Settings, get_settings
+from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
-from .routing import RoutePlanner, model_profiles
+from .routing import RoutePlanner, extract_prompt_text, model_profiles
 from .usage import UsageStore
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
 
 
 def create_app(
@@ -23,6 +29,7 @@ def create_app(
     app = FastAPI(title="Claude Code OpenRouter Gateway", version="0.1.0")
     app.state.settings = resolved_settings
     app.state.usage = UsageStore()
+    app.state.customer_usage = CustomerUsageStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
     app.state.openrouter = factory(resolved_settings)
@@ -31,6 +38,7 @@ def create_app(
         app.state.planner,
         app.state.usage,
     )
+    _mount_frontend(app)
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -47,10 +55,13 @@ def create_app(
 
     @app.get("/v1/models")
     async def list_models(request: Request) -> dict[str, Any]:
-        require_gateway_auth(request, app.state.settings)
+        auth = require_gateway_auth(request, app.state.settings)
         cost_policy = CostPolicy(
             max_ratio_vs_claude=app.state.settings.max_cost_ratio_vs_claude,
         )
+        profiles = model_profiles(app.state.settings)
+        if auth.customer and auth.customer.allowed_model != "*":
+            profiles = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
         return {
             "data": [
                 {
@@ -66,7 +77,7 @@ def create_app(
                         )
                     ).to_dict(),
                 }
-                for profile in model_profiles(app.state.settings)
+                for profile in profiles
             ]
         }
 
@@ -91,6 +102,8 @@ def create_app(
             "max_cost_ratio_vs_claude": app.state.settings.max_cost_ratio_vs_claude,
             "minimum_savings_vs_claude": 1 - app.state.settings.max_cost_ratio_vs_claude,
             "allow_premium_fallback": app.state.settings.allow_premium_fallback,
+            "allow_direct_external_models": app.state.settings.allow_direct_external_models,
+            "max_request_output_tokens": app.state.settings.max_request_output_tokens,
             "models": {
                 role: cost_policy.estimate(model).to_dict() for role, model in models.items()
             },
@@ -98,13 +111,16 @@ def create_app(
 
     @app.post("/v1/messages")
     async def messages(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
-        require_gateway_auth(request, app.state.settings)
+        auth = require_gateway_auth(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
+        payload = _prepare_payload(payload, app.state.settings, auth)
         decision = app.state.planner.plan(payload)
+        reservation = _reserve_customer_budget(app, auth, payload, decision)
         if payload.get("stream"):
             if not app.state.settings.openrouter_api_key:
+                app.state.customer_usage.rollback(reservation)
                 raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
             app.state.usage.record_request(decision)
             return StreamingResponse(
@@ -115,13 +131,19 @@ def create_app(
         try:
             response, _ = await app.state.orchestrator.complete(payload)
         except OpenRouterError as exc:
+            app.state.customer_usage.rollback(reservation)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        except Exception:
+            app.state.customer_usage.rollback(reservation)
+            raise
 
         return JSONResponse(response)
 
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
-        require_gateway_auth(request, app.state.settings)
+        auth = require_gateway_auth(request, app.state.settings)
+        if auth.customer:
+            return app.state.customer_usage.snapshot_for(auth.customer)
         return app.state.usage.snapshot()
 
     @app.post("/v1/router/debug")
@@ -129,7 +151,8 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
-        require_gateway_auth(request, app.state.settings)
+        auth = require_gateway_auth(request, app.state.settings)
+        payload = _prepare_payload(payload, app.state.settings, auth)
         return app.state.planner.plan(payload).to_dict()
 
     @app.post("/v1/agent/run")
@@ -137,28 +160,95 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
-        require_gateway_auth(request, app.state.settings)
+        auth = require_gateway_auth(request, app.state.settings)
+        payload = _prepare_payload(payload, app.state.settings, auth)
         if payload.get("stream"):
             payload = {**payload, "stream": False}
 
+        decision = app.state.planner.plan(payload, force_orchestration=True)
+        reservation = _reserve_customer_budget(app, auth, payload, decision)
         try:
             response, decision = await app.state.orchestrator.complete(
                 payload,
                 force_orchestration=True,
             )
         except OpenRouterError as exc:
+            app.state.customer_usage.rollback(reservation)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        except Exception:
+            app.state.customer_usage.rollback(reservation)
+            raise
 
         return JSONResponse({"decision": decision.to_dict(), "response": response})
 
     return app
 
 
+def _mount_frontend(app: FastAPI) -> None:
+    if not FRONTEND_DIR.exists():
+        return
+
+    app.mount("/frontier", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontier")
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/frontier/app.html")
+
+    @app.get("/app", include_in_schema=False)
+    async def app_page() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "app.html")
+
+    @app.get("/admin", include_in_schema=False)
+    async def admin_page() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+def _prepare_payload(
+    payload: dict[str, Any],
+    settings: Settings,
+    auth: AuthContext,
+) -> dict[str, Any]:
+    prompt_text = extract_prompt_text(payload)
+    if len(prompt_text) > settings.max_request_input_chars:
+        raise HTTPException(
+            status_code=413,
+            detail="Request input is larger than MAX_REQUEST_INPUT_CHARS.",
+        )
+
+    limited = dict(payload)
+    limited["max_tokens"] = _safe_max_tokens(limited, settings)
+    if auth.customer:
+        limited = clamp_customer_payload(limited, settings, auth.customer)
+    return limited
+
+
+def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:
+    try:
+        requested = int(payload.get("max_tokens") or settings.max_request_output_tokens)
+    except (TypeError, ValueError):
+        requested = settings.max_request_output_tokens
+    return max(1, min(requested, settings.max_request_output_tokens))
+
+
+def _reserve_customer_budget(
+    app: FastAPI,
+    auth: AuthContext,
+    payload: dict[str, Any],
+    decision: Any,
+) -> CustomerReservation | None:
+    if not auth.customer:
+        return None
+    return app.state.customer_usage.reserve(auth.customer, payload, decision)
+
+
 app = create_app()
 
 
 def run() -> None:
-    uvicorn.run("claude_gateway.main:app", host="127.0.0.1", port=8787, reload=True)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8787"))
+    reload_enabled = os.getenv("RELOAD", "false").strip().lower() in {"1", "true", "yes", "on"}
+    uvicorn.run("claude_gateway.main:app", host=host, port=port, reload=reload_enabled)
 
 
 if __name__ == "__main__":

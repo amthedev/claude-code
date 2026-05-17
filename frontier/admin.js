@@ -29,10 +29,29 @@ function renderMetrics(accounts) {
   document.querySelector("#metricUsage").textContent = ClaudeApp.integer.format(usage);
 }
 
+function renderGatewaySnippet(accounts) {
+  const target = document.querySelector("#customerEnvSnippet");
+  if (!target) return;
+
+  target.value = accounts
+    .map((account) =>
+      [
+        account.apiToken,
+        account.name,
+        Number(account.price || 0).toFixed(2),
+        account.dailyLimit,
+        ClaudeApp.backendModelForPlan(account.modelKey),
+        account.active ? "true" : "false",
+      ].join("|"),
+    )
+    .join(";");
+}
+
 function renderAccounts() {
   const accounts = ClaudeApp.accounts();
   ClaudeApp.saveAccounts(accounts);
   renderMetrics(accounts);
+  renderGatewaySnippet(accounts);
 
   const table = document.querySelector("#accountsTable");
   if (!accounts.length) {
@@ -50,6 +69,7 @@ function renderAccounts() {
             <strong>${ClaudeApp.escapeHtml(account.name)}</strong>
             <div class="muted">${ClaudeApp.escapeHtml(account.login)}</div>
             <div class="muted">Senha: ${ClaudeApp.escapeHtml(account.password)}</div>
+            <div class="muted">API: ${ClaudeApp.escapeHtml(account.apiToken)}</div>
           </td>
           <td>
             ${ClaudeApp.escapeHtml(account.plan)}

@@ -76,9 +76,26 @@ const ClaudeApp = (() => {
     return models.sonnet.publicModel;
   }
 
+  function backendModelForPlan(modelKey) {
+    const aliases = {
+      haiku: "allan-code-economy",
+      economy: "allan-code-economy",
+      sonnet: "allan-code-pro",
+      pro: "allan-code-pro",
+      opus: "allan-code-ultra",
+      ultra: "allan-code-ultra",
+      ui: "allan-code-ui",
+    };
+    return aliases[modelKey] || "allan-code-pro";
+  }
+
   function apiSettings() {
+    const sameOriginApi =
+      window.location.origin && window.location.origin !== "null"
+        ? window.location.origin
+        : "http://127.0.0.1:8787";
     const settings = load(API_SETTINGS_KEY, {
-      baseUrl: "http://127.0.0.1:8787",
+      baseUrl: sameOriginApi,
       token: "local-dev-token",
       model: models.sonnet.publicModel,
       demoMode: true,
@@ -140,6 +157,9 @@ const ClaudeApp = (() => {
     const limit = calculateLimit(account.price, account.modelKey, account.manualLimit);
     return {
       ...account,
+      apiToken:
+        account.apiToken ||
+        `cus_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       modelKey: normalizeModelKey(account.modelKey),
       dailyLimit: limit.dailyLimit,
       computedDailyTokens: limit.computedDailyTokens,
@@ -150,6 +170,9 @@ const ClaudeApp = (() => {
   function makeAccount(values) {
     const account = {
       id: `acct_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      apiToken:
+        values.apiToken ||
+        `cus_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),
@@ -222,6 +245,7 @@ const ClaudeApp = (() => {
     modelOptions,
     normalizeModelKey,
     normalizePublicModel,
+    backendModelForPlan,
     demoReply,
     models,
     brl,

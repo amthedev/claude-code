@@ -46,6 +46,14 @@ function loadApiForm() {
   document.querySelector("#bottomModel").value = settings.model;
 }
 
+function syncCustomerApiToken(current) {
+  if (!current?.apiToken) return;
+  const settings = ClaudeApp.apiSettings();
+  if (settings.token && settings.token !== "local-dev-token") return;
+  ClaudeApp.saveApiSettings({ ...settings, token: current.apiToken });
+  loadApiForm();
+}
+
 function renderAccount() {
   const current = account();
   const authOpen = document.querySelector("#authOpen");
@@ -72,6 +80,7 @@ function renderAccount() {
   }
 
   const preferredName = (current.displayName || current.name || "Você").trim();
+  syncCustomerApiToken(current);
   document.querySelector("#planBadge").textContent = current.plan;
   document.querySelector("#welcomeTitle").textContent = `${preferredName} está de volta!`;
   document.querySelector("#usageTitle").textContent =

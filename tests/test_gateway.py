@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -150,6 +151,89 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertNotEqual(data["selected_openrouter_model"], "anthropic/claude-sonnet-4.6")
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
+
+    def test_external_model_request_is_budget_routed_by_default(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "anthropic/claude-opus-4.7",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "Implemente uma API"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertNotEqual(data["mode"], "direct")
+        self.assertNotEqual(data["selected_openrouter_model"], "anthropic/claude-opus-4.7")
+        self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
+
+    def test_direct_external_model_can_be_enabled_for_admin(self) -> None:
+        settings = make_settings()
+        settings.allow_direct_external_models = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        response = client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "anthropic/claude-opus-4.7",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "Implemente uma API"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "direct")
+        self.assertEqual(data["selected_openrouter_model"], "anthropic/claude-opus-4.7")
+
+    def test_customer_token_forces_allowed_model_and_reports_own_usage(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.customer_accounts = (
+                "customer-token|Maria|149.90|60000|allan-code-economy|true"
+            )
+            settings.quota_data_file = f"{tmpdir}/usage.json"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            customer_headers = {"Authorization": "Bearer customer-token"}
+
+            response = client.post(
+                "/v1/messages",
+                headers=customer_headers,
+                json={
+                    "model": "claude-opus-4.7",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Explique este trecho"}],
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+
+            usage = client.get("/v1/usage", headers=customer_headers)
+            self.assertEqual(usage.status_code, 200)
+            self.assertEqual(usage.json()["customer"]["allowed_model"], "allan-code-economy")
+            self.assertGreater(usage.json()["today"]["requests"], 0)
+
+    def test_customer_quota_blocks_before_upstream_call(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.customer_accounts = "tiny-token|Tiny|49.90|10|allan-code-pro|true"
+            settings.quota_data_file = f"{tmpdir}/usage.json"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/messages",
+                headers={"Authorization": "Bearer tiny-token"},
+                json={
+                    "model": "allan-code-pro",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Crie uma funcao"}],
+                },
+            )
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(app.state.openrouter.calls, [])
 
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(

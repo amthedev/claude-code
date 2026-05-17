@@ -206,7 +206,8 @@ class RoutePlanner:
         mode = self._mode_for_requested_model(requested_model, task_type, complexity)
         public_model = self._public_model_for_mode(mode)
         selected_model = self._openrouter_model_for_mode(mode, task_type, complexity)
-        direct_external = "/" in requested_model and requested_model not in self._public_ids()
+        external_model_requested = "/" in requested_model and requested_model not in self._public_ids()
+        direct_external = external_model_requested and self.settings.allow_direct_external_models
         if direct_external:
             public_model = requested_model
             selected_model = requested_model

@@ -48,6 +48,14 @@ class Settings:
     enable_agent_orchestration: bool = True
     max_cost_ratio_vs_claude: float = 0.50
     allow_premium_fallback: bool = False
+    allow_direct_external_models: bool = False
+    max_request_input_chars: int = 120_000
+    max_request_output_tokens: int = 4096
+    customer_accounts: str = ""
+    quota_data_file: str = "data/customer_usage.json"
+    customer_profit_margin: float = 0.50
+    usd_to_brl: float = 5.50
+    cost_reserve_multiplier: float = 2.0
 
     economy_public_model: str = "allan-code-economy"
     pro_public_model: str = "allan-code-pro"
@@ -79,6 +87,14 @@ class Settings:
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),
             allow_premium_fallback=_bool_env("ALLOW_PREMIUM_FALLBACK", False),
+            allow_direct_external_models=_bool_env("ALLOW_DIRECT_EXTERNAL_MODELS", False),
+            max_request_input_chars=int(os.getenv("MAX_REQUEST_INPUT_CHARS", "120000")),
+            max_request_output_tokens=int(os.getenv("MAX_REQUEST_OUTPUT_TOKENS", "4096")),
+            customer_accounts=os.getenv("CUSTOMER_ACCOUNTS", ""),
+            quota_data_file=os.getenv("QUOTA_DATA_FILE", "data/customer_usage.json"),
+            customer_profit_margin=float(os.getenv("CUSTOMER_PROFIT_MARGIN", "0.50")),
+            usd_to_brl=float(os.getenv("USD_TO_BRL", "5.50")),
+            cost_reserve_multiplier=float(os.getenv("COST_RESERVE_MULTIPLIER", "2.0")),
             economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "allan-code-economy"),
             pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "allan-code-pro"),
             ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "allan-code-ultra"),
