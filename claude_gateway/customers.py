@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -88,6 +88,7 @@ class CustomerUsageStore:
         self.settings = settings
         self.path = Path(settings.quota_data_file)
         self._lock = Lock()
+        self._init_db()
 
     def reserve(self, plan: CustomerPlan, payload: dict[str, Any], decision: RouteDecision) -> CustomerReservation:
         if not plan.active:
@@ -115,27 +116,42 @@ class CustomerUsageStore:
 
         day = _today()
         with self._lock:
-            data = self._read()
-            bucket = self._bucket(data, day, plan.token_hash)
-            next_cost = float(bucket.get("reserved_cost_usd") or 0) + estimated_cost_usd
-            next_tokens = int(bucket.get("reserved_tokens") or 0) + estimated_tokens
+            with self._connect() as db:
+                bucket = self._bucket(db, day, plan.token_hash)
+                next_cost = float(bucket["reserved_cost_usd"] or 0) + estimated_cost_usd
+                next_tokens = int(bucket["reserved_tokens"] or 0) + estimated_tokens
 
-            if plan.daily_token_limit and next_tokens > plan.daily_token_limit:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Daily token limit reached for this customer.",
+                if plan.daily_token_limit and next_tokens > plan.daily_token_limit:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Daily token limit reached for this customer.",
+                    )
+
+                if next_cost > daily_budget:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Daily money budget reached for this customer.",
+                    )
+
+                db.execute(
+                    """
+                    INSERT INTO customer_usage (
+                        day, token_hash, requests, reserved_cost_usd, reserved_tokens
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(day, token_hash) DO UPDATE SET
+                        requests = excluded.requests,
+                        reserved_cost_usd = excluded.reserved_cost_usd,
+                        reserved_tokens = excluded.reserved_tokens
+                    """,
+                    (
+                        day,
+                        plan.token_hash,
+                        int(bucket["requests"] or 0) + 1,
+                        round(next_cost, 8),
+                        next_tokens,
+                    ),
                 )
-
-            if next_cost > daily_budget:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Daily money budget reached for this customer.",
-                )
-
-            bucket["reserved_cost_usd"] = round(next_cost, 8)
-            bucket["reserved_tokens"] = next_tokens
-            bucket["requests"] = int(bucket.get("requests") or 0) + 1
-            self._write(data)
+                db.commit()
 
         return CustomerReservation(
             token_hash=plan.token_hash,
@@ -149,28 +165,44 @@ class CustomerUsageStore:
             return
 
         with self._lock:
-            data = self._read()
-            bucket = self._bucket(data, reservation.date, reservation.token_hash)
-            bucket["reserved_cost_usd"] = round(
-                max(0.0, float(bucket.get("reserved_cost_usd") or 0) - reservation.estimated_cost_usd),
-                8,
-            )
-            bucket["reserved_tokens"] = max(
-                0,
-                int(bucket.get("reserved_tokens") or 0) - reservation.estimated_tokens,
-            )
-            bucket["requests"] = max(0, int(bucket.get("requests") or 0) - 1)
-            self._write(data)
+            with self._connect() as db:
+                bucket = self._bucket(db, reservation.date, reservation.token_hash)
+                db.execute(
+                    """
+                    INSERT INTO customer_usage (
+                        day, token_hash, requests, reserved_cost_usd, reserved_tokens
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(day, token_hash) DO UPDATE SET
+                        requests = excluded.requests,
+                        reserved_cost_usd = excluded.reserved_cost_usd,
+                        reserved_tokens = excluded.reserved_tokens
+                    """,
+                    (
+                        reservation.date,
+                        reservation.token_hash,
+                        max(0, int(bucket["requests"] or 0) - 1),
+                        round(
+                            max(
+                                0.0,
+                                float(bucket["reserved_cost_usd"] or 0)
+                                - reservation.estimated_cost_usd,
+                            ),
+                            8,
+                        ),
+                        max(0, int(bucket["reserved_tokens"] or 0) - reservation.estimated_tokens),
+                    ),
+                )
+                db.commit()
 
     def snapshot_for(self, plan: CustomerPlan) -> dict[str, Any]:
         daily_budget = daily_cost_budget_usd(plan, self.settings)
         day = _today()
         with self._lock:
-            data = self._read()
-            bucket = self._bucket(data, day, plan.token_hash)
-            spent = float(bucket.get("reserved_cost_usd") or 0)
-            tokens = int(bucket.get("reserved_tokens") or 0)
-            requests = int(bucket.get("requests") or 0)
+            with self._connect() as db:
+                bucket = self._bucket(db, day, plan.token_hash)
+                spent = float(bucket["reserved_cost_usd"] or 0)
+                tokens = int(bucket["reserved_tokens"] or 0)
+                requests = int(bucket["requests"] or 0)
 
         return {
             "customer": {
@@ -193,40 +225,56 @@ class CustomerUsageStore:
             },
         }
 
-    def _read(self) -> dict[str, Any]:
-        if not self.path.exists():
-            return {}
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Quota data file is corrupted; refusing requests to protect budget.",
-            ) from exc
-        if not isinstance(data, dict):
-            return {}
-        return data
-
-    def _write(self, data: dict[str, Any]) -> None:
+    def _init_db(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(self.path)
+        with self._connect() as db:
+            db.execute("PRAGMA journal_mode = WAL")
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS customer_usage (
+                    day TEXT NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    reserved_cost_usd REAL NOT NULL DEFAULT 0,
+                    reserved_tokens INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (day, token_hash)
+                )
+                """
+            )
+            db.commit()
 
-    def _bucket(self, data: dict[str, Any], day: str, token_hash: str) -> dict[str, Any]:
-        day_bucket = data.setdefault(day, {})
-        if not isinstance(day_bucket, dict):
-            day_bucket = {}
-            data[day] = day_bucket
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        return db
 
-        bucket = day_bucket.setdefault(
-            token_hash,
-            {"requests": 0, "reserved_cost_usd": 0.0, "reserved_tokens": 0},
+    def _bucket(self, db: sqlite3.Connection, day: str, token_hash: str) -> sqlite3.Row:
+        row = db.execute(
+            """
+            SELECT requests, reserved_cost_usd, reserved_tokens
+              FROM customer_usage
+             WHERE day = ? AND token_hash = ?
+            """,
+            (day, token_hash),
+        ).fetchone()
+        if row:
+            return row
+        db.execute(
+            """
+            INSERT OR IGNORE INTO customer_usage (
+                day, token_hash, requests, reserved_cost_usd, reserved_tokens
+            ) VALUES (?, ?, 0, 0, 0)
+            """,
+            (day, token_hash),
         )
-        if not isinstance(bucket, dict):
-            bucket = {"requests": 0, "reserved_cost_usd": 0.0, "reserved_tokens": 0}
-            day_bucket[token_hash] = bucket
-        return bucket
+        return db.execute(
+            """
+            SELECT requests, reserved_cost_usd, reserved_tokens
+              FROM customer_usage
+             WHERE day = ? AND token_hash = ?
+            """,
+            (day, token_hash),
+        ).fetchone()
 
 
 def daily_cost_budget_usd(plan: CustomerPlan, settings: Settings) -> float:

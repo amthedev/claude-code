@@ -227,7 +227,6 @@ const ClaudeApp = (() => {
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),
-      password: values.password,
       plan: values.plan.trim() || "Claude Sonnet 4.6",
       price: Number(values.price) || 0,
       modelKey: normalizeModelKey(values.model),

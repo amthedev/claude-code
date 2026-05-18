@@ -445,15 +445,9 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
     const data = await authRequest("/v1/auth/login", values);
     found = saveServerAccount(data.account);
   } catch (error) {
-    if (!error.fallback) {
-      document.querySelector("#clientLoginError").textContent = error.message;
-      return;
-    }
-    found = ClaudeApp.accounts().find(
-      (item) =>
-        item.login.toLowerCase() === values.login.trim().toLowerCase() &&
-        item.password === values.password,
-    );
+    document.querySelector("#clientLoginError").textContent =
+      error.fallback ? "API indisponível para validar login." : error.message;
+    return;
   }
 
   if (!found) {
@@ -496,49 +490,9 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     renderAccount();
     return;
   } catch (error) {
-    if (!error.fallback) {
-      message.textContent = error.message;
-      return;
-    }
-  }
-
-  const giftCode = ClaudeApp.normalizeGiftCode(values.giftCard);
-  const giftCards = ClaudeApp.giftCards();
-  const giftIndex = giftCards.findIndex((card) => card.code === giftCode);
-  const giftCard = giftCards[giftIndex];
-  if (!giftCard || !giftCard.active || giftCard.usedByAccountId) {
-    message.textContent = "Gift card inválido, pausado ou já usado.";
+    message.textContent = error.fallback ? "API indisponível para criar conta." : error.message;
     return;
   }
-
-  const account = ClaudeApp.makeAccount({
-    name: values.name,
-    displayName: values.name,
-    login,
-    password: values.password,
-    plan: giftCard.plan,
-    price: giftCard.price,
-    model: giftCard.modelKey,
-    manualLimit: giftCard.manualLimit,
-    active: "true",
-    giftCardCode: giftCard.code,
-  });
-
-  giftCards[giftIndex] = {
-    ...giftCard,
-    active: false,
-    usedByAccountId: account.id,
-    usedByLogin: login,
-    usedAt: new Date().toISOString(),
-  };
-  accounts.push(account);
-  ClaudeApp.saveAccounts(accounts);
-  ClaudeApp.saveGiftCards(giftCards);
-  event.currentTarget.reset();
-  currentAccountId = account.id;
-  localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, account.id);
-  closeAuthModal();
-  renderAccount();
 });
 
 document.querySelectorAll("[data-panel]").forEach((button) => {

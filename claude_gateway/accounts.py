@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import math
 import secrets
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 from .config import Settings
 from .customers import CustomerPlan
+from .security import hash_password, verify_password
 
 
 MODEL_LABELS = {
@@ -40,49 +39,61 @@ class AccountStore:
         self.settings = settings
         self.path = Path(settings.account_data_file)
         self._lock = Lock()
+        self._init_db()
 
     def list_gift_cards(self) -> list[dict[str, Any]]:
-        with self._lock:
-            return [_public_gift_card(card) for card in self._read()["gift_cards"]]
+        with self._lock, self._connect() as db:
+            rows = db.execute("SELECT * FROM gift_cards ORDER BY created_at DESC").fetchall()
+        return [_public_gift_card(_gift_card_from_row(row)) for row in rows]
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        with self._lock:
-            return [_public_account(account) for account in self._read()["accounts"]]
+        with self._lock, self._connect() as db:
+            rows = db.execute("SELECT * FROM accounts ORDER BY created_at DESC").fetchall()
+        return [_public_account(_account_from_row(row)) for row in rows]
 
     def create_gift_card(self, values: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
-            data = self._read()
+        with self._lock, self._connect() as db:
             code = _normalize_gift_code(values.get("code")) or _generate_gift_code()
-            while any(card["code"] == code for card in data["gift_cards"]):
+            while self._gift_code_exists(db, code):
                 if values.get("code"):
                     raise HTTPException(status_code=409, detail="Gift card already exists.")
                 code = _generate_gift_code()
 
             card = _gift_card_from_values(values, code, self.settings)
-            data["gift_cards"].insert(0, card)
-            self._write(data)
-            return _public_gift_card(card)
+            db.execute(
+                """
+                INSERT INTO gift_cards (
+                    id, code, plan, price, model_key, manual_limit, active, daily_limit,
+                    computed_daily_tokens, max_cost_usd, used_by_account_id, used_by_login,
+                    used_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _gift_card_values(card),
+            )
+            db.commit()
+        return _public_gift_card(card)
 
     def update_gift_card(self, card_id: str, values: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
-            data = self._read()
-            card = _find_by_id(data["gift_cards"], card_id, "Gift card")
+        with self._lock, self._connect() as db:
+            card = self._find_gift_card(db, card_id)
             if card.get("usedByAccountId"):
                 raise HTTPException(status_code=409, detail="Used gift cards cannot be changed.")
             if "active" in values:
                 card["active"] = bool(values["active"])
-            self._write(data)
-            return _public_gift_card(card)
+                db.execute(
+                    "UPDATE gift_cards SET active = ? WHERE id = ?",
+                    (int(card["active"]), card_id),
+                )
+                db.commit()
+        return _public_gift_card(card)
 
     def delete_gift_card(self, card_id: str) -> dict[str, str]:
-        with self._lock:
-            data = self._read()
-            before = len(data["gift_cards"])
-            data["gift_cards"] = [card for card in data["gift_cards"] if card["id"] != card_id]
-            if len(data["gift_cards"]) == before:
+        with self._lock, self._connect() as db:
+            cursor = db.execute("DELETE FROM gift_cards WHERE id = ?", (card_id,))
+            db.commit()
+            if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Gift card not found.")
-            self._write(data)
-            return {"status": "deleted"}
+        return {"status": "deleted"}
 
     def signup(self, values: dict[str, Any]) -> dict[str, Any]:
         login = str(values.get("login") or "").strip().lower()
@@ -92,95 +103,176 @@ class AccountStore:
 
         if not name or not login or not password or not gift_code:
             raise HTTPException(status_code=400, detail="Name, e-mail, password, and gift card are required.")
-        if "@" not in login:
+        if "@" not in login or len(login) > 254:
             raise HTTPException(status_code=400, detail="Use a valid e-mail.")
 
-        with self._lock:
-            data = self._read()
-            if any(account["login"].lower() == login for account in data["accounts"]):
+        with self._lock, self._connect() as db:
+            if self._login_exists(db, login):
                 raise HTTPException(status_code=409, detail="This e-mail is already registered.")
 
-            gift_card = next((card for card in data["gift_cards"] if card["code"] == gift_code), None)
+            gift_card = self._gift_card_by_code(db, gift_code)
             if not gift_card or not gift_card.get("active") or gift_card.get("usedByAccountId"):
                 raise HTTPException(status_code=400, detail="Gift card is invalid, paused, or already used.")
 
             account = _account_from_gift_card(gift_card, name, login, password)
-            data["accounts"].append(account)
-            gift_card["active"] = False
-            gift_card["usedByAccountId"] = account["id"]
-            gift_card["usedByLogin"] = login
-            gift_card["usedAt"] = _now()
-            self._write(data)
-            return _public_account(account)
+            db.execute(
+                """
+                INSERT INTO accounts (
+                    id, api_token, name, display_name, login, password_hash, plan, price,
+                    model_key, manual_limit, active, gift_card_code, used_today, daily_limit,
+                    computed_daily_tokens, max_cost_usd, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _account_values(account),
+            )
+            db.execute(
+                """
+                UPDATE gift_cards
+                   SET active = 0, used_by_account_id = ?, used_by_login = ?, used_at = ?
+                 WHERE id = ?
+                """,
+                (account["id"], login, _now(), gift_card["id"]),
+            )
+            db.commit()
+        return _public_account(account)
 
     def login(self, values: dict[str, Any]) -> dict[str, Any]:
         login = str(values.get("login") or "").strip().lower()
         password = str(values.get("password") or "")
-        with self._lock:
-            data = self._read()
-            account = next((item for item in data["accounts"] if item["login"].lower() == login), None)
-            if not account or not _verify_password(password, account["passwordHash"]):
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM accounts WHERE login = ?", (login,)).fetchone()
+            account = _account_from_row(row) if row else None
+            if not account:
+                raise HTTPException(status_code=403, detail="Invalid e-mail or password.")
+            ok, needs_rehash = verify_password(password, account["passwordHash"])
+            if not ok:
                 raise HTTPException(status_code=403, detail="Invalid e-mail or password.")
             if not account.get("active"):
                 raise HTTPException(status_code=403, detail="Account is paused.")
+            if needs_rehash:
+                account["passwordHash"] = hash_password(password)
+                db.execute(
+                    "UPDATE accounts SET password_hash = ? WHERE id = ?",
+                    (account["passwordHash"], account["id"]),
+                )
+                db.commit()
             return _public_account(account)
 
     def update_account(self, account_id: str, values: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
-            data = self._read()
-            account = _find_by_id(data["accounts"], account_id, "Account")
+        with self._lock, self._connect() as db:
+            account = self._find_account(db, account_id)
             if "active" in values:
                 account["active"] = bool(values["active"])
             if values.get("resetUsage"):
                 account["usedToday"] = 0
-            self._write(data)
-            return _public_account(account)
+            db.execute(
+                "UPDATE accounts SET active = ?, used_today = ? WHERE id = ?",
+                (int(account["active"]), int(account["usedToday"]), account_id),
+            )
+            db.commit()
+        return _public_account(account)
 
     def delete_account(self, account_id: str) -> dict[str, str]:
-        with self._lock:
-            data = self._read()
-            before = len(data["accounts"])
-            data["accounts"] = [account for account in data["accounts"] if account["id"] != account_id]
-            if len(data["accounts"]) == before:
+        with self._lock, self._connect() as db:
+            cursor = db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+            db.commit()
+            if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Account not found.")
-            self._write(data)
-            return {"status": "deleted"}
+        return {"status": "deleted"}
 
     def customer_plan_for_token(self, token: str) -> CustomerPlan | None:
-        with self._lock:
-            for account in self._read()["accounts"]:
-                if hmac.compare_digest(token, account.get("apiToken", "")):
-                    return CustomerPlan(
-                        token=token,
-                        name=account["name"],
-                        monthly_price_brl=float(account.get("price") or 0),
-                        daily_token_limit=int(account.get("dailyLimit") or 0),
-                        allowed_model=BACKEND_MODELS.get(account.get("modelKey"), "claude-code-pro"),
-                        active=bool(account.get("active")),
-                    )
-        return None
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+        if not row:
+            return None
+        account = _account_from_row(row)
+        return CustomerPlan(
+            token=token,
+            name=account["name"],
+            monthly_price_brl=float(account.get("price") or 0),
+            daily_token_limit=int(account.get("dailyLimit") or 0),
+            allowed_model=BACKEND_MODELS.get(account.get("modelKey"), "claude-code-pro"),
+            active=bool(account.get("active")),
+        )
 
-    def _read(self) -> dict[str, list[dict[str, Any]]]:
-        if not self.path.exists():
-            return {"gift_cards": [], "accounts": []}
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Account data file is corrupted.",
-            ) from exc
-        if not isinstance(data, dict):
-            return {"gift_cards": [], "accounts": []}
-        gift_cards = data.get("gift_cards") if isinstance(data.get("gift_cards"), list) else []
-        accounts = data.get("accounts") if isinstance(data.get("accounts"), list) else []
-        return {"gift_cards": gift_cards, "accounts": accounts}
-
-    def _write(self, data: dict[str, list[dict[str, Any]]]) -> None:
+    def _init_db(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(self.path)
+        with self._connect() as db:
+            db.execute("PRAGMA journal_mode = WAL")
+            db.execute("PRAGMA foreign_keys = ON")
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS gift_cards (
+                    id TEXT PRIMARY KEY,
+                    code TEXT NOT NULL UNIQUE,
+                    plan TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    model_key TEXT NOT NULL,
+                    manual_limit INTEGER NOT NULL,
+                    active INTEGER NOT NULL,
+                    daily_limit INTEGER NOT NULL,
+                    computed_daily_tokens INTEGER NOT NULL,
+                    max_cost_usd REAL NOT NULL,
+                    used_by_account_id TEXT NOT NULL DEFAULT '',
+                    used_by_login TEXT NOT NULL DEFAULT '',
+                    used_at TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id TEXT PRIMARY KEY,
+                    api_token TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    login TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    plan TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    model_key TEXT NOT NULL,
+                    manual_limit INTEGER NOT NULL,
+                    active INTEGER NOT NULL,
+                    gift_card_code TEXT NOT NULL,
+                    used_today INTEGER NOT NULL DEFAULT 0,
+                    daily_limit INTEGER NOT NULL,
+                    computed_daily_tokens INTEGER NOT NULL,
+                    max_cost_usd REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            db.commit()
+
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        db.row_factory = sqlite3.Row
+        return db
+
+    def _gift_code_exists(self, db: sqlite3.Connection, code: str) -> bool:
+        row = db.execute("SELECT 1 FROM gift_cards WHERE code = ?", (code,)).fetchone()
+        return row is not None
+
+    def _login_exists(self, db: sqlite3.Connection, login: str) -> bool:
+        row = db.execute("SELECT 1 FROM accounts WHERE login = ?", (login,)).fetchone()
+        return row is not None
+
+    def _find_gift_card(self, db: sqlite3.Connection, card_id: str) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM gift_cards WHERE id = ?", (card_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Gift card not found.")
+        return _gift_card_from_row(row)
+
+    def _gift_card_by_code(self, db: sqlite3.Connection, code: str) -> dict[str, Any] | None:
+        row = db.execute("SELECT * FROM gift_cards WHERE code = ?", (code,)).fetchone()
+        return _gift_card_from_row(row) if row else None
+
+    def _find_account(self, db: sqlite3.Connection, account_id: str) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        return _account_from_row(row)
 
 
 def _gift_card_from_values(values: dict[str, Any], code: str, settings: Settings) -> dict[str, Any]:
@@ -218,7 +310,7 @@ def _account_from_gift_card(
         "name": name,
         "displayName": name,
         "login": login,
-        "passwordHash": _hash_password(password),
+        "passwordHash": hash_password(password),
         "plan": gift_card["plan"],
         "price": gift_card["price"],
         "modelKey": gift_card["modelKey"],
@@ -262,6 +354,88 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def _gift_card_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "code": row["code"],
+        "plan": row["plan"],
+        "price": row["price"],
+        "modelKey": row["model_key"],
+        "manualLimit": row["manual_limit"],
+        "active": bool(row["active"]),
+        "dailyLimit": row["daily_limit"],
+        "computedDailyTokens": row["computed_daily_tokens"],
+        "maxCostUsd": row["max_cost_usd"],
+        "usedByAccountId": row["used_by_account_id"],
+        "usedByLogin": row["used_by_login"],
+        "usedAt": row["used_at"],
+        "createdAt": row["created_at"],
+    }
+
+
+def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "apiToken": row["api_token"],
+        "name": row["name"],
+        "displayName": row["display_name"],
+        "login": row["login"],
+        "passwordHash": row["password_hash"],
+        "plan": row["plan"],
+        "price": row["price"],
+        "modelKey": row["model_key"],
+        "manualLimit": row["manual_limit"],
+        "active": bool(row["active"]),
+        "giftCardCode": row["gift_card_code"],
+        "usedToday": row["used_today"],
+        "dailyLimit": row["daily_limit"],
+        "computedDailyTokens": row["computed_daily_tokens"],
+        "maxCostUsd": row["max_cost_usd"],
+        "createdAt": row["created_at"],
+    }
+
+
+def _gift_card_values(card: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        card["id"],
+        card["code"],
+        card["plan"],
+        card["price"],
+        card["modelKey"],
+        card["manualLimit"],
+        int(card["active"]),
+        card["dailyLimit"],
+        card["computedDailyTokens"],
+        card["maxCostUsd"],
+        card["usedByAccountId"],
+        card["usedByLogin"],
+        card["usedAt"],
+        card["createdAt"],
+    )
+
+
+def _account_values(account: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        account["id"],
+        account["apiToken"],
+        account["name"],
+        account["displayName"],
+        account["login"],
+        account["passwordHash"],
+        account["plan"],
+        account["price"],
+        account["modelKey"],
+        account["manualLimit"],
+        int(account["active"]),
+        account["giftCardCode"],
+        account["usedToday"],
+        account["dailyLimit"],
+        account["computedDailyTokens"],
+        account["maxCostUsd"],
+        account["createdAt"],
+    )
+
+
 def _normalize_model_key(value: Any) -> str:
     raw = str(value or "").lower()
     if "haiku" in raw or "economy" in raw:
@@ -283,28 +457,6 @@ def _normalize_gift_code(value: Any) -> str:
 
 def _generate_gift_code() -> str:
     return f"CLAUDE-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
-
-
-def _hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120_000).hex()
-    return f"{salt}:{digest}"
-
-
-def _verify_password(password: str, password_hash: str) -> bool:
-    try:
-        salt, digest = password_hash.split(":", 1)
-    except ValueError:
-        return False
-    candidate = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120_000).hex()
-    return hmac.compare_digest(candidate, digest)
-
-
-def _find_by_id(items: list[dict[str, Any]], item_id: str, label: str) -> dict[str, Any]:
-    item = next((candidate for candidate in items if candidate["id"] == item_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail=f"{label} not found.")
-    return item
 
 
 def _now() -> str:

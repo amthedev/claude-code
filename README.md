@@ -86,6 +86,76 @@ The default helper model is `gpt-5-mini`. You can switch it when needed:
 OPENAI_HELPER_MODEL=gpt-5.2
 ```
 
+## MCP / ChatGPT App Bridge
+
+The project also includes a small MCP server that exposes coding tools over the
+Model Context Protocol. This is the bridge you need for ChatGPT Apps, MCP hosts,
+or Claude Code MCP integrations to inspect a project, apply patches, run allowed
+tests, and ask this gateway for extra reasoning.
+
+```bash
+export MCP_WORKSPACE_ROOT="$PWD"
+export MCP_GATEWAY_BASE_URL="http://127.0.0.1:8787"
+export MCP_GATEWAY_TOKEN="local-dev-token"
+export MCP_TRANSPORT="streamable-http"
+export MCP_HOST="127.0.0.1"
+export MCP_PORT="8000"
+export MCP_ENABLE_WRITE_TOOLS="true"
+export MCP_ENABLE_COMMANDS="true"
+claude-mcp
+```
+
+By default it starts a Streamable HTTP MCP endpoint at `http://localhost:8000/mcp`.
+For Claude Code you can add it with:
+
+```bash
+claude mcp add --transport http claude-gateway-tools http://localhost:8000/mcp
+```
+
+Tools exposed:
+
+- `analyze_project`: summarize the workspace and configuration.
+- `list_files` and `read_file`: inspect project files under `MCP_WORKSPACE_ROOT`.
+- `write_file` and `apply_patch`: edit files inside the workspace.
+- `run_tests`: run only exact commands allowed by `MCP_ALLOWED_COMMANDS`.
+- `gateway_status` and `think_with_gateway`: use the backing gateway/OpenRouter API.
+
+For production, keep `MCP_ENABLE_WRITE_TOOLS=false` and `MCP_ENABLE_COMMANDS=false`
+unless the MCP endpoint is private, authenticated, and behind HTTPS.
+
+## Security Baseline
+
+Use SQLite for server-side accounts, gift cards, and customer usage:
+
+```env
+ACCOUNT_DATA_FILE=data/gateway.sqlite3
+QUOTA_DATA_FILE=data/gateway.sqlite3
+```
+
+Admin UI login is checked by the backend. Prefer a password hash instead of a
+plain environment password:
+
+```bash
+python -c "from claude_gateway.security import hash_password; print(hash_password('your-password'))"
+```
+
+Then configure:
+
+```env
+ADMIN_USERNAME=reidelas
+ADMIN_PASSWORD_HASH=$argon2id$...
+GATEWAY_API_KEYS=replace-with-a-long-random-admin-token
+TRUSTED_HOSTS=your-domain.example
+ADMIN_TRUSTED_IPS=177.200.246.8
+TRUST_PROXY_HEADERS=true
+AUTH_RATE_LIMIT=10
+API_RATE_LIMIT=120
+```
+
+The app sets security headers, disables public OpenAPI docs, rate-limits login
+and API calls, stores customer passwords with Argon2, and keeps MCP write/command
+tools disabled unless explicitly enabled.
+
 ## Paid Customer Tokens
 
 For selling API access, use customer-scoped tokens instead of sharing the admin token:

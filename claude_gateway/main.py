@@ -8,16 +8,18 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
-from .auth import AuthContext, require_gateway_auth
+from .auth import AuthContext, client_ip_for_debug, require_gateway_auth
 from .config import Settings, get_settings
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
 from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .routing import RoutePlanner, extract_prompt_text, model_profiles
+from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
 from .usage import UsageStore
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
@@ -29,8 +31,9 @@ def create_app(
     openai_helper_factory: Callable[[Settings], OpenAIHelperClient] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
-    app = FastAPI(title="Claude Code", version="0.1.0")
+    app = FastAPI(title="Claude Code", version="0.1.0", docs_url=None, redoc_url=None)
     app.state.settings = resolved_settings
+    app.state.rate_limiter = InMemoryRateLimiter()
     app.state.usage = UsageStore()
     app.state.customer_usage = CustomerUsageStore(resolved_settings)
     app.state.account_store = AccountStore(resolved_settings)
@@ -45,6 +48,9 @@ def create_app(
         app.state.usage,
         app.state.openai_helper,
     )
+    app.add_middleware(SecurityHeadersMiddleware)
+    if resolved_settings.trusted_hosts and resolved_settings.trusted_hosts != ("*",):
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(resolved_settings.trusted_hosts))
     _mount_frontend(app)
 
     @app.get("/health")
@@ -124,6 +130,7 @@ def create_app(
 
     @app.post("/v1/messages")
     async def messages(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
@@ -157,18 +164,34 @@ def create_app(
 
     @app.post("/v1/auth/signup")
     async def signup(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        _rate_limit_public_auth(app, payload)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"account": app.state.account_store.signup(payload)})
 
     @app.post("/v1/auth/login")
     async def login(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        _rate_limit_public_auth(app, payload)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"account": app.state.account_store.login(payload)})
 
+    @app.post("/v1/admin/login")
+    async def admin_login(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, str]:
+        _rate_limit(request, app, "admin-auth", app.state.settings.auth_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        verify_admin_login(payload, app.state.settings)
+        return {"status": "ok"}
+
+    @app.get("/v1/admin/ip-check")
+    async def admin_ip_check(request: Request) -> dict[str, object]:
+        return client_ip_for_debug(request, app.state.settings)
+
     @app.get("/v1/admin/gift-cards")
     async def list_gift_cards(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return {"data": app.state.account_store.list_gift_cards()}
 
@@ -177,6 +200,7 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
@@ -188,6 +212,7 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
@@ -195,11 +220,13 @@ def create_app(
 
     @app.delete("/v1/admin/gift-cards/{card_id}")
     async def delete_gift_card(card_id: str, request: Request) -> dict[str, str]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return app.state.account_store.delete_gift_card(card_id)
 
     @app.get("/v1/admin/accounts")
     async def list_accounts(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return {"data": app.state.account_store.list_accounts()}
 
@@ -209,6 +236,7 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
@@ -216,11 +244,13 @@ def create_app(
 
     @app.delete("/v1/admin/accounts/{account_id}")
     async def delete_account(account_id: str, request: Request) -> dict[str, str]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return app.state.account_store.delete_account(account_id)
 
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         if auth.customer:
             return app.state.customer_usage.snapshot_for(auth.customer)
@@ -231,6 +261,7 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth)
         return app.state.planner.plan(payload).to_dict()
@@ -240,6 +271,7 @@ def create_app(
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth)
         if payload.get("stream"):
@@ -328,6 +360,26 @@ def _allow_openai_helper(auth: AuthContext, settings: Settings) -> bool:
     if auth.customer and not settings.openai_helper_for_customers:
         return False
     return True
+
+
+def _rate_limit(request: Request, app: FastAPI, namespace: str, limit: int) -> None:
+    app.state.rate_limiter.check(
+        rate_limit_key(request, namespace),
+        limit=limit,
+        window_seconds=app.state.settings.rate_limit_window_seconds,
+    )
+
+
+def _rate_limit_public_auth(app: FastAPI, payload: dict[str, Any]) -> None:
+    login = ""
+    if isinstance(payload, dict):
+        login = str(payload.get("login") or "").strip().lower()[:254]
+    key = f"auth:login:{login or 'unknown'}"
+    app.state.rate_limiter.check(
+        key,
+        limit=app.state.settings.auth_rate_limit,
+        window_seconds=app.state.settings.rate_limit_window_seconds,
+    )
 
 
 def _require_admin(request: Request, settings: Settings) -> AuthContext:

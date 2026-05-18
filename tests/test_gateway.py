@@ -78,6 +78,85 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
         self.assertIn("claude-code-pro", model_ids)
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+        self.assertIn("default-src 'self'", response.headers["content-security-policy"])
+
+    def test_admin_login_is_checked_on_server(self) -> None:
+        settings = make_settings()
+        settings.admin_password = "admin-test-password"
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/admin/login",
+            headers=self.headers,
+            json={"login": "reidelas", "password": "wrong-password"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+        response = client.post(
+            "/v1/admin/login",
+            headers=self.headers,
+            json={"login": "reidelas", "password": "admin-test-password"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_trusted_admin_ip_can_open_admin_routes_without_token(self) -> None:
+        settings = make_settings()
+        settings.gateway_api_keys = ("real-admin-token",)
+        settings.admin_trusted_ips = ("177.200.246.8",)
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.get(
+            "/v1/admin/accounts",
+            headers={"X-Forwarded-For": "177.200.246.8"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_trusted_admin_ip_accepts_cloudflare_header(self) -> None:
+        settings = make_settings()
+        settings.gateway_api_keys = ("real-admin-token",)
+        settings.admin_trusted_ips = ("177.200.246.8",)
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.get(
+            "/v1/admin/accounts",
+            headers={"CF-Connecting-IP": "177.200.246.8"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_ip_check_reports_detected_proxy_ip(self) -> None:
+        settings = make_settings()
+        settings.admin_trusted_ips = ("177.200.246.8",)
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.get(
+            "/v1/admin/ip-check",
+            headers={"CF-Connecting-IP": "177.200.246.8"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["detected_ip"], "177.200.246.8")
+        self.assertTrue(response.json()["trusted"])
+
+    def test_trusted_admin_ip_does_not_bypass_non_admin_routes(self) -> None:
+        settings = make_settings()
+        settings.gateway_api_keys = ("real-admin-token",)
+        settings.admin_trusted_ips = ("177.200.246.8",)
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.get(
+            "/v1/models",
+            headers={"X-Forwarded-For": "177.200.246.8"},
+        )
+        self.assertEqual(response.status_code, 401)
 
     def test_auto_routes_frontend_to_ui(self) -> None:
         response = self.client.post(

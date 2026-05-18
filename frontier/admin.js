@@ -7,6 +7,28 @@ function showAdminApp() {
   adminApp.classList.remove("hidden");
 }
 
+function rememberAdminDevice() {
+  localStorage.setItem(ClaudeApp.ADMIN_SESSION_KEY, "1");
+}
+
+function forgetAdminDevice() {
+  localStorage.removeItem(ClaudeApp.ADMIN_SESSION_KEY);
+  sessionStorage.removeItem(ClaudeApp.ADMIN_SESSION_KEY);
+}
+
+async function unlockRememberedAdminDevice() {
+  try {
+    await refreshFromServer();
+  } catch {
+    if (localStorage.getItem(ClaudeApp.ADMIN_SESSION_KEY) === "1") forgetAdminDevice();
+    return false;
+  }
+  rememberAdminDevice();
+  showAdminApp();
+  renderAll();
+  return true;
+}
+
 function adminApiSettings() {
   return ClaudeApp.apiSettings();
 }
@@ -255,27 +277,23 @@ function seedDemo() {
 document.querySelector("#adminLoginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-  if (values.login !== "admin" || values.password !== "admin") {
-    document.querySelector("#adminLoginError").textContent = "Login admin inválido.";
-    return;
-  }
+  document.querySelector("#adminLoginError").textContent = "";
   const settings = ClaudeApp.apiSettings();
   ClaudeApp.saveApiSettings({ ...settings, token: values.apiToken || settings.token });
   try {
     await refreshFromServer();
   } catch (error) {
-    if (!error.fallback) {
-      document.querySelector("#adminLoginError").textContent = error.message;
-      return;
-    }
+    document.querySelector("#adminLoginError").textContent =
+      error.fallback ? "API admin indisponível." : error.message;
+    return;
   }
-  sessionStorage.setItem(ClaudeApp.ADMIN_SESSION_KEY, "1");
+  rememberAdminDevice();
   showAdminApp();
   renderAll();
 });
 
 document.querySelector("#adminLogout").addEventListener("click", () => {
-  sessionStorage.removeItem(ClaudeApp.ADMIN_SESSION_KEY);
+  forgetAdminDevice();
   location.reload();
 });
 
@@ -443,11 +461,6 @@ document.querySelector("#seedDemo").addEventListener("click", seedDemo);
 
 renderPreview();
 
-if (sessionStorage.getItem(ClaudeApp.ADMIN_SESSION_KEY) === "1") {
-  showAdminApp();
-  refreshFromServer()
-    .catch(() => {})
-    .finally(renderAll);
-} else {
-  renderAll();
-}
+unlockRememberedAdminDevice().then((unlocked) => {
+  if (!unlocked) renderAll();
+});
