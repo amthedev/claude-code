@@ -59,36 +59,33 @@ function apiConfigForCurrentUser() {
     baseUrl,
     token,
     model: ClaudeApp.backendModelForPlan(modelKey),
-    publicModel: settings.model,
+    plan: current?.plan || "Plano ativo",
     hasAccount: Boolean(current?.apiToken),
   };
 }
 
-function pythonInstallScript(config) {
-  return `#!/usr/bin/env python3
+function pythonInstaller(config) {
+  return `python3 - <<'PY'
 from pathlib import Path
-import os
 import platform
 import subprocess
 
 base_url = ${JSON.stringify(config.baseUrl)}
 api_token = ${JSON.stringify(config.token)}
-model = ${JSON.stringify(config.model)}
+selected_model = ${JSON.stringify(config.model)}
 
 profile = Path.home() / (".zshrc" if platform.system() == "Darwin" else ".bashrc")
 lines = [
     f'export ANTHROPIC_BASE_URL="{base_url}"',
     f'export ANTHROPIC_AUTH_TOKEN="{api_token}"',
     'export ANTHROPIC_API_KEY=""',
-    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
-    f'export ANTHROPIC_DEFAULT_SONNET_MODEL="{model}"',
-    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
-    f'export CLAUDE_CODE_SUBAGENT_MODEL="{model}"',
+    f'export ANTHROPIC_DEFAULT_SONNET_MODEL="{selected_model}"',
+    f'export CLAUDE_CODE_SUBAGENT_MODEL="{selected_model}"',
 ]
 
 existing = profile.read_text() if profile.exists() else ""
-start = "# Claude Code API gateway"
-end = "# /Claude Code API gateway"
+start = "# assistente_api_config"
+end = "# /assistente_api_config"
 block = start + "\\n" + "\\n".join(lines) + "\\n" + end + "\\n"
 
 if start in existing and end in existing:
@@ -99,7 +96,7 @@ else:
     profile.write_text(existing.rstrip() + "\\n\\n" + block)
 
 print(f"Configurado em {profile}")
-print("Abra um terminal novo ou rode:")
+print("Abra um terminal novo ou cole estes comandos agora:")
 for line in lines:
     print(line)
 
@@ -113,7 +110,7 @@ try:
     print("Claude Code encontrado:", result.stdout.strip() or result.stderr.strip())
 except FileNotFoundError:
     print("Claude Code ainda nao esta instalado ou nao esta no PATH.")
-`;
+PY`;
 }
 
 function renderCodeBlock(title, code, copyLabel = "Copiar") {
@@ -133,15 +130,6 @@ function renderApiInstallGuide() {
   const guide = document.querySelector("#apiInstallGuide");
   if (!guide) return;
   const config = apiConfigForCurrentUser();
-  const envCommands = [
-    `export ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
-    `export ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
-    'export ANTHROPIC_API_KEY=""',
-    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
-    `export ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
-    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
-    `export CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
-  ].join("\n");
   const curlTest = `curl ${shellQuote(`${config.baseUrl}/v1/messages`)} \\
   -H ${shellQuote(`Anthropic-Auth-Token: ${config.token}`)} \\
   -H ${shellQuote("Content-Type: application/json")} \\
@@ -152,31 +140,30 @@ function renderApiInstallGuide() {
       messages: [{ role: "user", content: "Responda apenas: API funcionando" }],
     }),
   )}`;
-  const pythonScript = pythonInstallScript(config);
+  const installCommand = pythonInstaller(config);
   const loginHint = config.hasAccount
-    ? "Sua API Key ja esta preenchida com o token desta conta."
-    : "Entre em uma conta ativa para a API Key aparecer automaticamente.";
+    ? "Configuracao pronta para esta conta."
+    : "Entre em uma conta ativa para gerar a configuracao personalizada.";
 
   guide.innerHTML = `
     <section class="api-summary">
       <div>
-        <span class="overline">Configuracao pronta</span>
+        <span class="overline">Acesso da conta</span>
         <strong>${ClaudeApp.escapeHtml(loginHint)}</strong>
       </div>
       <div class="api-kv">
-        <code>URL: ${ClaudeApp.escapeHtml(config.baseUrl)}</code>
-        <code>Modelo: ${ClaudeApp.escapeHtml(config.model)}</code>
-        <code>Token: ${ClaudeApp.escapeHtml(config.token)}</code>
+        <code>URL da API: ${ClaudeApp.escapeHtml(config.baseUrl)}</code>
+        <code>Plano: ${ClaudeApp.escapeHtml(config.plan)}</code>
+        <code>API Key: ${ClaudeApp.escapeHtml(config.token)}</code>
       </div>
     </section>
     <ol class="api-steps">
-      <li>Use no Claude Code ou em ferramentas que deixam trocar a URL da API Anthropic. O Claude web normal nao aceita API externa.</li>
-      <li>Rode os comandos abaixo no terminal antes de abrir o Claude Code.</li>
-      <li>Para deixar automatico no Mac ou Linux, salve e rode o script Python.</li>
+      <li>Copie o comando unico e cole no terminal do Mac ou Linux.</li>
+      <li>Depois abra um terminal novo e rode o Claude Code normalmente.</li>
+      <li>O Claude web do navegador nao aceita API externa; use o Claude Code ou app compativel.</li>
     </ol>
-    ${renderCodeBlock("Comandos de terminal", envCommands)}
-    ${renderCodeBlock("Script Python automatico", pythonScript, "Copiar script")}
-    ${renderCodeBlock("Teste rapido da API", curlTest)}
+    ${renderCodeBlock("Configurar este computador", installCommand, "Copiar comando")}
+    ${renderCodeBlock("Testar conexao", curlTest)}
   `;
 }
 
