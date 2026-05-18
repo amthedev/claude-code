@@ -36,15 +36,30 @@ Open the web app:
 - Client chat: `http://127.0.0.1:8787/app`
 - Admin gift cards: `http://127.0.0.1:8787/admin`
 
+## Coding Combo
+
+The default model combo is tuned for Claude Code terminal work: direct tool calls stay compatible, while text-only coding requests can use a cheap multi-agent plan/test/code/review path.
+
+- `deepseek/deepseek-v4-flash`: cheap and fast economy path.
+- `qwen/qwen3-coder-flash`: main file-editing and patch-writing coder.
+- `deepseek/deepseek-v4-pro`: reasoning and testing planner.
+- `moonshotai/kimi-k2.6`: frontend/UI specialist.
+- `qwen/qwen3.6-flash`: ultra-path extra candidate.
+- `gpt-5.5`: optional OpenAI admin helper review, only when `OPENAI_API_KEY` is configured.
+
+Every request also receives an Anthropic-compatible public response profile so the terminal experience keeps Claude-style identity, tone, tool-call behavior, and coding ergonomics while hiding internal routing details.
+
+See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and terminal setup.
+
 ## Public Models
 
 - `claude-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
-- `claude-code-pro`: stronger code/reasoning path, usually DeepSeek V4 Pro.
+- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Flash plus cheap review agents.
 - `claude-code-ultra`: strong path with optional premium review.
 - `claude-code-ui`: frontend/UI path, usually Kimi K2.6.
 - `claude-code-auto`: heuristically chooses between the above.
 
-You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-17.
+You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-18.
 
 ## Cost Guard
 
@@ -58,8 +73,10 @@ export ALLOW_DIRECT_EXTERNAL_MODELS=false
 
 With the default model set, the main paths stay well under that budget:
 
-- DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
 - DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
+- Qwen3 Coder Flash: about 3.9% of Claude Opus 4.7 blended token cost.
+- DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
+- Qwen3.6 Flash: about 4.4% of Claude Opus 4.7 blended token cost.
 - Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.
 
 `claude-code-ultra` improves quality through extra cheap candidates and review instead of calling Claude by default. Set `ALLOW_PREMIUM_FALLBACK=true` only if you intentionally want to permit premium fallback models that still pass the budget guard.
@@ -80,10 +97,10 @@ By default this helper runs only for admin/API-owner calls, not customer tokens,
 OPENAI_HELPER_FOR_CUSTOMERS=true
 ```
 
-The default helper model is `gpt-5-mini`. You can switch it when needed:
+The default helper model is `gpt-5.5`. You can switch it when needed:
 
 ```env
-OPENAI_HELPER_MODEL=gpt-5.2
+OPENAI_HELPER_MODEL=gpt-5.4-mini
 ```
 
 ## MCP / ChatGPT App Bridge

@@ -51,6 +51,25 @@ FRONTEND_KEYWORDS = {
     "layout",
 }
 
+FILE_EDIT_KEYWORDS = {
+    "apply_patch",
+    "alterar arquivo",
+    "alterar arquivos",
+    "commit",
+    "diff",
+    "edit file",
+    "editar arquivo",
+    "edite o arquivo",
+    "mexer no arquivo",
+    "mexer nos arquivos",
+    "modifique o arquivo",
+    "patch",
+    "shell",
+    "terminal",
+    "workspace",
+    "write file",
+}
+
 DEBUG_KEYWORDS = {
     "bug",
     "debug",
@@ -64,6 +83,23 @@ DEBUG_KEYWORDS = {
     "test failed",
     "corrija",
     "fix",
+}
+
+TEST_KEYWORDS = {
+    "ci",
+    "coverage",
+    "jest",
+    "playwright",
+    "pytest",
+    "regressao",
+    "regressão",
+    "regression",
+    "test",
+    "teste",
+    "testes",
+    "tests",
+    "unittest",
+    "vitest",
 }
 
 REVIEW_KEYWORDS = {"review", "revis", "audit", "security", "risco", "vulnerability"}
@@ -283,6 +319,8 @@ class RoutePlanner:
 
         if task_type == "frontend":
             return "ui"
+        if task_type in {"file_edit", "testing", "debugging"} and complexity != "critical":
+            return "pro"
         if complexity == "low" or task_type == "explanation":
             return "economy"
         if complexity == "critical":
@@ -303,6 +341,10 @@ class RoutePlanner:
             return self.settings.cheap_code_agent
         if mode == "ui" or task_type == "frontend":
             return self.settings.ui_agent
+        if task_type == "file_edit":
+            return self.settings.code_agent
+        if task_type == "testing":
+            return self.settings.reasoning_agent
         if mode == "ultra" and complexity == "critical":
             return self.cost_policy.strongest_allowed(
                 [
@@ -390,6 +432,10 @@ class RoutePlanner:
         return [selected_model]
 
     def _task_type(self, task_text: str) -> str:
+        if _contains_any(task_text, FILE_EDIT_KEYWORDS):
+            return "file_edit"
+        if _contains_any(task_text, TEST_KEYWORDS):
+            return "testing"
         if _contains_any(task_text, FRONTEND_KEYWORDS):
             return "frontend"
         if _contains_any(task_text, REVIEW_KEYWORDS):
@@ -405,7 +451,7 @@ class RoutePlanner:
     def _complexity(self, task_text: str) -> str:
         if _contains_any(task_text, HIGH_COMPLEXITY_KEYWORDS):
             return "critical"
-        if _contains_any(task_text, ARCHITECTURE_KEYWORDS | DEBUG_KEYWORDS):
+        if _contains_any(task_text, ARCHITECTURE_KEYWORDS | DEBUG_KEYWORDS | FILE_EDIT_KEYWORDS):
             return "high"
         if _contains_any(task_text, LOW_COMPLEXITY_KEYWORDS):
             return "low"
@@ -433,8 +479,10 @@ class RoutePlanner:
         return complexity in {"high", "critical"} or task_type in {
             "architecture",
             "debugging",
+            "file_edit",
             "frontend",
             "review",
+            "testing",
         }
 
 

@@ -46,7 +46,7 @@ class Settings:
     openrouter_base_url: str = "https://openrouter.ai/api"
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_helper_model: str = "gpt-5-mini"
+    openai_helper_model: str = "gpt-5.5"
     openai_helper_max_output_tokens: int = 900
     openai_helper_reasoning_effort: str = "low"
     openai_helper_for_customers: bool = False
@@ -81,13 +81,13 @@ class Settings:
     auto_public_model: str = "claude-code-auto"
 
     router_agent: str = "tencent/hy3-preview"
-    cheap_code_agent: str = "qwen/qwen3-coder-30b-a3b-instruct"
+    cheap_code_agent: str = "deepseek/deepseek-v4-flash"
     code_agent: str = "qwen/qwen3-coder-flash"
-    reasoning_agent: str = "qwen/qwen3-coder-flash"
+    reasoning_agent: str = "deepseek/deepseek-v4-pro"
     ui_agent: str = "moonshotai/kimi-k2.6"
-    fast_agent: str = "stepfun/step-3.5-flash"
+    fast_agent: str = "deepseek/deepseek-v4-flash"
     premium_fallback: str = "moonshotai/kimi-k2.6"
-    ultra_fallback: str = "qwen/qwen3-coder-flash"
+    ultra_fallback: str = "qwen/qwen3.6-flash"
 
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
@@ -102,7 +102,7 @@ class Settings:
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5-mini"),
+            openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.5"),
             openai_helper_max_output_tokens=int(os.getenv("OPENAI_HELPER_MAX_OUTPUT_TOKENS", "900")),
             openai_helper_reasoning_effort=os.getenv("OPENAI_HELPER_REASONING_EFFORT", "low"),
             openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", False),
@@ -138,13 +138,13 @@ class Settings:
             ui_public_model=os.getenv("UI_PUBLIC_MODEL", "claude-code-ui"),
             auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "claude-code-auto"),
             router_agent=os.getenv("ROUTER_AGENT", "tencent/hy3-preview"),
-            cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "qwen/qwen3-coder-30b-a3b-instruct"),
+            cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "deepseek/deepseek-v4-flash"),
             code_agent=os.getenv("CODE_AGENT", "qwen/qwen3-coder-flash"),
-            reasoning_agent=os.getenv("REASONING_AGENT", "qwen/qwen3-coder-flash"),
+            reasoning_agent=os.getenv("REASONING_AGENT", "deepseek/deepseek-v4-pro"),
             ui_agent=os.getenv("UI_AGENT", "moonshotai/kimi-k2.6"),
-            fast_agent=os.getenv("FAST_AGENT", "stepfun/step-3.5-flash"),
+            fast_agent=os.getenv("FAST_AGENT", "deepseek/deepseek-v4-flash"),
             premium_fallback=os.getenv("PREMIUM_FALLBACK", "moonshotai/kimi-k2.6"),
-            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3-coder-flash"),
+            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3.6-flash"),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",

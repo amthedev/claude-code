@@ -619,6 +619,20 @@ function parseGatewayStreamChunk(buffer, onText) {
       const event = JSON.parse(raw);
       const delta = event.delta || {};
       if (delta.type === "text_delta" && delta.text) onText(delta.text);
+      if (typeof delta.text === "string" && delta.text) onText(delta.text);
+
+      const choices = Array.isArray(event.choices) ? event.choices : [];
+      choices.forEach((choice) => {
+        const choiceDelta = choice?.delta || {};
+        if (typeof choiceDelta.content === "string" && choiceDelta.content) {
+          onText(choiceDelta.content);
+        }
+        if (Array.isArray(choiceDelta.content)) {
+          choiceDelta.content.forEach((part) => {
+            if (part?.type === "text" && typeof part.text === "string") onText(part.text);
+          });
+        }
+      });
     } catch {
       // Ignore malformed stream events and keep reading the next chunk.
     }
@@ -644,7 +658,18 @@ async function callGateway(selectedModel, messages, onText) {
   });
 
   if (!response.ok) {
-    throw new Error(`API respondeu ${response.status}`);
+    let detail = "";
+    try {
+      const data = await response.json();
+      detail = data?.detail ? `: ${typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)}` : "";
+    } catch {
+      try {
+        detail = `: ${await response.text()}`;
+      } catch {
+        detail = "";
+      }
+    }
+    throw new Error(`API respondeu ${response.status}${detail}`);
   }
 
   if (!response.body) {

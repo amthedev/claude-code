@@ -285,6 +285,28 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-flash")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
 
+    def test_auto_routes_terminal_file_edits_to_pro_coder(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-auto",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "No terminal, mexer nos arquivos e aplicar patch para corrigir o bug",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "pro")
+        self.assertEqual(data["task_type"], "file_edit")
+        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-flash")
+        self.assertTrue(data["use_orchestration"])
+
     def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
         response = self.client.post(
             "/v1/messages",
@@ -427,7 +449,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(
                 response.json()["content"][0]["text"],
-                "model=qwen/qwen3-coder-30b-a3b-instruct",
+                "model=deepseek/deepseek-v4-flash",
             )
 
             usage = client.get("/v1/usage", headers=customer_headers)
@@ -616,6 +638,24 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
         self.assertIn("Claude Opus 4.7", payload["system"])
+        self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
+        self.assertIn("Do not mention internal routing providers", payload["system"])
+
+    def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 256,
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "Leia um arquivo"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertIn("Claude Sonnet 4.6", payload["system"])
+        self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
 
     def test_model_identity_question_returns_selected_public_model(self) -> None:
         response = self.client.post(

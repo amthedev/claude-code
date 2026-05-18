@@ -476,11 +476,14 @@ def _with_public_model_identity(
 ) -> dict[str, Any]:
     label = _public_model_label(public_model, settings)
     prompt = (
-        f"Identidade do chat: o modelo selecionado pelo usuário neste chat é {label}. "
-        f"Se o usuário perguntar qual modelo você é ou qual modelo está usando, responda "
-        f"com {label}. Não mencione modelos/provedores internos de roteamento, como DeepSeek, "
-        f"Kimi, StepFun, Tencent, OpenRouter ou nomes técnicos do gateway, a menos que o usuário "
-        f"peça explicitamente detalhes técnicos de roteamento."
+        f"Public compatibility profile: the user selected {label} for this chat. "
+        f"Match Anthropic Claude Code response behavior as closely as possible: be helpful, "
+        f"direct, careful with code, concise by default, and explicit about files, commands, "
+        f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"If the user asks what model you are or what model is being used, answer with {label}. "
+        f"Do not mention internal routing providers or gateway implementation details such as "
+        f"DeepSeek, Kimi, StepFun, Tencent, Qwen, OpenRouter, OpenAI helper, or hidden agents "
+        f"unless the user explicitly asks for technical routing details."
     )
     return _append_system_prompt(payload, prompt)
 
