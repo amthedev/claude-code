@@ -40,12 +40,14 @@ Open the web app:
 
 The default model combo is tuned for Claude Code terminal work: direct tool calls stay compatible, while text-only coding requests can use a cheap multi-agent plan/test/code/review path.
 
-- `deepseek/deepseek-v4-flash`: cheap and fast economy path.
-- `qwen/qwen3-coder-flash`: main file-editing and patch-writing coder.
-- `deepseek/deepseek-v4-pro`: reasoning and testing planner.
-- `moonshotai/kimi-k2.6`: frontend/UI specialist.
-- `qwen/qwen3.6-flash`: ultra-path extra candidate.
-- `gpt-5.5`: optional OpenAI admin helper review, only when `OPENAI_API_KEY` is configured.
+- `qwen/qwen3-coder-next`: main frontend/backend coder and patch writer.
+- `deepseek/deepseek-v4-flash`: cheap fixes, economy path, and simple frontend corrections.
+- `tencent/hy3-preview`: cheap frontend/router reasoning pass.
+- `deepseek/deepseek-v4-pro`: stronger reasoning and testing planner.
+- `moonshotai/kimi-k2.6`: backend partner and large-project implementation/review pass.
+- `qwen/qwen3-235b-a22b-thinking-2507`: integral project analysis and ultra reasoning.
+- `deepseek/deepseek-r1`: critical deep reasoning only when complexity is high enough.
+- `gpt-5.4-mini`: optional OpenAI helper/design-director pass when `OPENAI_API_KEY` is configured.
 
 Every request also receives an Anthropic-compatible public response profile so the terminal experience keeps Claude-style identity, tone, tool-call behavior, and coding ergonomics while hiding internal routing details.
 
@@ -54,9 +56,9 @@ See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and termina
 ## Public Models
 
 - `claude-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
-- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Flash plus cheap review agents.
-- `claude-code-ultra`: strong path with optional premium review.
-- `claude-code-ui`: frontend/UI path, usually Kimi K2.6.
+- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Next plus Kimi/DeepSeek review agents.
+- `claude-code-ultra`: strong path with Qwen Thinking, Kimi, and R1 only for critical reasoning.
+- `claude-code-ui`: frontend/UI path, usually Qwen3 Coder Next with Hy3/DeepSeek guidance.
 - `claude-code-auto`: heuristically chooses between the above.
 
 You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-18.
@@ -74,9 +76,10 @@ export ALLOW_DIRECT_EXTERNAL_MODELS=false
 With the default model set, the main paths stay well under that budget:
 
 - DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
-- Qwen3 Coder Flash: about 3.9% of Claude Opus 4.7 blended token cost.
+- Qwen3 Coder Next: about 3.0% of Claude Opus 4.7 blended token cost.
 - DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
-- Qwen3.6 Flash: about 4.4% of Claude Opus 4.7 blended token cost.
+- Qwen3 235B A22B Thinking: about 2.4% of Claude Opus 4.7 blended token cost.
+- DeepSeek R1: about 10.7% of Claude Opus 4.7 blended token cost.
 - Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.
 
 `claude-code-ultra` improves quality through extra cheap candidates and review instead of calling Claude by default. Set `ALLOW_PREMIUM_FALLBACK=true` only if you intentionally want to permit premium fallback models that still pass the budget guard.
@@ -91,16 +94,16 @@ You can add an OpenAI/ChatGPT key so the internal agent pipeline gets one extra 
 OPENAI_API_KEY=sk-proj-...
 ```
 
-By default this helper runs only for admin/API-owner calls, not customer tokens, so it does not silently increase customer delivery cost. To allow it for customer chat too:
+By default this helper can run for customer/admin frontend and strongest-mode calls as a concise design director/reviewer. To disable it for customer chat:
 
 ```env
-OPENAI_HELPER_FOR_CUSTOMERS=true
+OPENAI_HELPER_FOR_CUSTOMERS=false
 ```
 
-The default helper model is `gpt-5.5`. You can switch it when needed:
+The default helper model is `gpt-5.4-mini`. You can switch it when needed:
 
 ```env
-OPENAI_HELPER_MODEL=gpt-5.4-mini
+OPENAI_HELPER_MODEL=gpt-5.5
 ```
 
 ## MCP / ChatGPT App Bridge

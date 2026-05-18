@@ -84,12 +84,18 @@ class Settings:
 
     router_agent: str = "tencent/hy3-preview"
     cheap_code_agent: str = "deepseek/deepseek-v4-flash"
-    code_agent: str = "qwen/qwen3-coder-flash"
+    code_agent: str = "qwen/qwen3-coder-next"
     reasoning_agent: str = "deepseek/deepseek-v4-pro"
-    ui_agent: str = "moonshotai/kimi-k2.6"
+    ui_agent: str = "qwen/qwen3-coder-next"
     fast_agent: str = "deepseek/deepseek-v4-flash"
     premium_fallback: str = "moonshotai/kimi-k2.6"
-    ultra_fallback: str = "qwen/qwen3.6-flash"
+    ultra_fallback: str = "qwen/qwen3-235b-a22b-thinking-2507"
+    frontend_coder_agent: str = "qwen/qwen3-coder-next"
+    frontend_fix_agent: str = "deepseek/deepseek-v4-flash"
+    frontend_reasoning_agent: str = "tencent/hy3-preview"
+    backend_partner_agent: str = "moonshotai/kimi-k2.6"
+    project_reasoning_agent: str = "qwen/qwen3-235b-a22b-thinking-2507"
+    deep_reasoning_agent: str = "deepseek/deepseek-r1"
 
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
@@ -143,12 +149,21 @@ class Settings:
             auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "claude-code-auto"),
             router_agent=os.getenv("ROUTER_AGENT", "tencent/hy3-preview"),
             cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "deepseek/deepseek-v4-flash"),
-            code_agent=os.getenv("CODE_AGENT", "qwen/qwen3-coder-flash"),
+            code_agent=os.getenv("CODE_AGENT", "qwen/qwen3-coder-next"),
             reasoning_agent=os.getenv("REASONING_AGENT", "deepseek/deepseek-v4-pro"),
-            ui_agent=os.getenv("UI_AGENT", "moonshotai/kimi-k2.6"),
+            ui_agent=os.getenv("UI_AGENT", "qwen/qwen3-coder-next"),
             fast_agent=os.getenv("FAST_AGENT", "deepseek/deepseek-v4-flash"),
             premium_fallback=os.getenv("PREMIUM_FALLBACK", "moonshotai/kimi-k2.6"),
-            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3.6-flash"),
+            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3-235b-a22b-thinking-2507"),
+            frontend_coder_agent=os.getenv("FRONTEND_CODER_AGENT", "qwen/qwen3-coder-next"),
+            frontend_fix_agent=os.getenv("FRONTEND_FIX_AGENT", "deepseek/deepseek-v4-flash"),
+            frontend_reasoning_agent=os.getenv("FRONTEND_REASONING_AGENT", "tencent/hy3-preview"),
+            backend_partner_agent=os.getenv("BACKEND_PARTNER_AGENT", "moonshotai/kimi-k2.6"),
+            project_reasoning_agent=os.getenv(
+                "PROJECT_REASONING_AGENT",
+                "qwen/qwen3-235b-a22b-thinking-2507",
+            ),
+            deep_reasoning_agent=os.getenv("DEEP_REASONING_AGENT", "deepseek/deepseek-r1"),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",

@@ -134,6 +134,12 @@ def create_app(
             "fast_agent": app.state.settings.fast_agent,
             "premium_fallback": app.state.settings.premium_fallback,
             "ultra_fallback": app.state.settings.ultra_fallback,
+            "frontend_coder_agent": app.state.settings.frontend_coder_agent,
+            "frontend_fix_agent": app.state.settings.frontend_fix_agent,
+            "frontend_reasoning_agent": app.state.settings.frontend_reasoning_agent,
+            "backend_partner_agent": app.state.settings.backend_partner_agent,
+            "project_reasoning_agent": app.state.settings.project_reasoning_agent,
+            "deep_reasoning_agent": app.state.settings.deep_reasoning_agent,
         }
         return {
             "baseline_model": CLAUDE_BASELINE_MODEL,

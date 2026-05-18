@@ -259,7 +259,7 @@ class RoutePlanner:
         else:
             selected_model = self._budget_safe_model(selected_model, mode, task_type)
 
-        agents = self._agents_for_mode(mode)
+        agents = self._agents_for_mode(mode, task_type, complexity)
         selected_cost = self.cost_policy.estimate(selected_model)
         pipeline_cost = self.cost_policy.estimate_pipeline(
             f"{mode}-pipeline",
@@ -339,8 +339,20 @@ class RoutePlanner:
     def _openrouter_model_for_mode(self, mode: str, task_type: str, complexity: str) -> str:
         if mode == "economy":
             return self.settings.cheap_code_agent
+        if task_type == "frontend" and complexity == "low":
+            return self.settings.frontend_fix_agent
         if mode == "ui" or task_type == "frontend":
             return self.settings.ui_agent
+        if task_type in {"architecture", "review"} and mode == "ultra":
+            return self.cost_policy.strongest_allowed(
+                [
+                    self.settings.project_reasoning_agent,
+                    self.settings.reasoning_agent,
+                    self.settings.backend_partner_agent,
+                    self.settings.code_agent,
+                    self.settings.cheap_code_agent,
+                ]
+            )
         if task_type == "file_edit":
             return self.settings.code_agent
         if task_type == "testing":
@@ -348,33 +360,79 @@ class RoutePlanner:
         if mode == "ultra" and complexity == "critical":
             return self.cost_policy.strongest_allowed(
                 [
-                    self.settings.ultra_fallback,
+                    self.settings.deep_reasoning_agent,
+                    self.settings.project_reasoning_agent,
+                    self.settings.reasoning_agent,
                     self.settings.code_agent,
-                    self.settings.ui_agent,
+                    self.settings.backend_partner_agent,
                     self.settings.cheap_code_agent,
                 ]
             )
         return self.settings.code_agent
 
-    def _agents_for_mode(self, mode: str) -> dict[str, str]:
+    def _agents_for_mode(self, mode: str, task_type: str, complexity: str) -> dict[str, str]:
         agents = {
             "router": self.settings.router_agent,
             "fast": self.settings.fast_agent,
             "reasoning": self.settings.reasoning_agent,
             "coding": self.settings.code_agent,
-            "review": self.settings.code_agent,
+            "review": self.settings.backend_partner_agent,
             "ui": self.settings.ui_agent,
+            "frontend_reasoning": self.settings.frontend_reasoning_agent,
+            "frontend_fix": self.settings.frontend_fix_agent,
+            "backend_partner": self.settings.backend_partner_agent,
+            "project_reasoning": self.settings.project_reasoning_agent,
+            "deep_reasoning": self.settings.deep_reasoning_agent,
         }
         if mode == "economy":
             agents["coding"] = self.settings.cheap_code_agent
             agents["review"] = self.settings.cheap_code_agent
         if mode == "ui":
-            agents["coding"] = self.settings.ui_agent
-            agents["review"] = self.settings.code_agent
+            agents["reasoning"] = self.settings.frontend_reasoning_agent
+            agents["coding"] = (
+                self.settings.frontend_fix_agent
+                if complexity == "low"
+                else self.settings.frontend_coder_agent
+            )
+            agents["review"] = self.settings.reasoning_agent
+            agents["premium_review"] = self.settings.backend_partner_agent
+        if task_type == "frontend":
+            agents["reasoning"] = self.settings.frontend_reasoning_agent
+            agents["coding"] = (
+                self.settings.frontend_fix_agent
+                if complexity == "low"
+                else self.settings.frontend_coder_agent
+            )
+            agents["review"] = self.settings.reasoning_agent
+        if task_type in {"architecture", "review"}:
+            agents["reasoning"] = self.settings.project_reasoning_agent
+            agents["coding"] = self.settings.backend_partner_agent
+            agents["review"] = self.settings.reasoning_agent
         if mode == "ultra":
-            premium_review = self._premium_agent_or_budget_safe(self.settings.premium_fallback)
+            if complexity == "critical":
+                agents["reasoning"] = self._premium_agent_or_budget_safe(self.settings.deep_reasoning_agent)
+                agents["ultra_fallback"] = self._premium_agent_or_budget_safe(
+                    self.settings.deep_reasoning_agent
+                )
+                premium_review = self._premium_agent_or_budget_safe(
+                    self.settings.project_reasoning_agent
+                )
+            else:
+                if task_type == "frontend":
+                    agents["reasoning"] = self.settings.frontend_reasoning_agent
+                    agents["ultra_fallback"] = self._premium_agent_or_budget_safe(
+                        self.settings.frontend_coder_agent
+                    )
+                    premium_review = self._premium_agent_or_budget_safe(self.settings.reasoning_agent)
+                else:
+                    agents["reasoning"] = self._premium_agent_or_budget_safe(
+                        self.settings.project_reasoning_agent
+                    )
+                    agents["ultra_fallback"] = self._premium_agent_or_budget_safe(
+                        self.settings.ultra_fallback
+                    )
+                    premium_review = self._premium_agent_or_budget_safe(self.settings.premium_fallback)
             agents["premium_review"] = premium_review
-            agents["ultra_fallback"] = self._premium_agent_or_budget_safe(self.settings.ultra_fallback)
         return agents
 
     def _budget_safe_model(self, model: str, mode: str, task_type: str) -> str:
@@ -383,15 +441,17 @@ class RoutePlanner:
 
         candidates = [
             self.settings.code_agent,
-            self.settings.ui_agent,
+            self.settings.backend_partner_agent,
+            self.settings.frontend_coder_agent,
             self.settings.reasoning_agent,
             self.settings.cheap_code_agent,
             self.settings.fast_agent,
         ]
         if mode == "ui" or task_type == "frontend":
             candidates = [
-                self.settings.ui_agent,
-                self.settings.code_agent,
+                self.settings.frontend_coder_agent,
+                self.settings.frontend_reasoning_agent,
+                self.settings.reasoning_agent,
                 self.settings.cheap_code_agent,
                 self.settings.fast_agent,
             ]
@@ -400,12 +460,14 @@ class RoutePlanner:
         return self.cost_policy.strongest_allowed(candidates)
 
     def _premium_agent_or_budget_safe(self, model: str) -> str:
-        if self.settings.allow_premium_fallback and self.cost_policy.estimate(model).within_budget:
+        if self.cost_policy.estimate(model).within_budget:
             return model
         return self.cost_policy.strongest_allowed(
             [
                 self.settings.code_agent,
-                self.settings.ui_agent,
+                self.settings.backend_partner_agent,
+                self.settings.frontend_coder_agent,
+                self.settings.project_reasoning_agent,
                 self.settings.reasoning_agent,
                 self.settings.cheap_code_agent,
             ]
@@ -451,6 +513,11 @@ class RoutePlanner:
     def _complexity(self, task_text: str) -> str:
         if _contains_any(task_text, HIGH_COMPLEXITY_KEYWORDS):
             return "critical"
+        if _contains_any(task_text, LOW_COMPLEXITY_KEYWORDS) and _contains_any(
+            task_text,
+            FRONTEND_KEYWORDS,
+        ):
+            return "low"
         if _contains_any(task_text, ARCHITECTURE_KEYWORDS | DEBUG_KEYWORDS | FILE_EDIT_KEYWORDS):
             return "high"
         if _contains_any(task_text, LOW_COMPLEXITY_KEYWORDS):

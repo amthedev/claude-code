@@ -264,12 +264,76 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["mode"], "ui")
-        self.assertEqual(data["selected_openrouter_model"], "moonshotai/kimi-k2.6")
+        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-next")
+        self.assertEqual(data["agents"]["reasoning"], "tencent/hy3-preview")
+        self.assertEqual(data["agents"]["review"], "deepseek/deepseek-v4-pro")
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
         self.assertLessEqual(
             data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"],
             0.5,
         )
+
+    def test_simple_frontend_fix_uses_deepseek_flash(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ui",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "Corrija um typo simples no CSS do frontend"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "ui")
+        self.assertEqual(data["task_type"], "frontend")
+        self.assertEqual(data["complexity"], "low")
+        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-flash")
+
+    def test_integral_project_analysis_uses_qwen_thinking(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Analise a arquitetura integral de todo o projeto e encontre riscos",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "ultra")
+        self.assertEqual(data["task_type"], "architecture")
+        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-235b-a22b-thinking-2507")
+        self.assertEqual(data["agents"]["reasoning"], "qwen/qwen3-235b-a22b-thinking-2507")
+        self.assertEqual(data["agents"]["coding"], "moonshotai/kimi-k2.6")
+
+    def test_critical_ultra_reasoning_uses_r1_only_when_needed(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Corrija um bug critical de auth em production com race condition",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "ultra")
+        self.assertEqual(data["complexity"], "critical")
+        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-r1")
+        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-r1")
 
     def test_tool_calls_are_proxied_without_orchestration(self) -> None:
         response = self.client.post(
@@ -283,7 +347,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-flash")
+        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
 
     def test_auto_routes_terminal_file_edits_to_pro_coder(self) -> None:
@@ -305,7 +369,7 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "pro")
         self.assertEqual(data["task_type"], "file_edit")
-        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-flash")
+        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-next")
         self.assertTrue(data["use_orchestration"])
 
     def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
