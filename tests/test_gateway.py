@@ -576,6 +576,27 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
         self.assertIn(b"event: message_start", body)
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+
+    def test_streaming_complex_request_uses_internal_pipeline(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "corrija esse bug no projeto"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"text_delta", body)
+        self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
+        self.assertEqual(self.app.state.openrouter.calls[0][1]["__gateway_reasoning"], "low")
 
     def test_streaming_payload_uses_public_model_identity(self) -> None:
         with self.client.stream(
@@ -640,6 +661,19 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(payload["reasoning"], {"effort": "none", "exclude": True})
         self.assertFalse(payload["include_reasoning"])
+        self.assertNotIn("__gateway_reasoning", payload)
+
+    def test_openrouter_payload_allows_hidden_reasoning_for_complex_tasks(self) -> None:
+        client = OpenRouterClient(make_settings())
+
+        payload = client._payload_for_model(
+            {"messages": [], "__gateway_reasoning": "low"},
+            "qwen/qwen3-coder-flash",
+        )
+
+        self.assertEqual(payload["reasoning"], {"effort": "low", "exclude": True})
+        self.assertFalse(payload["include_reasoning"])
+        self.assertNotIn("__gateway_reasoning", payload)
 
     def test_openrouter_strips_reasoning_blocks_from_non_streaming_response(self) -> None:
         client = OpenRouterClient(make_settings())

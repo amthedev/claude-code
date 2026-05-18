@@ -69,13 +69,21 @@ DEBUG_KEYWORDS = {
 REVIEW_KEYWORDS = {"review", "revis", "audit", "security", "risco", "vulnerability"}
 
 ARCHITECTURE_KEYWORDS = {
+    "analisar",
+    "analise",
+    "analyze",
     "architecture",
     "arquitetura",
+    "codebase",
     "refactor",
     "refator",
     "migration",
     "migrate",
     "database",
+    "projeto",
+    "project",
+    "repository",
+    "repo",
     "schema",
     "multi-file",
 }
@@ -223,12 +231,13 @@ class RoutePlanner:
         )
         has_tool_contract = payload_has_tool_contract(payload)
         is_streaming = bool(payload.get("stream"))
+        deep_stream_request = is_streaming and self._needs_deep_reasoning(task_type, complexity)
         can_orchestrate = (
             self.settings.enable_agent_orchestration
-            and not is_streaming
             and not has_tool_contract
             and mode in {"pro", "ultra", "ui"}
             and pipeline_cost.within_budget
+            and (not is_streaming or deep_stream_request)
         )
         use_orchestration = can_orchestrate or (
             force_orchestration and mode in {"pro", "ultra", "ui"} and pipeline_cost.within_budget
@@ -412,10 +421,21 @@ class RoutePlanner:
     ) -> str:
         details = [f"mode={mode}", f"task_type={task_type}", f"complexity={complexity}"]
         if is_streaming:
-            details.append("streaming proxy")
+            if self._needs_deep_reasoning(task_type, complexity):
+                details.append("streaming with internal reasoning")
+            else:
+                details.append("streaming proxy")
         if has_tool_contract:
             details.append("tool contract proxy")
         return ", ".join(details)
+
+    def _needs_deep_reasoning(self, task_type: str, complexity: str) -> bool:
+        return complexity in {"high", "critical"} or task_type in {
+            "architecture",
+            "debugging",
+            "frontend",
+            "review",
+        }
 
 
 def _contains_any(text: str, keywords: set[str]) -> bool:

@@ -154,6 +154,7 @@ def create_app(
         payload = _prepare_payload(payload, app.state.settings, auth)
         decision = app.state.planner.plan(payload)
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
+        payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         if identity_answer:
             app.state.usage.record_request(decision)
@@ -171,6 +172,24 @@ def create_app(
 
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         if payload.get("stream"):
+            if decision.use_orchestration:
+                try:
+                    response, _ = await app.state.orchestrator.complete(
+                        {**payload, "stream": False},
+                        allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
+                    )
+                except OpenRouterError as exc:
+                    app.state.customer_usage.rollback(reservation)
+                    raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+                except Exception:
+                    app.state.customer_usage.rollback(reservation)
+                    raise
+
+                return StreamingResponse(
+                    _stream_text_message(response),
+                    media_type="text/event-stream",
+                )
+
             if not app.state.settings.openrouter_api_key:
                 app.state.customer_usage.rollback(reservation)
                 raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
@@ -464,6 +483,22 @@ def _with_public_model_identity(
         f"peça explicitamente detalhes técnicos de roteamento."
     )
     return _append_system_prompt(payload, prompt)
+
+
+def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:
+    outgoing = dict(payload)
+    if decision.complexity == "critical" or decision.mode == "ultra":
+        outgoing["__gateway_reasoning"] = "medium"
+    elif decision.complexity == "high" or decision.task_type in {
+        "architecture",
+        "debugging",
+        "frontend",
+        "review",
+    }:
+        outgoing["__gateway_reasoning"] = "low"
+    else:
+        outgoing["__gateway_reasoning"] = "none"
+    return outgoing
 
 
 def _selected_model_identity_answer(

@@ -38,8 +38,16 @@ class OpenRouterClient:
 
     def _payload_for_model(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
         outgoing = deepcopy(payload)
+        reasoning_mode = str(outgoing.pop("__gateway_reasoning", "none"))
+        for key in list(outgoing):
+            if key.startswith("__gateway_"):
+                outgoing.pop(key, None)
+
         outgoing["model"] = model
-        outgoing["reasoning"] = {"effort": "none", "exclude": True}
+        if reasoning_mode in {"low", "medium", "high"}:
+            outgoing["reasoning"] = {"effort": reasoning_mode, "exclude": True}
+        else:
+            outgoing["reasoning"] = {"effort": "none", "exclude": True}
         outgoing["include_reasoning"] = False
         return outgoing
 
