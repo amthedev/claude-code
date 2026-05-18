@@ -869,6 +869,98 @@ code {
   white-space: pre-wrap;
 }
 
+.support-panel,
+.support-admin-chat {
+  min-height: 0;
+}
+
+.support-status,
+.support-empty {
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: var(--cloud-panel);
+  color: var(--cloud-muted);
+  padding: 12px 14px;
+  line-height: 1.45;
+}
+
+.support-messages {
+  min-height: 260px;
+  max-height: 48vh;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  padding: 12px;
+}
+
+.support-message {
+  width: min(86%, 560px);
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: var(--cloud-panel);
+  padding: 10px 12px;
+}
+
+.support-message.support {
+  justify-self: start;
+}
+
+.support-message.customer {
+  justify-self: end;
+  background: var(--cloud-panel-2);
+}
+
+.support-message p {
+  margin: 5px 0 6px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.support-message span,
+.support-ticket span {
+  color: var(--cloud-muted);
+  font-size: 12px;
+}
+
+.support-form {
+  display: grid;
+  gap: 10px;
+}
+
+.support-admin-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.4fr);
+  gap: 16px;
+}
+
+.support-ticket-list {
+  display: grid;
+  gap: 10px;
+}
+
+.support-ticket {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: var(--admin-panel);
+  padding: 12px;
+}
+
+.support-ticket p {
+  margin: 0;
+  color: var(--admin-muted);
+  line-height: 1.4;
+}
+
+.support-ticket button {
+  justify-self: start;
+}
+
 .result-item,
 .usage-card {
   border: 1px solid var(--cloud-line);
@@ -995,7 +1087,8 @@ code {
   .admin-metrics,
   .field-grid,
   .limit-box,
-  .explain-grid {
+  .explain-grid,
+  .support-admin-grid {
     grid-template-columns: 1fr;
   }
 

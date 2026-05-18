@@ -33,6 +33,9 @@
         <button class="icon-button auth-only hidden" title="Claude Code API" data-panel="apiPanel" aria-label="Claude Code API">
           <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
         </button>
+        <button class="icon-button auth-only hidden" title="Suporte" data-panel="supportPanel" aria-label="Suporte">
+          <svg viewBox="0 0 24 24"><path d="M5 18.5 3.8 22l3.8-1.3a9 9 0 1 0-2.6-2.2Z" /><path d="M8 10h8M8 14h5" /></svg>
+        </button>
         <button id="authOpen" class="icon-button rail-bottom login-corner-button" title="Entrar ou cadastrar" aria-label="Entrar ou cadastrar">
           Entrar
         </button>
@@ -184,6 +187,20 @@
             <code>GET /v1/models</code>
             <code>GET /v1/budget</code>
           </div>
+        </section>
+
+        <section id="supportPanel" class="client-panel side-panel support-panel">
+          <div class="panel-header">
+            <span class="overline">Suporte</span>
+            <h2>Atendimento humano</h2>
+          </div>
+          <div id="supportStatus" class="support-status">Nenhum atendimento aberto.</div>
+          <div id="supportMessages" class="support-messages"></div>
+          <form id="supportForm" class="support-form">
+            <textarea name="message" placeholder="Digite sua mensagem para o suporte..." required></textarea>
+            <button class="primary" type="submit">Enviar ao suporte</button>
+          </form>
+          <div id="supportError" class="form-error"></div>
         </section>
 
         <section id="settingsPanel" class="client-panel side-panel">

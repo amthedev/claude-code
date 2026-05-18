@@ -144,6 +144,79 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.json()["detected_ip"], "177.200.246.8")
         self.assertTrue(response.json()["trusted"])
 
+    def test_support_queue_allows_one_active_ticket(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            gift_one = client.post(
+                "/v1/admin/gift-cards",
+                headers=self.headers,
+                json={"code": "SUPPORT-ONE", "plan": "Pro", "price": 149.9, "model": "sonnet"},
+            ).json()["giftCard"]
+            gift_two = client.post(
+                "/v1/admin/gift-cards",
+                headers=self.headers,
+                json={"code": "SUPPORT-TWO", "plan": "Pro", "price": 149.9, "model": "sonnet"},
+            ).json()["giftCard"]
+            account_one = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Um",
+                    "login": "um@example.com",
+                    "password": "secret-one",
+                    "giftCard": gift_one["code"],
+                },
+            ).json()["account"]
+            account_two = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Dois",
+                    "login": "dois@example.com",
+                    "password": "secret-two",
+                    "giftCard": gift_two["code"],
+                },
+            ).json()["account"]
+
+            customer_one_headers = {"Authorization": f"Bearer {account_one['apiToken']}"}
+            customer_two_headers = {"Authorization": f"Bearer {account_two['apiToken']}"}
+            ticket_one = client.post(
+                "/v1/support/tickets",
+                headers=customer_one_headers,
+                json={"message": "Preciso de ajuda"},
+            ).json()["ticket"]
+            ticket_two = client.post(
+                "/v1/support/tickets",
+                headers=customer_two_headers,
+                json={"message": "Estou na fila"},
+            ).json()["ticket"]
+
+            queue = client.get("/v1/admin/support/tickets", headers=self.headers).json()
+            self.assertEqual([ticket["id"] for ticket in queue["waiting"]], [ticket_one["id"], ticket_two["id"]])
+
+            response = client.post(f"/v1/admin/support/tickets/{ticket_one['id']}/claim", headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+
+            response = client.post(f"/v1/admin/support/tickets/{ticket_two['id']}/claim", headers=self.headers)
+            self.assertEqual(response.status_code, 409)
+
+            response = client.post(
+                f"/v1/admin/support/tickets/{ticket_one['id']}/messages",
+                headers=self.headers,
+                json={"message": "Vou te ajudar agora."},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["ticket"]["messages"][-1]["sender"], "support")
+
+            response = client.post(f"/v1/admin/support/tickets/{ticket_one['id']}/close", headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+
+            response = client.post(f"/v1/admin/support/tickets/{ticket_two['id']}/claim", headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+
     def test_cors_allows_local_admin_origin_when_configured(self) -> None:
         settings = make_settings()
         settings.cors_allowed_origins = ("http://127.0.0.1:8787",)

@@ -2,6 +2,8 @@ let currentAccountId = localStorage.getItem(ClaudeApp.CLIENT_SESSION_KEY);
 let activeConversation = [];
 let activeRecognition = null;
 let activeVoiceButton = null;
+let activeSupportTicket = null;
+let supportPollTimer = null;
 
 function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
@@ -202,6 +204,32 @@ async function authRequest(path, payload) {
   return response.json();
 }
 
+async function supportRequest(path, options = {}) {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.token}`,
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    let detail = `API respondeu ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      // Keep status text.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
+}
+
 function saveServerAccount(accountData) {
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex(
@@ -246,6 +274,7 @@ function renderAccount() {
     authOpen.classList.remove("hidden");
     logout.classList.add("hidden");
     logout.textContent = "";
+    stopSupportPolling();
     return;
   }
 
@@ -273,6 +302,7 @@ function renderAccount() {
   authOpen.classList.add("hidden");
   logout.classList.remove("hidden");
   logout.textContent = preferredName.charAt(0).toUpperCase();
+  startSupportPolling();
 }
 
 function setPanel(panelId) {
@@ -282,6 +312,7 @@ function setPanel(panelId) {
     button.classList.toggle("active", button.dataset.panel === panelId);
   });
   renderSidePanels();
+  if (panelId === "supportPanel") refreshSupportTicket();
 }
 
 function addMessage(role, text) {
@@ -452,6 +483,64 @@ function searchLocal(query) {
         )
         .join("")
     : `<div class="result-item"><p>Nenhum resultado.</p></div>`;
+}
+
+function supportStatusText(ticket) {
+  if (!ticket) return "Nenhum atendimento aberto.";
+  if (ticket.status === "waiting") return "Na fila. O suporte vai assumir assim que finalizar o atendimento atual.";
+  if (ticket.status === "active") return "Em atendimento agora.";
+  return "Atendimento finalizado.";
+}
+
+function renderSupport() {
+  const status = document.querySelector("#supportStatus");
+  const list = document.querySelector("#supportMessages");
+  if (!status || !list) return;
+  status.textContent = supportStatusText(activeSupportTicket);
+  if (!activeSupportTicket?.messages?.length) {
+    list.innerHTML = `<div class="support-empty">Envie uma mensagem para entrar na fila.</div>`;
+    return;
+  }
+
+  list.innerHTML = activeSupportTicket.messages
+    .map(
+      (message) => `
+        <div class="support-message ${message.sender}">
+          <strong>${ClaudeApp.escapeHtml(message.author)}</strong>
+          <p>${ClaudeApp.escapeHtml(message.body)}</p>
+          <span>${new Date(message.createdAt).toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}</span>
+        </div>
+      `,
+    )
+    .join("");
+  list.scrollTop = list.scrollHeight;
+}
+
+async function refreshSupportTicket() {
+  if (!account()?.active) return;
+  try {
+    const data = await supportRequest("/v1/support/tickets/current");
+    activeSupportTicket = data.ticket;
+    renderSupport();
+  } catch {
+    // Keep the last visible state; chat errors are shown when the user sends.
+  }
+}
+
+function startSupportPolling() {
+  if (supportPollTimer || !account()?.active) return;
+  refreshSupportTicket();
+  supportPollTimer = window.setInterval(refreshSupportTicket, 2200);
+}
+
+function stopSupportPolling() {
+  if (supportPollTimer) window.clearInterval(supportPollTimer);
+  supportPollTimer = null;
+  activeSupportTicket = null;
+  renderSupport();
 }
 
 function showChatNotice(message) {
@@ -726,6 +815,29 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
   renderSidePanels();
 });
 
+document.querySelector("#supportForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const message = form.elements.message.value.trim();
+  if (!message) return;
+  document.querySelector("#supportError").textContent = "";
+  try {
+    const path = activeSupportTicket
+      ? `/v1/support/tickets/${activeSupportTicket.id}/messages`
+      : "/v1/support/tickets";
+    const data = await supportRequest(path, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    activeSupportTicket = data.ticket;
+    form.reset();
+    renderSupport();
+    startSupportPolling();
+  } catch (error) {
+    document.querySelector("#supportError").textContent = error.message;
+  }
+});
+
 document.querySelector("#searchInput").addEventListener("input", (event) => {
   searchLocal(event.target.value);
 });
@@ -734,6 +846,7 @@ document.querySelector("#newChat").addEventListener("click", resetChat);
 
 document.querySelector("#clientLogout").addEventListener("click", () => {
   saveConversation();
+  stopSupportPolling();
   currentAccountId = null;
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
   activeConversation = [];
@@ -756,6 +869,7 @@ document.querySelectorAll("[data-auth-tab]").forEach((button) => {
 fillModelSelects();
 loadApiForm();
 renderSidePanels();
+renderSupport();
 
 if (currentAccountId && !account()) {
   currentAccountId = null;

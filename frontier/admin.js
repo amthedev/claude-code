@@ -1,6 +1,9 @@
 const adminLogin = document.querySelector("#adminLogin");
 const adminApp = document.querySelector("#adminApp");
 const giftCardForm = document.querySelector("#giftCardForm");
+let supportState = { waiting: [], active: [], closed: [] };
+let activeSupportTicket = null;
+let supportPollTimer = null;
 
 function showAdminApp() {
   adminLogin.classList.add("hidden");
@@ -42,6 +45,7 @@ async function unlockRememberedAdminDevice() {
   showAdminApp();
   fillAdminApiTargetForm();
   renderAll();
+  startSupportPolling();
   return true;
 }
 
@@ -94,6 +98,36 @@ async function refreshFromServer() {
   ]);
   ClaudeApp.saveGiftCards(giftCards.data || []);
   ClaudeApp.saveAccounts(accounts.data || []);
+}
+
+async function refreshSupportFromServer() {
+  const data = await adminRequest("/v1/admin/support/tickets");
+  supportState = {
+    waiting: data.waiting || [],
+    active: data.active || [],
+    closed: data.closed || [],
+  };
+  activeSupportTicket = supportState.active[0] || activeSupportTicket;
+  if (activeSupportTicket) {
+    activeSupportTicket =
+      [...supportState.active, ...supportState.waiting, ...supportState.closed].find(
+        (ticket) => ticket.id === activeSupportTicket.id,
+      ) || activeSupportTicket;
+  }
+  renderSupportAdmin();
+}
+
+function startSupportPolling() {
+  if (supportPollTimer) return;
+  refreshSupportFromServer().catch(() => {});
+  supportPollTimer = window.setInterval(() => {
+    refreshSupportFromServer().catch(() => {});
+  }, 2200);
+}
+
+function stopSupportPolling() {
+  if (supportPollTimer) window.clearInterval(supportPollTimer);
+  supportPollTimer = null;
 }
 
 function renderPreview() {
@@ -252,9 +286,68 @@ function renderAccounts() {
     .join("");
 }
 
+function supportBadge(ticket) {
+  if (ticket.status === "waiting") return "Na fila";
+  if (ticket.status === "active") return "Atendendo";
+  return "Finalizado";
+}
+
+function renderSupportAdmin() {
+  const queue = document.querySelector("#supportQueue");
+  const title = document.querySelector("#activeSupportTitle");
+  const messages = document.querySelector("#adminSupportMessages");
+  const closeButton = document.querySelector("#closeSupportTicket");
+  if (!queue || !title || !messages) return;
+
+  queue.innerHTML = supportState.waiting.length
+    ? supportState.waiting
+        .map(
+          (ticket, index) => `
+            <article class="support-ticket">
+              <strong>${index + 1}. ${ClaudeApp.escapeHtml(ticket.customerName)}</strong>
+              <p>${ClaudeApp.escapeHtml(ticket.subject)}</p>
+              <span>${ClaudeApp.escapeHtml(ticket.customerLogin)}</span>
+              <button type="button" data-support-action="claim" data-id="${ticket.id}">
+                ${supportState.active.length ? "Aguardando" : "Atender"}
+              </button>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="support-empty">Fila vazia.</div>`;
+
+  const active = supportState.active[0] || (activeSupportTicket?.status === "active" ? activeSupportTicket : null);
+  activeSupportTicket = active;
+  closeButton.disabled = !active;
+
+  if (!active) {
+    title.textContent = "Nenhum cliente em atendimento";
+    messages.innerHTML = `<div class="support-empty">Quando assumir um cliente da fila, a conversa aparece aqui.</div>`;
+    return;
+  }
+
+  title.textContent = `${active.customerName} - ${supportBadge(active)}`;
+  messages.innerHTML = active.messages
+    .map(
+      (message) => `
+        <div class="support-message ${message.sender}">
+          <strong>${ClaudeApp.escapeHtml(message.author)}</strong>
+          <p>${ClaudeApp.escapeHtml(message.body)}</p>
+          <span>${new Date(message.createdAt).toLocaleTimeString("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}</span>
+        </div>
+      `,
+    )
+    .join("");
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function renderAll() {
   renderGiftCards();
   renderAccounts();
+  renderSupportAdmin();
 }
 
 function uniqueGiftCard(values) {
@@ -311,9 +404,11 @@ document.querySelector("#adminLoginForm").addEventListener("submit", async (even
   showAdminApp();
   fillAdminApiTargetForm();
   renderAll();
+  startSupportPolling();
 });
 
 document.querySelector("#adminLogout").addEventListener("click", () => {
+  stopSupportPolling();
   forgetAdminDevice();
   location.reload();
 });
@@ -334,6 +429,7 @@ document.querySelector("#adminApiTargetForm").addEventListener("submit", async (
     rememberAdminDevice();
     fillAdminApiTargetForm();
     renderAll();
+    startSupportPolling();
   } catch (error) {
     message.textContent = error.fallback ? "API admin indisponível." : error.message;
   }
@@ -497,6 +593,54 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
 
   ClaudeApp.saveAccounts(accounts);
   renderAll();
+});
+
+document.querySelector("#supportQueue").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-support-action='claim']");
+  if (!button || button.textContent.trim() === "Aguardando") return;
+  document.querySelector("#adminSupportError").textContent = "";
+  try {
+    const data = await adminRequest(`/v1/admin/support/tickets/${button.dataset.id}/claim`, {
+      method: "POST",
+    });
+    activeSupportTicket = data.ticket;
+    await refreshSupportFromServer();
+  } catch (error) {
+    document.querySelector("#adminSupportError").textContent = error.message;
+  }
+});
+
+document.querySelector("#adminSupportForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const message = form.elements.message.value.trim();
+  if (!message || !activeSupportTicket) return;
+  document.querySelector("#adminSupportError").textContent = "";
+  try {
+    const data = await adminRequest(`/v1/admin/support/tickets/${activeSupportTicket.id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    });
+    activeSupportTicket = data.ticket;
+    form.reset();
+    await refreshSupportFromServer();
+  } catch (error) {
+    document.querySelector("#adminSupportError").textContent = error.message;
+  }
+});
+
+document.querySelector("#closeSupportTicket").addEventListener("click", async () => {
+  if (!activeSupportTicket) return;
+  document.querySelector("#adminSupportError").textContent = "";
+  try {
+    await adminRequest(`/v1/admin/support/tickets/${activeSupportTicket.id}/close`, {
+      method: "POST",
+    });
+    activeSupportTicket = null;
+    await refreshSupportFromServer();
+  } catch (error) {
+    document.querySelector("#adminSupportError").textContent = error.message;
+  }
 });
 
 document.querySelector("#seedDemo").addEventListener("click", seedDemo);

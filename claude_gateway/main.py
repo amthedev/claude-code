@@ -21,6 +21,7 @@ from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .routing import RoutePlanner, extract_prompt_text, model_profiles
 from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
+from .support import SupportStore
 from .usage import UsageStore
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
@@ -38,6 +39,7 @@ def create_app(
     app.state.usage = UsageStore()
     app.state.customer_usage = CustomerUsageStore(resolved_settings)
     app.state.account_store = AccountStore(resolved_settings)
+    app.state.support_store = SupportStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
     app.state.openrouter = factory(resolved_settings)
@@ -257,6 +259,65 @@ def create_app(
         _require_admin(request, app.state.settings)
         return app.state.account_store.delete_account(account_id)
 
+    @app.get("/v1/support/tickets/current")
+    async def current_support_ticket(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return {"ticket": app.state.support_store.current_for_customer(auth.token)}
+
+    @app.post("/v1/support/tickets")
+    async def open_support_ticket(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"ticket": app.state.support_store.open_ticket(auth.token, payload)})
+
+    @app.post("/v1/support/tickets/{ticket_id}/messages")
+    async def customer_support_message(
+        ticket_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"ticket": app.state.support_store.customer_message(auth.token, ticket_id, payload)})
+
+    @app.get("/v1/admin/support/tickets")
+    async def list_support_tickets(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return app.state.support_store.list_admin_tickets()
+
+    @app.post("/v1/admin/support/tickets/{ticket_id}/claim")
+    async def claim_support_ticket(ticket_id: str, request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return JSONResponse({"ticket": app.state.support_store.claim_ticket(ticket_id)})
+
+    @app.post("/v1/admin/support/tickets/{ticket_id}/messages")
+    async def admin_support_message(
+        ticket_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"ticket": app.state.support_store.admin_message(ticket_id, payload)})
+
+    @app.post("/v1/admin/support/tickets/{ticket_id}/close")
+    async def close_support_ticket(ticket_id: str, request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return JSONResponse({"ticket": app.state.support_store.close_ticket(ticket_id)})
+
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
@@ -395,6 +456,13 @@ def _require_admin(request: Request, settings: Settings) -> AuthContext:
     auth = require_gateway_auth(request, settings)
     if auth.kind != "admin":
         raise HTTPException(status_code=403, detail="Admin token required.")
+    return auth
+
+
+def _require_customer(request: Request, settings: Settings) -> AuthContext:
+    auth = require_gateway_auth(request, settings)
+    if not auth.is_customer:
+        raise HTTPException(status_code=403, detail="Customer token required.")
     return auth
 
 

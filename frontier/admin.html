@@ -42,6 +42,7 @@
         </div>
         <nav class="admin-nav">
           <button class="active" data-admin-tab="accountsPanel">Gift cards</button>
+          <button data-admin-tab="supportPanel">Atendimento</button>
           <button data-admin-tab="financePanel">Financeiro</button>
           <button data-admin-tab="gatewayPanel">Gateway</button>
         </nav>
@@ -175,6 +176,34 @@
                   <tbody id="accountsTable"></tbody>
                 </table>
               </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="supportPanel" class="admin-panel">
+          <div class="support-admin-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <span class="overline">Fila</span>
+                <h2>Clientes aguardando</h2>
+              </div>
+              <div id="supportQueue" class="support-ticket-list"></div>
+            </section>
+
+            <section class="panel support-admin-chat">
+              <div class="panel-heading inline">
+                <div>
+                  <span class="overline">Atendimento atual</span>
+                  <h2 id="activeSupportTitle">Nenhum cliente em atendimento</h2>
+                </div>
+                <button id="closeSupportTicket" type="button" class="ghost">Finalizar</button>
+              </div>
+              <div id="adminSupportMessages" class="support-messages"></div>
+              <form id="adminSupportForm" class="support-form">
+                <textarea name="message" placeholder="Responder ao cliente..." required></textarea>
+                <button class="primary" type="submit">Enviar resposta</button>
+              </form>
+              <div id="adminSupportError" class="form-error"></div>
             </section>
           </div>
         </section>
