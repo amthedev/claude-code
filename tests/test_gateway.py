@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from claude_gateway.config import Settings
 from claude_gateway.main import create_app
+from claude_gateway.openrouter import OpenRouterClient
 
 
 class FakeOpenRouterClient:
@@ -590,6 +592,65 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
         self.assertIn("Claude Opus 4.7", payload["system"])
+
+    def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:
+        client = OpenRouterClient(make_settings())
+
+        payload = client._payload_for_model(
+            {"messages": [], "reasoning": {"effort": "high", "exclude": False}},
+            "deepseek/deepseek-v4-flash",
+        )
+
+        self.assertEqual(payload["reasoning"], {"effort": "none", "exclude": True})
+        self.assertFalse(payload["include_reasoning"])
+
+    def test_openrouter_strips_reasoning_blocks_from_non_streaming_response(self) -> None:
+        client = OpenRouterClient(make_settings())
+
+        response = client._strip_reasoning_from_response(
+            {
+                "content": [
+                    {"type": "thinking", "thinking": "hidden"},
+                    {"type": "text", "text": "Oi!"},
+                ],
+                "reasoning": "hidden",
+            }
+        )
+
+        self.assertEqual(response["content"], [{"type": "text", "text": "Oi!"}])
+        self.assertNotIn("reasoning", response)
+
+    def test_openrouter_filters_reasoning_events_from_stream(self) -> None:
+        client = OpenRouterClient(make_settings())
+
+        async def chunks():
+            yield (
+                b'event: message_start\n'
+                b'data: {"type":"message_start"}\n\n'
+                b'event: content_block_start\n'
+                b'data: {"type":"content_block_start","index":0,'
+                b'"content_block":{"type":"thinking","thinking":""}}\n\n'
+            )
+            yield (
+                b'event: content_block_delta\n'
+                b'data: {"type":"content_block_delta","index":0,'
+                b'"delta":{"type":"thinking_delta","thinking":"hidden"}}\n\n'
+                b'event: content_block_stop\n'
+                b'data: {"type":"content_block_stop","index":0}\n\n'
+                b'event: content_block_delta\n'
+                b'data: {"type":"content_block_delta","index":1,'
+                b'"delta":{"type":"text_delta","text":"Oi!"}}\n\n'
+            )
+
+        async def collect() -> bytes:
+            parts = []
+            async for chunk in client._filter_reasoning_stream(chunks()):
+                parts.append(chunk)
+            return b"".join(parts)
+
+        body = asyncio.run(collect())
+        self.assertNotIn(b"thinking", body)
+        self.assertIn(b"text_delta", body)
 
 
 if __name__ == "__main__":
