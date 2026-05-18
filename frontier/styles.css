@@ -910,9 +910,16 @@ code {
 }
 
 .api-primary-head button {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: #2d9a65;
+  border-color: #2d9a65;
   color: white;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(45, 154, 101, 0.22);
+}
+
+.api-primary-head button:hover {
+  background: #247e55;
+  border-color: #247e55;
 }
 
 .api-command-box-primary {
