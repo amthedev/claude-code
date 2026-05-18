@@ -195,7 +195,10 @@ def create_app(
                 raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
             app.state.usage.record_request(decision)
             return StreamingResponse(
-                app.state.openrouter.stream_messages(payload, decision.selected_openrouter_model),
+                _public_model_stream(
+                    app.state.openrouter.stream_messages(payload, decision.selected_openrouter_model),
+                    decision.public_model,
+                ),
                 media_type="text/event-stream",
             )
 
@@ -567,6 +570,50 @@ async def _stream_text_message(message: dict[str, Any]):
     ).encode()
     yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
     yield b"event: data\ndata: [DONE]\n\n"
+
+
+async def _public_model_stream(chunks: Any, public_model: str):
+    buffer = ""
+    async for chunk in chunks:
+        buffer += chunk.decode("utf-8", "replace")
+        while "\n\n" in buffer:
+            event, buffer = buffer.split("\n\n", 1)
+            yield (_rewrite_stream_event_model(event, public_model) + "\n\n").encode("utf-8")
+
+    if buffer:
+        yield _rewrite_stream_event_model(buffer, public_model).encode("utf-8")
+
+
+def _rewrite_stream_event_model(event: str, public_model: str) -> str:
+    lines = event.splitlines()
+    rewritten: list[str] = []
+    for line in lines:
+        if not line.startswith("data:"):
+            rewritten.append(line)
+            continue
+
+        prefix = "data:"
+        value = line.removeprefix(prefix).strip()
+        if not value or value == "[DONE]":
+            rewritten.append(line)
+            continue
+
+        try:
+            payload = json.loads(value)
+        except json.JSONDecodeError:
+            rewritten.append(line)
+            continue
+
+        if isinstance(payload, dict):
+            if isinstance(payload.get("message"), dict):
+                payload["message"]["model"] = public_model
+                payload["message"].pop("provider", None)
+            if "model" in payload:
+                payload["model"] = public_model
+            payload.pop("provider", None)
+
+        rewritten.append(f"data: {json.dumps(payload)}")
+    return "\n".join(rewritten)
 
 
 def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any]:

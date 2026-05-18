@@ -33,7 +33,7 @@ class FakeOpenRouterClient:
     async def stream_messages(self, payload: dict[str, Any], model: str):
         self.calls.append((model, payload))
         yield b"event: message_start\n"
-        yield b"data: {}\n\n"
+        yield f'data: {{"message": {{"model": "{model}", "provider": "fake"}}}}\n\n'.encode()
 
 
 class FakeOpenAIHelper:
@@ -640,6 +640,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Claude Opus 4.7", payload["system"])
         self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
+
+    def test_streaming_proxy_rewrites_message_start_to_public_model(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "oi"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b'"model": "claude-code-pro"', body)
 
     def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
         response = self.client.post(
