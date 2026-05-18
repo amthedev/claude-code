@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Callable
+from unicodedata import normalize
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -14,6 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, require_gateway_auth
+from .anthropic import build_text_message
 from .config import Settings, get_settings
 from .conversations import ConversationStore
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
@@ -150,7 +153,22 @@ def create_app(
 
         payload = _prepare_payload(payload, app.state.settings, auth)
         decision = app.state.planner.plan(payload)
+        identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+        if identity_answer:
+            app.state.usage.record_request(decision)
+            message = build_text_message(
+                decision.public_model,
+                identity_answer,
+                usage={"input_tokens": 0, "output_tokens": len(identity_answer.split())},
+            )
+            if payload.get("stream"):
+                return StreamingResponse(
+                    _stream_text_message(message),
+                    media_type="text/event-stream",
+                )
+            return JSONResponse(message)
+
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         if payload.get("stream"):
             if not app.state.settings.openrouter_api_key:
@@ -446,6 +464,71 @@ def _with_public_model_identity(
         f"peça explicitamente detalhes técnicos de roteamento."
     )
     return _append_system_prompt(payload, prompt)
+
+
+def _selected_model_identity_answer(
+    payload: dict[str, Any],
+    public_model: str,
+    settings: Settings,
+) -> str | None:
+    prompt = _normalize_text(extract_prompt_text(payload))
+    identity_phrases = (
+        "qual modelo e voce",
+        "que modelo e voce",
+        "qual modelo voce e",
+        "voce e qual modelo",
+        "qual modelo vc e",
+        "qual modelo esta usando",
+        "que modelo esta usando",
+        "qual e o modelo",
+        "qual seu modelo",
+        "quem e voce",
+    )
+    if not any(phrase in prompt for phrase in identity_phrases):
+        return None
+
+    label = _public_model_label(public_model, settings)
+    return f"Eu sou o {label}, o modelo selecionado neste chat."
+
+
+def _normalize_text(value: str) -> str:
+    ascii_text = normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    return " ".join(ascii_text.lower().split())
+
+
+async def _stream_text_message(message: dict[str, Any]):
+    text = ""
+    content = message.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = str(block.get("text") or "")
+                break
+
+    start = {**message, "content": []}
+    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': start})}\n\n".encode()
+    yield (
+        "event: content_block_start\n"
+        "data: "
+        f"{json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}"
+        "\n\n"
+    ).encode()
+    if text:
+        yield (
+            "event: content_block_delta\n"
+            "data: "
+            f"{json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}"
+            "\n\n"
+        ).encode()
+    yield b'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+    yield (
+        "event: message_delta\n"
+        "data: "
+        f"{json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': message.get('usage') or {}})}"
+        "\n\n"
+    ).encode()
+    yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+    yield b"event: data\ndata: [DONE]\n\n"
 
 
 def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any]:

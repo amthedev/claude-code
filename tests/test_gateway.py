@@ -586,7 +586,7 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-ultra",
                 "stream": True,
                 "max_tokens": 128,
-                "messages": [{"role": "user", "content": "qual modelo e voce"}],
+                "messages": [{"role": "user", "content": "explique uma funcao"}],
             },
         ) as response:
             self.assertEqual(response.status_code, 200)
@@ -595,6 +595,40 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
         self.assertIn("Claude Opus 4.7", payload["system"])
+
+    def test_model_identity_question_returns_selected_public_model(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "qual modelo e voce?"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertIn("Claude Opus 4.7", response.json()["content"][0]["text"])
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
+    def test_streaming_model_identity_question_returns_selected_public_model(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "qual modelo está usando?"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"Claude Sonnet 4.6", body)
+        self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:
         client = OpenRouterClient(make_settings())
