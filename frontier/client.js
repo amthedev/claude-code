@@ -116,6 +116,17 @@ except FileNotFoundError:
 PY`;
 }
 
+function terminalCommand(config) {
+  return [
+    `export ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
+    `export ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
+    `export ANTHROPIC_API_KEY=''`,
+    `export ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
+    `export CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
+    "claude",
+  ].join("\n");
+}
+
 function renderCodeBlock(title, code, copyLabel = "Copiar") {
   const escaped = ClaudeApp.escapeHtml(code);
   return `
@@ -144,6 +155,7 @@ function renderApiInstallGuide() {
     }),
   )}`;
   const installCommand = pythonInstaller(config);
+  const sessionCommand = terminalCommand(config);
   const loginHint = config.hasAccount
     ? "Configuracao pronta para esta conta."
     : "Entre em uma conta ativa para gerar a configuracao personalizada.";
@@ -161,11 +173,12 @@ function renderApiInstallGuide() {
       </div>
     </section>
     <ol class="api-steps">
-      <li>Copie o comando unico e cole no terminal do Mac ou Linux.</li>
-      <li>Depois abra um terminal novo e rode o Claude Code normalmente.</li>
+      <li>Para funcionar agora, copie o comando especifico abaixo e cole no terminal.</li>
+      <li>Para deixar salvo neste computador, use o instalador permanente logo depois.</li>
       <li>O Claude web do navegador nao aceita API externa; use o Claude Code ou app compativel.</li>
     </ol>
-    ${renderCodeBlock("Configurar este computador", installCommand, "Copiar comando")}
+    ${renderCodeBlock("Comando para colar no terminal agora", sessionCommand, "Copiar comando")}
+    ${renderCodeBlock("Salvar configuracao neste computador", installCommand, "Copiar instalador")}
     ${renderCodeBlock("Testar conexao", curlTest)}
   `;
 }
