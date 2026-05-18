@@ -8,6 +8,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from claude_gateway.config import Settings
+from claude_gateway.customers import _today, parse_customer_accounts
 from claude_gateway.main import create_app
 from claude_gateway.openrouter import OpenRouterClient
 
@@ -456,6 +457,95 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(usage.status_code, 200)
             self.assertEqual(usage.json()["customer"]["allowed_model"], "claude-code-economy")
             self.assertGreater(usage.json()["today"]["requests"], 0)
+
+    def test_customer_wildcard_model_starts_on_ultra_by_default(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.customer_accounts = "wild-token|Maria|9999|100000|*|true"
+            settings.quota_data_file = f"{tmpdir}/usage.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": "Bearer wild-token"},
+                json={
+                    "model": "claude-code-pro",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Implemente uma API"}],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
+            self.assertEqual(response.json()["public_model"], "claude-code-ultra")
+
+    def test_customer_wildcard_model_downgrades_when_daily_tokens_are_low(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.customer_accounts = "quota-token|Maria|9999|100000|*|true"
+            settings.quota_data_file = f"{tmpdir}/usage.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            plan = parse_customer_accounts(settings)["quota-token"]
+            self.assertIsNotNone(plan)
+
+            with app.state.customer_usage._connect() as db:
+                db.execute(
+                    """
+                    INSERT INTO customer_usage (
+                        day, token_hash, requests, reserved_cost_usd, reserved_tokens
+                    ) VALUES (?, ?, 1, 0.01, 97000)
+                    """,
+                    (_today(), plan.token_hash),
+                )
+
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": "Bearer quota-token"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Implemente uma API"}],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["requested_model"], "claude-code-economy")
+            self.assertEqual(response.json()["public_model"], "claude-code-economy")
+
+    def test_openai_design_director_guides_frontend_tool_requests(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            openai_helper_factory=FakeOpenAIHelper,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 256,
+                "tools": [{"name": "write_file", "input_schema": {"type": "object"}}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Crie uma landing page premium moderna em React e Tailwind",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.openai_helper.calls), 1)
+        self.assertEqual(len(app.state.openrouter.calls), 1)
+        payload = app.state.openrouter.calls[-1][1]
+        self.assertIn("Internal frontend quality guidance", payload["system"])
+        self.assertIn("Use stricter validation", payload["system"])
 
     def test_customer_quota_blocks_before_upstream_call(self) -> None:
         with TemporaryDirectory() as tmpdir:

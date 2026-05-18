@@ -46,10 +46,11 @@ class Settings:
     openrouter_base_url: str = "https://openrouter.ai/api"
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_helper_model: str = "gpt-5.5"
+    openai_helper_model: str = "gpt-5.4-mini"
     openai_helper_max_output_tokens: int = 900
     openai_helper_reasoning_effort: str = "low"
-    openai_helper_for_customers: bool = False
+    openai_helper_for_customers: bool = True
+    enable_openai_design_director: bool = True
     request_timeout_seconds: float = 120.0
     enable_agent_orchestration: bool = True
     max_cost_ratio_vs_claude: float = 0.50
@@ -103,10 +104,11 @@ class Settings:
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.5"),
+            openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.4-mini"),
             openai_helper_max_output_tokens=int(os.getenv("OPENAI_HELPER_MAX_OUTPUT_TOKENS", "900")),
             openai_helper_reasoning_effort=os.getenv("OPENAI_HELPER_REASONING_EFFORT", "low"),
-            openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", False),
+            openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", True),
+            enable_openai_design_director=_bool_env("ENABLE_OPENAI_DESIGN_DIRECTOR", True),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),

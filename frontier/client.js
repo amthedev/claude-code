@@ -122,6 +122,8 @@ GATEWAY_KEYS = {{
     "ANTHROPIC_DEFAULT_SONNET_MODEL": SELECTED_MODEL,
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
     "CLAUDE_CODE_SUBAGENT_MODEL": SELECTED_MODEL,
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
 }}
 
 def wants_gateway():
@@ -204,6 +206,8 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
         "ANTHROPIC_DEFAULT_SONNET_MODEL": selected_model,
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
         "CLAUDE_CODE_SUBAGENT_MODEL": selected_model,
+        "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
     })
     settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
     print(f"Extensao configurada em {settings_path}")
@@ -229,6 +233,8 @@ function terminalCommand(config) {
       ANTHROPIC_DEFAULT_SONNET_MODEL: config.model,
       ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-ultra",
       CLAUDE_CODE_SUBAGENT_MODEL: config.model,
+      CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "16000",
     },
   };
   return `claude --settings ${shellQuote(JSON.stringify(settings))} --setting-sources local`;
@@ -256,6 +262,8 @@ env.update({
     "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(config.model)},
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
     "CLAUDE_CODE_SUBAGENT_MODEL": ${JSON.stringify(config.model)},
+    "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
 })
 
 settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")

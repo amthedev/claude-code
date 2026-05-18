@@ -25,12 +25,18 @@ from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_p
 from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
-from .routing import RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
+from .routing import RouteDecision, RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
 from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
 from .support import SupportStore
 from .usage import UsageStore
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
+
+OPENAI_DESIGN_DIRECTOR_PROMPT = """You are a concise design director for a coding assistant.
+Return only tactical guidance that improves frontend implementation quality before code is written.
+Focus on premium SaaS polish, layout hierarchy, responsive behavior, component structure, visual restraint,
+copy quality, spacing, states, accessibility, and verification. Do not write full source code. Do not mention
+OpenAI, ChatGPT, internal routing, providers, or that another model is helping."""
 
 
 def create_app(
@@ -154,10 +160,12 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
         payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+        payload = await _with_openai_design_guidance(app, auth, payload, decision)
         payload["__gateway_route_decision"] = decision
         if identity_answer:
             app.state.usage.record_request(decision)
@@ -403,6 +411,7 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _with_customer_power_tier(payload, app, auth)
         return app.state.planner.plan(payload).to_dict()
 
     @app.post("/v1/agent/run")
@@ -413,11 +422,13 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _with_customer_power_tier(payload, app, auth)
         if payload.get("stream"):
             payload = {**payload, "stream": False}
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+        payload = await _with_openai_design_guidance(app, auth, payload, decision)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         try:
             response, decision = await app.state.orchestrator.complete(
@@ -480,6 +491,58 @@ def _prepare_payload(
     return limited
 
 
+def _with_customer_power_tier(
+    payload: dict[str, Any],
+    app: FastAPI,
+    auth: AuthContext,
+) -> dict[str, Any]:
+    if not auth.customer or auth.customer.allowed_model != "*":
+        return payload
+
+    settings = app.state.settings
+    requested = str(payload.get("model") or "").strip()
+    requested_lower = requested.lower()
+    if "/" in requested_lower:
+        return payload
+    if _is_explicit_low_power_model(requested_lower, settings):
+        return payload
+
+    snapshot = app.state.customer_usage.snapshot_for(auth.customer)
+    remaining = snapshot["today"].get("remaining_tokens")
+    limit = auth.customer.daily_token_limit
+    ratio = 1.0
+    if isinstance(remaining, int) and limit > 0:
+        ratio = max(0.0, min(1.0, remaining / limit))
+
+    if ratio <= 0.05:
+        target_model = settings.economy_public_model
+    elif ratio <= 0.20:
+        target_model = settings.pro_public_model
+    elif requested_lower == settings.ui_public_model.lower():
+        target_model = settings.ui_public_model
+    else:
+        target_model = settings.ultra_public_model
+
+    outgoing = dict(payload)
+    outgoing["model"] = target_model
+    outgoing["__gateway_customer_power_tier"] = {
+        "remaining_token_ratio": round(ratio, 4),
+        "selected_public_model": target_model,
+    }
+    return outgoing
+
+
+def _is_explicit_low_power_model(model: str, settings: Settings) -> bool:
+    if not model:
+        return False
+    economy_names = {
+        settings.economy_public_model.lower(),
+        "claude-code-economy",
+        "haiku",
+    }
+    return model in economy_names or "economy" in model or "haiku" in model
+
+
 def _with_public_model_identity(
     payload: dict[str, Any],
     public_model: str,
@@ -503,6 +566,52 @@ def _with_public_model_identity(
         f"unless the user explicitly asks for technical routing details."
     )
     return _append_system_prompt(payload, prompt)
+
+
+async def _with_openai_design_guidance(
+    app: FastAPI,
+    auth: AuthContext,
+    payload: dict[str, Any],
+    decision: RouteDecision,
+) -> dict[str, Any]:
+    settings = app.state.settings
+    if not settings.enable_openai_design_director:
+        return payload
+    if not _allow_openai_helper(auth, settings) or not app.state.openai_helper:
+        return payload
+    if decision.task_type != "frontend" and decision.mode not in {"ultra", "ui"}:
+        return payload
+
+    try:
+        guidance = await app.state.openai_helper.generate_text(
+            instructions=OPENAI_DESIGN_DIRECTOR_PROMPT,
+            input_text=_design_director_input(payload, decision),
+            max_output_tokens=min(settings.openai_helper_max_output_tokens, 900),
+        )
+    except Exception:
+        return payload
+
+    guidance = guidance.strip()
+    if not guidance:
+        return payload
+
+    prompt = (
+        "Internal frontend quality guidance to apply silently before answering. "
+        "Use it to improve the implementation; do not mention this guidance to the user.\n"
+        f"{guidance[:4000]}"
+    )
+    return _append_system_prompt(payload, prompt)
+
+
+def _design_director_input(payload: dict[str, Any], decision: RouteDecision) -> str:
+    preview = extract_prompt_text(payload)[:12000]
+    return (
+        f"Public model: {decision.public_model}\n"
+        f"Mode: {decision.mode}\n"
+        f"Task type: {decision.task_type}\n"
+        f"Complexity: {decision.complexity}\n\n"
+        f"User/project context:\n{preview}"
+    )
 
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:

@@ -66,7 +66,7 @@ const ClaudeApp = (() => {
       sonnet: "sonnet",
       opus: "opus",
     };
-    return aliases[modelKey] || "sonnet";
+    return aliases[modelKey] || "opus";
   }
 
   function normalizePublicModel(publicModel) {
@@ -78,7 +78,7 @@ const ClaudeApp = (() => {
     if (value.includes("haiku")) return models.haiku.publicModel;
     if (value.includes("economy")) return models.haiku.publicModel;
     if (value.includes("ultra")) return models.opus.publicModel;
-    return models.sonnet.publicModel;
+    return models.opus.publicModel;
   }
 
   function apiSettings() {
@@ -89,7 +89,7 @@ const ClaudeApp = (() => {
     const settings = load(API_SETTINGS_KEY, {
       baseUrl: sameOriginApi,
       token: "local-dev-token",
-      model: models.sonnet.publicModel,
+      model: models.opus.publicModel,
     });
     return {
       ...settings,
