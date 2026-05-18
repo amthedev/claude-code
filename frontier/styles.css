@@ -969,6 +969,13 @@ code {
   padding: 14px;
 }
 
+button.result-item {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: var(--cloud-text);
+}
+
 .result-item strong {
   display: block;
   margin-bottom: 5px;

@@ -5,6 +5,8 @@ let activeVoiceButton = null;
 let activeSupportTicket = null;
 let supportPollTimer = null;
 let pendingAttachments = [];
+let activeConversationId = null;
+let serverHistory = [];
 
 function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
@@ -335,18 +337,94 @@ function updateMessage(message, text) {
   message.node.scrollIntoView({ block: "end" });
 }
 
-function saveConversation() {
-  if (!activeConversation.length) return;
-  const title = activeConversation.find((item) => item.role === "user")?.content.slice(0, 70) || "Chat";
-  const history = ClaudeApp.history();
-  history.unshift({
-    id: `chat_${Date.now()}`,
-    accountId: currentAccountId,
-    title,
-    messages: activeConversation,
-    createdAt: new Date().toISOString(),
+async function conversationRequest(path, options = {}) {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.token}`,
+      ...(options.headers || {}),
+    },
   });
-  ClaudeApp.saveHistory(history.slice(0, 40));
+
+  if (!response.ok) {
+    let detail = `API respondeu ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      // Keep the status message.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
+}
+
+async function loadServerHistory() {
+  if (!account()?.active) {
+    serverHistory = [];
+    renderSidePanels();
+    return;
+  }
+
+  try {
+    const data = await conversationRequest("/v1/conversations");
+    serverHistory = data.data || [];
+    renderSidePanels();
+  } catch {
+    serverHistory = [];
+    renderSidePanels();
+  }
+}
+
+async function saveConversation() {
+  if (!activeConversation.length || !account()?.active) return;
+
+  try {
+    const data = await conversationRequest("/v1/conversations", {
+      method: "POST",
+      body: JSON.stringify({
+        id: activeConversationId,
+        messages: activeConversation,
+      }),
+    });
+    activeConversationId = data.conversation.id;
+    await loadServerHistory();
+  } catch {
+    showChatNotice("Não consegui salvar a conversa no banco agora.");
+  }
+}
+
+function renderConversationMessages(messages) {
+  activeConversation = [];
+  const thread = document.querySelector("#chatThread");
+  thread.innerHTML = "";
+
+  messages.forEach((message) => {
+    if (message.role === "user" || message.role === "assistant") {
+      addMessage(message.role, message.content || "");
+    }
+  });
+
+  if (!activeConversation.length) {
+    thread.classList.add("hidden");
+    document.querySelector("#bottomComposer").classList.add("hidden");
+    document.querySelector("#emptyState").classList.remove("hidden");
+  }
+}
+
+async function openConversation(conversationId) {
+  try {
+    const data = await conversationRequest(`/v1/conversations/${conversationId}`);
+    activeConversationId = data.conversation.id;
+    renderConversationMessages(data.conversation.messages || []);
+    setPanel("chatPanel");
+  } catch (error) {
+    showChatNotice(error.message);
+  }
 }
 
 function parseGatewayStreamChunk(buffer, onText) {
@@ -456,6 +534,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
     ClaudeApp.saveAccounts(accounts);
   }
 
+  await saveConversation();
   createArtifactIfUseful(prompt, answer);
   renderAccount();
   renderSidePanels();
@@ -476,19 +555,18 @@ function createArtifactIfUseful(prompt, answer) {
 }
 
 function renderSidePanels() {
-  const history = ClaudeApp.history().filter((item) => item.accountId === currentAccountId);
-  document.querySelector("#historyList").innerHTML = history.length
-    ? history
+  document.querySelector("#historyList").innerHTML = serverHistory.length
+    ? serverHistory
         .map(
           (item) => `
-            <div class="result-item">
+            <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
               <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
-              <p>${new Date(item.createdAt).toLocaleString("pt-BR")}</p>
-            </div>
+              <p>${new Date(item.updatedAt || item.createdAt).toLocaleString("pt-BR")}</p>
+            </button>
           `,
         )
         .join("")
-    : `<div class="result-item"><p>Nenhuma conversa salva ainda.</p></div>`;
+    : `<div class="result-item"><p>Nenhuma conversa salva no banco ainda.</p></div>`;
 
   const projects = ClaudeApp.projects();
   document.querySelector("#projectList").innerHTML = projects.length
@@ -521,17 +599,15 @@ function renderSidePanels() {
 
 function searchLocal(query) {
   const q = query.trim().toLowerCase();
-  const results = ClaudeApp.history()
-    .filter((item) => item.accountId === currentAccountId)
-    .filter((item) => JSON.stringify(item).toLowerCase().includes(q));
+  const results = serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
   document.querySelector("#searchResults").innerHTML = results.length
     ? results
         .map(
           (item) => `
-            <div class="result-item">
+            <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
               <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
-              <p>${ClaudeApp.escapeHtml(item.messages.map((message) => message.content).join(" ").slice(0, 220))}</p>
-            </div>
+              <p>${new Date(item.updatedAt || item.createdAt).toLocaleString("pt-BR")}</p>
+            </button>
           `,
         )
         .join("")
@@ -785,6 +861,7 @@ function startDictation(button) {
 
 function resetChat() {
   saveConversation();
+  activeConversationId = null;
   activeConversation = [];
   document.querySelector("#chatThread").innerHTML = "";
   document.querySelector("#chatThread").classList.add("hidden");
@@ -822,6 +899,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
   localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, found.id);
   closeAuthModal();
   renderAccount();
+  loadServerHistory();
 });
 
 document.querySelector("#clientSignupForm").addEventListener("submit", async (event) => {
@@ -845,6 +923,7 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     event.currentTarget.reset();
     closeAuthModal();
     renderAccount();
+    loadServerHistory();
     return;
   } catch (error) {
     message.textContent = error.fallback ? "API indisponível para criar conta." : error.message;
@@ -854,6 +933,16 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
 
 document.querySelectorAll("[data-panel]").forEach((button) => {
   button.addEventListener("click", () => setPanel(button.dataset.panel));
+});
+
+document.querySelector("#historyList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-conversation-id]");
+  if (item) openConversation(item.dataset.conversationId);
+});
+
+document.querySelector("#searchResults").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-conversation-id]");
+  if (item) openConversation(item.dataset.conversationId);
 });
 
 document.querySelectorAll(".voice-button").forEach((button) => {
@@ -1013,6 +1102,8 @@ document.querySelector("#clientLogout").addEventListener("click", () => {
   saveConversation();
   stopSupportPolling();
   currentAccountId = null;
+  activeConversationId = null;
+  serverHistory = [];
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
   activeConversation = [];
   document.querySelector("#chatThread").innerHTML = "";
@@ -1042,3 +1133,4 @@ if (currentAccountId && !account()) {
 }
 
 renderAccount();
+loadServerHistory();

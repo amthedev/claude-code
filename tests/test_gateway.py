@@ -510,6 +510,52 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
 
+    def test_customer_conversations_are_saved_in_database(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            gift = client.post(
+                "/v1/admin/gift-cards",
+                headers=self.headers,
+                json={"code": "CHAT-HISTORY", "plan": "Plano", "price": 149.9, "model": "sonnet"},
+            ).json()["giftCard"]
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Chat",
+                    "login": "chat@example.com",
+                    "password": "senha-segura",
+                    "giftCard": gift["code"],
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            saved = client.post(
+                "/v1/conversations",
+                headers=customer_headers,
+                json={
+                    "messages": [
+                        {"role": "user", "content": "Boa noite, preciso de um app"},
+                        {"role": "assistant", "content": "Claro, vamos montar."},
+                    ]
+                },
+            )
+            self.assertEqual(saved.status_code, 200)
+            conversation = saved.json()["conversation"]
+            self.assertEqual(conversation["title"], "Boa noite, preciso de um app")
+
+            listed = client.get("/v1/conversations", headers=customer_headers)
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual(listed.json()["data"][0]["id"], conversation["id"])
+
+            loaded = client.get(f"/v1/conversations/{conversation['id']}", headers=customer_headers)
+            self.assertEqual(loaded.status_code, 200)
+            self.assertEqual(loaded.json()["conversation"]["messages"][1]["content"], "Claro, vamos montar.")
+
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(
             "POST",

@@ -15,6 +15,7 @@ from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, require_gateway_auth
 from .config import Settings, get_settings
+from .conversations import ConversationStore
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
 from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient, OpenRouterError
@@ -39,6 +40,7 @@ def create_app(
     app.state.usage = UsageStore()
     app.state.customer_usage = CustomerUsageStore(resolved_settings)
     app.state.account_store = AccountStore(resolved_settings)
+    app.state.conversation_store = ConversationStore(resolved_settings)
     app.state.support_store = SupportStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
@@ -318,6 +320,29 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return JSONResponse({"ticket": app.state.support_store.close_ticket(ticket_id)})
+
+    @app.get("/v1/conversations")
+    async def list_conversations(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return {"data": app.state.conversation_store.list_for_customer(auth.token)}
+
+    @app.get("/v1/conversations/{conversation_id}")
+    async def get_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return {"conversation": app.state.conversation_store.get_for_customer(auth.token, conversation_id)}
+
+    @app.post("/v1/conversations")
+    async def save_conversation(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"conversation": app.state.conversation_store.save_for_customer(auth.token, payload)})
 
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
