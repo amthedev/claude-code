@@ -426,6 +426,7 @@ code {
   grid-template-columns: 64px minmax(0, 1fr);
   background: var(--cloud-bg);
   color: var(--cloud-text);
+  overflow: hidden;
 }
 
 .icon-rail {
@@ -506,8 +507,11 @@ code {
 .cloud-main {
   position: relative;
   min-width: 0;
+  min-height: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .cloud-top {
@@ -577,6 +581,8 @@ code {
 
 #chatPanel {
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-empty {
@@ -732,6 +738,7 @@ code {
 
 .chat-thread {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 28px;
   display: grid;
@@ -746,6 +753,7 @@ code {
   padding: 14px 16px;
   line-height: 1.58;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .message.user {
@@ -974,6 +982,39 @@ button.result-item {
   text-align: left;
   cursor: pointer;
   color: var(--cloud-text);
+}
+
+.history-item {
+  display: grid;
+  gap: 10px;
+  border-color: rgba(236, 229, 218, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.history-item:hover {
+  border-color: rgba(209, 130, 64, 0.48);
+  background: rgba(209, 130, 64, 0.11);
+  transform: translateY(-1px);
+}
+
+.history-title {
+  display: block;
+  color: var(--cloud-text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.history-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cloud-muted);
+  font-size: 12px;
 }
 
 .result-item strong {

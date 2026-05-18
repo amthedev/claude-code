@@ -554,17 +554,31 @@ function createArtifactIfUseful(prompt, answer) {
   ClaudeApp.saveArtifacts(artifacts.slice(0, 30));
 }
 
+function historyDate(item) {
+  return new Date(item.updatedAt || item.createdAt).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function historyItemMarkup(item) {
+  return `
+    <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
+      <span class="history-title">${ClaudeApp.escapeHtml(item.title)}</span>
+      <span class="history-meta">
+        <span>${historyDate(item)}</span>
+        <span>Abrir</span>
+      </span>
+    </button>
+  `;
+}
+
 function renderSidePanels() {
   document.querySelector("#historyList").innerHTML = serverHistory.length
     ? serverHistory
-        .map(
-          (item) => `
-            <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
-              <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
-              <p>${new Date(item.updatedAt || item.createdAt).toLocaleString("pt-BR")}</p>
-            </button>
-          `,
-        )
+        .map((item) => historyItemMarkup(item))
         .join("")
     : `<div class="result-item"><p>Nenhuma conversa salva no banco ainda.</p></div>`;
 
@@ -602,14 +616,7 @@ function searchLocal(query) {
   const results = serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
   document.querySelector("#searchResults").innerHTML = results.length
     ? results
-        .map(
-          (item) => `
-            <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
-              <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
-              <p>${new Date(item.updatedAt || item.createdAt).toLocaleString("pt-BR")}</p>
-            </button>
-          `,
-        )
+        .map((item) => historyItemMarkup(item))
         .join("")
     : `<div class="result-item"><p>Nenhum resultado.</p></div>`;
 }
@@ -859,8 +866,8 @@ function startDictation(button) {
   }
 }
 
-function resetChat() {
-  saveConversation();
+async function resetChat() {
+  await saveConversation();
   activeConversationId = null;
   activeConversation = [];
   document.querySelector("#chatThread").innerHTML = "";
@@ -868,6 +875,7 @@ function resetChat() {
   document.querySelector("#bottomComposer").classList.add("hidden");
   document.querySelector("#emptyState").classList.remove("hidden");
   setPanel("chatPanel");
+  renderSidePanels();
 }
 
 document.querySelector("#clientLoginForm").addEventListener("submit", async (event) => {
@@ -934,6 +942,8 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
 document.querySelectorAll("[data-panel]").forEach((button) => {
   button.addEventListener("click", () => setPanel(button.dataset.panel));
 });
+
+document.querySelector("#railNewChat").addEventListener("click", resetChat);
 
 document.querySelector("#historyList").addEventListener("click", (event) => {
   const item = event.target.closest("[data-conversation-id]");
@@ -1098,8 +1108,8 @@ document.querySelector("#searchInput").addEventListener("input", (event) => {
 
 document.querySelector("#newChat").addEventListener("click", resetChat);
 
-document.querySelector("#clientLogout").addEventListener("click", () => {
-  saveConversation();
+document.querySelector("#clientLogout").addEventListener("click", async () => {
+  await saveConversation();
   stopSupportPolling();
   currentAccountId = null;
   activeConversationId = null;

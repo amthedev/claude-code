@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Claude</title>
-    <link rel="stylesheet" href="/frontier/styles.css" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=chat-layout-history-20260518" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell">
@@ -12,7 +12,7 @@
         <button class="icon-button" title="Menu" data-panel="historyPanel" aria-label="Menu">
           <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
         </button>
-        <button class="icon-button active" title="Novo chat" data-panel="chatPanel" aria-label="Novo chat">
+        <button id="railNewChat" class="icon-button active" title="Novo chat" type="button" aria-label="Novo chat">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
         </button>
         <button class="icon-button" title="Buscar" data-panel="searchPanel" aria-label="Buscar">
@@ -125,7 +125,7 @@
         <section id="searchPanel" class="client-panel side-panel">
           <div class="panel-header">
             <span class="overline">Busca</span>
-            <h2>Pesquisar conversas locais</h2>
+            <h2>Pesquisar conversas</h2>
           </div>
           <input id="searchInput" placeholder="Buscar no historico..." />
           <div id="searchResults" class="result-list"></div>
@@ -134,7 +134,7 @@
         <section id="historyPanel" class="client-panel side-panel">
           <div class="panel-header">
             <span class="overline">Conversas</span>
-            <h2>Historico local</h2>
+            <h2>Histórico</h2>
           </div>
           <button id="newChat" class="primary">Nova conversa</button>
           <div id="historyList" class="result-list"></div>
@@ -271,7 +271,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=db-history-20260518"></script>
-    <script src="/frontier/client.js?v=db-history-20260518"></script>
+    <script src="/frontier/shared.js?v=chat-layout-history-20260518"></script>
+    <script src="/frontier/client.js?v=chat-layout-history-20260518"></script>
   </body>
 </html>
