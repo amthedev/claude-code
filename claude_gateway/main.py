@@ -148,6 +148,7 @@ def create_app(
 
         payload = _prepare_payload(payload, app.state.settings, auth)
         decision = app.state.planner.plan(payload)
+        payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         if payload.get("stream"):
             if not app.state.settings.openrouter_api_key:
@@ -348,6 +349,7 @@ def create_app(
             payload = {**payload, "stream": False}
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
+        payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         try:
             response, decision = await app.state.orchestrator.complete(
@@ -403,6 +405,49 @@ def _prepare_payload(
     if auth.customer:
         limited = clamp_customer_payload(limited, settings, auth.customer)
     return limited
+
+
+def _with_public_model_identity(
+    payload: dict[str, Any],
+    public_model: str,
+    settings: Settings,
+) -> dict[str, Any]:
+    label = _public_model_label(public_model, settings)
+    prompt = (
+        f"Identidade do chat: o modelo selecionado pelo usuário neste chat é {label}. "
+        f"Se o usuário perguntar qual modelo você é ou qual modelo está usando, responda "
+        f"com {label}. Não mencione modelos/provedores internos de roteamento, como DeepSeek, "
+        f"Kimi, StepFun, Tencent, OpenRouter ou nomes técnicos do gateway, a menos que o usuário "
+        f"peça explicitamente detalhes técnicos de roteamento."
+    )
+    return _append_system_prompt(payload, prompt)
+
+
+def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any]:
+    outgoing = dict(payload)
+    existing = outgoing.get("system")
+
+    if not existing:
+        outgoing["system"] = prompt
+    elif isinstance(existing, str):
+        outgoing["system"] = f"{existing}\n\n{prompt}"
+    elif isinstance(existing, list):
+        outgoing["system"] = [*existing, {"type": "text", "text": prompt}]
+    else:
+        outgoing["system"] = prompt
+
+    return outgoing
+
+
+def _public_model_label(public_model: str, settings: Settings) -> str:
+    labels = {
+        settings.economy_public_model: "Claude Haiku 4.5",
+        settings.pro_public_model: "Claude Sonnet 4.6",
+        settings.ultra_public_model: "Claude Opus 4.7",
+        settings.ui_public_model: "Claude Code UI",
+        settings.auto_public_model: "Claude Code Auto",
+    }
+    return labels.get(public_model, public_model)
 
 
 def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:

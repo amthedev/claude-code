@@ -526,6 +526,25 @@ class GatewayTestCase(unittest.TestCase):
             body = b"".join(response.iter_bytes())
         self.assertIn(b"event: message_start", body)
 
+    def test_streaming_payload_uses_public_model_identity(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "qual modelo e voce"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            _ = b"".join(response.iter_bytes())
+
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertTrue(payload["stream"])
+        self.assertIn("Claude Opus 4.7", payload["system"])
+
 
 if __name__ == "__main__":
     unittest.main()
