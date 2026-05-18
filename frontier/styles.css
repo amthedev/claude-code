@@ -796,6 +796,79 @@ code {
   gap: 12px;
 }
 
+.api-guide {
+  display: grid;
+  gap: 14px;
+}
+
+.api-summary,
+.api-step {
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: var(--cloud-panel);
+  padding: 14px;
+}
+
+.api-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.api-summary strong {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.api-kv {
+  display: grid;
+  gap: 8px;
+}
+
+.api-kv code,
+.api-step code {
+  display: block;
+  border-color: var(--cloud-line);
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--cloud-text);
+  overflow-wrap: anywhere;
+}
+
+.api-steps {
+  margin: 0;
+  padding-left: 22px;
+  color: var(--cloud-muted);
+  line-height: 1.55;
+}
+
+.api-step {
+  display: grid;
+  gap: 10px;
+}
+
+.api-step-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.api-step-head button {
+  min-height: 34px;
+  border-color: var(--cloud-line);
+  background: transparent;
+  color: var(--cloud-muted);
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+.api-step pre {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .result-item,
 .usage-card {
   border: 1px solid var(--cloud-line);

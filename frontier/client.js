@@ -39,6 +39,145 @@ function loadApiForm() {
   form.elements.demoMode.checked = Boolean(settings.demoMode);
   document.querySelector("#heroModel").value = settings.model;
   document.querySelector("#bottomModel").value = settings.model;
+  renderApiInstallGuide();
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
+function apiConfigForCurrentUser() {
+  const settings = ClaudeApp.apiSettings();
+  const current = account();
+  const baseUrl = (settings.baseUrl || window.location.origin || "http://127.0.0.1:8787").replace(
+    /\/$/,
+    "",
+  );
+  const token = current?.apiToken || settings.token || "TOKEN_DA_SUA_CONTA";
+  const modelKey = ClaudeApp.normalizeModelKey(current?.modelKey || "sonnet");
+  return {
+    baseUrl,
+    token,
+    model: ClaudeApp.backendModelForPlan(modelKey),
+    publicModel: settings.model,
+    hasAccount: Boolean(current?.apiToken),
+  };
+}
+
+function pythonInstallScript(config) {
+  return `#!/usr/bin/env python3
+from pathlib import Path
+import os
+import platform
+import subprocess
+
+base_url = ${JSON.stringify(config.baseUrl)}
+api_token = ${JSON.stringify(config.token)}
+model = ${JSON.stringify(config.model)}
+
+profile = Path.home() / (".zshrc" if platform.system() == "Darwin" else ".bashrc")
+lines = [
+    f'export ANTHROPIC_BASE_URL="{base_url}"',
+    f'export ANTHROPIC_AUTH_TOKEN="{api_token}"',
+    'export ANTHROPIC_API_KEY=""',
+    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
+    f'export ANTHROPIC_DEFAULT_SONNET_MODEL="{model}"',
+    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
+    f'export CLAUDE_CODE_SUBAGENT_MODEL="{model}"',
+]
+
+existing = profile.read_text() if profile.exists() else ""
+start = "# Claude Code API gateway"
+end = "# /Claude Code API gateway"
+block = start + "\\n" + "\\n".join(lines) + "\\n" + end + "\\n"
+
+if start in existing and end in existing:
+    before = existing.split(start)[0].rstrip()
+    after = existing.split(end, 1)[1].lstrip()
+    profile.write_text(before + "\\n\\n" + block + "\\n" + after)
+else:
+    profile.write_text(existing.rstrip() + "\\n\\n" + block)
+
+print(f"Configurado em {profile}")
+print("Abra um terminal novo ou rode:")
+for line in lines:
+    print(line)
+
+try:
+    result = subprocess.run(
+        ["claude", "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    print("Claude Code encontrado:", result.stdout.strip() or result.stderr.strip())
+except FileNotFoundError:
+    print("Claude Code ainda nao esta instalado ou nao esta no PATH.")
+`;
+}
+
+function renderCodeBlock(title, code, copyLabel = "Copiar") {
+  const escaped = ClaudeApp.escapeHtml(code);
+  return `
+    <article class="api-step">
+      <div class="api-step-head">
+        <strong>${ClaudeApp.escapeHtml(title)}</strong>
+        <button type="button" data-copy-value="${ClaudeApp.escapeHtml(code)}">${copyLabel}</button>
+      </div>
+      <pre><code>${escaped}</code></pre>
+    </article>
+  `;
+}
+
+function renderApiInstallGuide() {
+  const guide = document.querySelector("#apiInstallGuide");
+  if (!guide) return;
+  const config = apiConfigForCurrentUser();
+  const envCommands = [
+    `export ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
+    `export ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
+    'export ANTHROPIC_API_KEY=""',
+    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
+    `export ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
+    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
+    `export CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
+  ].join("\n");
+  const curlTest = `curl ${shellQuote(`${config.baseUrl}/v1/messages`)} \\
+  -H ${shellQuote(`Anthropic-Auth-Token: ${config.token}`)} \\
+  -H ${shellQuote("Content-Type: application/json")} \\
+  -d ${shellQuote(
+    JSON.stringify({
+      model: config.model,
+      max_tokens: 120,
+      messages: [{ role: "user", content: "Responda apenas: API funcionando" }],
+    }),
+  )}`;
+  const pythonScript = pythonInstallScript(config);
+  const loginHint = config.hasAccount
+    ? "Sua API Key ja esta preenchida com o token desta conta."
+    : "Entre em uma conta ativa para a API Key aparecer automaticamente.";
+
+  guide.innerHTML = `
+    <section class="api-summary">
+      <div>
+        <span class="overline">Configuracao pronta</span>
+        <strong>${ClaudeApp.escapeHtml(loginHint)}</strong>
+      </div>
+      <div class="api-kv">
+        <code>URL: ${ClaudeApp.escapeHtml(config.baseUrl)}</code>
+        <code>Modelo: ${ClaudeApp.escapeHtml(config.model)}</code>
+        <code>Token: ${ClaudeApp.escapeHtml(config.token)}</code>
+      </div>
+    </section>
+    <ol class="api-steps">
+      <li>Use no Claude Code ou em ferramentas que deixam trocar a URL da API Anthropic. O Claude web normal nao aceita API externa.</li>
+      <li>Rode os comandos abaixo no terminal antes de abrir o Claude Code.</li>
+      <li>Para deixar automatico no Mac ou Linux, salve e rode o script Python.</li>
+    </ol>
+    ${renderCodeBlock("Comandos de terminal", envCommands)}
+    ${renderCodeBlock("Script Python automatico", pythonScript, "Copiar script")}
+    ${renderCodeBlock("Teste rapido da API", curlTest)}
+  `;
 }
 
 async function authRequest(path, payload) {
@@ -554,6 +693,21 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
   });
   fillModelSelects();
   loadApiForm();
+});
+
+document.querySelector("#apiInstallGuide").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-value]");
+  if (!button) return;
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(button.dataset.copyValue);
+    button.textContent = "Copiado";
+  } catch {
+    button.textContent = "Selecione o texto";
+  }
+  window.setTimeout(() => {
+    button.textContent = original;
+  }, 1600);
 });
 
 document.querySelector("#heroModel").addEventListener("change", (event) => {
