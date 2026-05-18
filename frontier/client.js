@@ -7,7 +7,7 @@ function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
 }
 
-function openAuthModal(tab = "loginPane") {
+function openAuthModal(tab = "clientLoginForm") {
   document.querySelector("#authModal").classList.remove("hidden");
   setAuthTab(tab);
 }
@@ -213,7 +213,7 @@ async function callGateway(prompt, selectedModel) {
 async function submitPrompt(prompt, selectedModel) {
   const current = account();
   if (!current || !current.active) {
-    openAuthModal("loginPane");
+    openAuthModal("clientLoginForm");
     throw new Error("Entre com uma conta paga e ativa para usar o chat.");
   }
 
@@ -649,7 +649,7 @@ document.querySelector("#clientLogout").addEventListener("click", () => {
   renderAccount();
 });
 
-document.querySelector("#authOpen").addEventListener("click", () => openAuthModal("loginPane"));
+document.querySelector("#authOpen").addEventListener("click", () => openAuthModal("clientLoginForm"));
 document.querySelector("#authClose").addEventListener("click", closeAuthModal);
 document.querySelector("#authModal").addEventListener("click", (event) => {
   if (event.target.id === "authModal") closeAuthModal();
