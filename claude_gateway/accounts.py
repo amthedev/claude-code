@@ -16,9 +16,9 @@ from .security import hash_password, verify_password
 
 
 MODEL_LABELS = {
-    "haiku": "Claude Haiku 4.5",
-    "sonnet": "Claude Sonnet 4.6",
-    "opus": "Claude Opus 4.7",
+    "haiku": "Claude Code Economy",
+    "sonnet": "Claude Code Pro",
+    "opus": "Claude Code Ultra",
 }
 
 MODEL_TOKEN_PRICES = {

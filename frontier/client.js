@@ -38,7 +38,6 @@ function loadApiForm() {
   const form = document.querySelector("#apiForm");
   form.elements.baseUrl.value = settings.baseUrl;
   form.elements.token.value = settings.token;
-  form.elements.demoMode.checked = Boolean(settings.demoMode);
   document.querySelector("#heroModel").value = settings.model;
   document.querySelector("#bottomModel").value = settings.model;
   renderApiInstallGuide();
@@ -258,15 +257,15 @@ function renderAccount() {
   const logout = document.querySelector("#clientLogout");
 
   if (!current || !current.active) {
-    document.querySelector("#planBadge").textContent = "plano Gratuito";
+    document.querySelector("#planBadge").textContent = "Entrar para usar";
     document.querySelector("#welcomeTitle").textContent = "Bem-vindo ao Claude";
     document.querySelector("#usageTitle").textContent = "Entre para usar o chat";
     document.querySelector("#usageText").textContent =
-      "Você pode ver a interface, mas o envio exige uma conta paga e ativa.";
+      "O envio exige uma conta ativa.";
     document.querySelector("#usageFill").style.width = "0%";
     document.querySelector("#accountDetails").innerHTML = `
-      <code>Status: prévia</code>
-      <code>Chat: bloqueado até login em plano pago</code>
+      <code>Status: aguardando login</code>
+      <code>Chat: entre com uma conta ativa</code>
       <code>API: Claude Code API</code>
     `;
     document.querySelector("#previewNotice").classList.remove("hidden");
@@ -294,7 +293,7 @@ function renderAccount() {
     <code>Login: ${ClaudeApp.escapeHtml(current.login)}</code>
     <code>Gift card: ${ClaudeApp.escapeHtml(current.giftCardCode || "-")}</code>
     <code>Plano: ${ClaudeApp.escapeHtml(current.plan)}</code>
-    <code>Modelo permitido: ${ClaudeApp.models[current.modelKey]?.label || "Claude Sonnet 4.6"}</code>
+    <code>Modelo permitido: ${ClaudeApp.models[current.modelKey]?.label || "Claude Code Pro"}</code>
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
   `;
   document.querySelector("#previewNotice").classList.add("hidden");
@@ -371,7 +370,7 @@ async function submitPrompt(prompt, selectedModel) {
   const current = account();
   if (!current || !current.active) {
     openAuthModal("clientLoginForm");
-    throw new Error("Entre com uma conta paga e ativa para usar o chat.");
+    throw new Error("Entre com uma conta ativa para usar o chat.");
   }
 
   const estimatedInput = ClaudeApp.estimateTokens(prompt);
@@ -387,13 +386,7 @@ async function submitPrompt(prompt, selectedModel) {
 
   const settings = ClaudeApp.apiSettings();
   let answer = "";
-  try {
-    if (settings.demoMode) throw new Error("Modo demo ativo.");
-    answer = await callGateway(prompt, selectedModel);
-  } catch (error) {
-    if (!settings.demoMode) throw error;
-    answer = ClaudeApp.demoReply(current, prompt, reservedTotal);
-  }
+  answer = await callGateway(prompt, selectedModel);
 
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex((item) => item.id === currentAccountId);
@@ -765,7 +758,6 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
     baseUrl: values.baseUrl || "http://127.0.0.1:8787",
     token: values.token || "local-dev-token",
     model: ClaudeApp.apiSettings().model,
-    demoMode: Boolean(values.demoMode),
   });
   fillModelSelects();
   loadApiForm();

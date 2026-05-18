@@ -13,18 +13,18 @@ const ClaudeApp = (() => {
 
   const models = {
     haiku: {
-      publicModel: "claude-haiku-4.5",
-      label: "Claude Haiku 4.5",
+      publicModel: "claude-code-economy",
+      label: "Claude Code Economy",
       usdPerToken: 0.000000224,
     },
     sonnet: {
-      publicModel: "claude-sonnet-4.6",
-      label: "Claude Sonnet 4.6",
+      publicModel: "claude-code-pro",
+      label: "Claude Code Pro",
       usdPerToken: 0.00000087,
     },
     opus: {
-      publicModel: "claude-opus-4.7",
-      label: "Claude Opus 4.7",
+      publicModel: "claude-code-ultra",
+      label: "Claude Code Ultra",
       usdPerToken: 0.00000087,
     },
   };
@@ -70,6 +70,9 @@ const ClaudeApp = (() => {
 
   function normalizePublicModel(publicModel) {
     const value = String(publicModel || "").toLowerCase();
+    if (value.includes("claude-code-economy")) return models.haiku.publicModel;
+    if (value.includes("claude-code-pro")) return models.sonnet.publicModel;
+    if (value.includes("claude-code-ultra")) return models.opus.publicModel;
     if (value.includes("opus")) return models.opus.publicModel;
     if (value.includes("haiku")) return models.haiku.publicModel;
     if (value.includes("economy")) return models.haiku.publicModel;
@@ -99,10 +102,10 @@ const ClaudeApp = (() => {
       baseUrl: sameOriginApi,
       token: "local-dev-token",
       model: models.sonnet.publicModel,
-      demoMode: true,
     });
     return {
       ...settings,
+      demoMode: false,
       model: normalizePublicModel(settings.model),
     };
   }
@@ -206,7 +209,7 @@ const ClaudeApp = (() => {
     return recalculateGiftCard({
       id: `gift_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       code: normalizeGiftCode(values.code) || generateGiftCode(),
-      plan: values.plan.trim() || models[modelKey]?.label || "Claude Sonnet 4.6",
+      plan: values.plan.trim() || models[modelKey]?.label || "Claude Code Pro",
       price: Number(values.price) || 0,
       modelKey,
       manualLimit: Number(values.manualLimit) || 0,
@@ -227,7 +230,7 @@ const ClaudeApp = (() => {
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),
-      plan: values.plan.trim() || "Claude Sonnet 4.6",
+      plan: values.plan.trim() || "Claude Code Pro",
       price: Number(values.price) || 0,
       modelKey: normalizeModelKey(values.model),
       manualLimit: Number(values.manualLimit) || 0,
@@ -262,20 +265,6 @@ const ClaudeApp = (() => {
       .join("");
   }
 
-  function demoReply(account, prompt, usedTokens) {
-    return [
-      "Resposta em modo demo do Claude.",
-      "",
-      `Plano: ${account.plan}`,
-      `Modelo: ${models[normalizeModelKey(account.modelKey)]?.label || "Claude Sonnet 4.6"}`,
-      `Tokens reservados nesta mensagem: ${integer.format(usedTokens)}`,
-      "",
-      "Para usar a IA real, abra API, configure a Claude Code API local e desative ou mantenha o fallback demo.",
-      "",
-      `Pedido recebido: ${prompt}`,
-    ].join("\n");
-  }
-
   return {
     ADMIN_SESSION_KEY,
     CLIENT_SESSION_KEY,
@@ -301,7 +290,6 @@ const ClaudeApp = (() => {
     normalizePublicModel,
     normalizeGiftCode,
     backendModelForPlan,
-    demoReply,
     models,
     brl,
     usd,

@@ -364,7 +364,7 @@ function seedDemo() {
   cards.unshift(
     uniqueGiftCard({
       code: "CLAUDE-DEMO-PRO",
-      plan: "Claude Sonnet 4.6",
+      plan: "Claude Code Pro",
       price: 149.9,
       model: "sonnet",
       manualLimit: "",
@@ -372,7 +372,7 @@ function seedDemo() {
     }),
     uniqueGiftCard({
       code: "CLAUDE-DEMO-ULTRA",
-      plan: "Claude Opus 4.7",
+      plan: "Claude Code Ultra",
       price: 299.9,
       model: "opus",
       manualLimit: "45000",
@@ -475,7 +475,7 @@ giftCardForm.addEventListener("submit", async (event) => {
   }
 
   event.currentTarget.reset();
-  event.currentTarget.elements.plan.value = "Claude Sonnet 4.6";
+  event.currentTarget.elements.plan.value = "Claude Code Pro";
   event.currentTarget.elements.price.value = "149.90";
   event.currentTarget.elements.model.value = "sonnet";
   event.currentTarget.elements.active.value = "true";
