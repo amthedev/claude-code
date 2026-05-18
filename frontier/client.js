@@ -314,7 +314,7 @@ function setPanel(panelId) {
 }
 
 function addMessage(role, text) {
-  activeConversation.push({ role, content: text });
+  const index = activeConversation.push({ role, content: text }) - 1;
   const thread = document.querySelector("#chatThread");
   const node = document.createElement("div");
   node.className = `message ${role}`;
@@ -324,6 +324,14 @@ function addMessage(role, text) {
   document.querySelector("#chatThread").classList.remove("hidden");
   document.querySelector("#bottomComposer").classList.remove("hidden");
   node.scrollIntoView({ block: "end" });
+  return { index, node };
+}
+
+function updateMessage(message, text) {
+  const nextText = text || "Pensando...";
+  activeConversation[message.index].content = nextText;
+  message.node.textContent = nextText;
+  message.node.scrollIntoView({ block: "end" });
 }
 
 function saveConversation() {
@@ -340,7 +348,33 @@ function saveConversation() {
   ClaudeApp.saveHistory(history.slice(0, 40));
 }
 
-async function callGateway(prompt, selectedModel) {
+function parseGatewayStreamChunk(buffer, onText) {
+  const events = buffer.split("\n\n");
+  const remainder = events.pop() || "";
+
+  events.forEach((eventText) => {
+    const dataLines = eventText
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => line.slice(6));
+    if (!dataLines.length) return;
+
+    const raw = dataLines.join("\n");
+    if (raw === "[DONE]") return;
+
+    try {
+      const event = JSON.parse(raw);
+      const delta = event.delta || {};
+      if (delta.type === "text_delta" && delta.text) onText(delta.text);
+    } catch {
+      // Ignore malformed stream events and keep reading the next chunk.
+    }
+  });
+
+  return remainder;
+}
+
+async function callGateway(selectedModel, messages, onText) {
   const settings = ClaudeApp.apiSettings();
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
@@ -351,9 +385,8 @@ async function callGateway(prompt, selectedModel) {
     body: JSON.stringify({
       model: selectedModel,
       max_tokens: 1200,
-      messages: activeConversation
-        .filter((item) => item.role === "user" || item.role === "assistant")
-        .map((item) => ({ role: item.role, content: item.content })),
+      stream: true,
+      messages,
     }),
   });
 
@@ -361,8 +394,27 @@ async function callGateway(prompt, selectedModel) {
     throw new Error(`API respondeu ${response.status}`);
   }
 
-  const data = await response.json();
-  return (data.content || []).map((part) => part.text || "").join("\n").trim() || "Sem resposta.";
+  if (!response.body) {
+    const data = await response.json();
+    return (data.content || []).map((part) => part.text || "").join("\n").trim() || "Sem resposta.";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = parseGatewayStreamChunk(buffer, (text) => {
+      answer += text;
+      onText(answer.trimStart());
+    });
+  }
+
+  return answer.trim() || "Sem resposta.";
 }
 
 async function submitPrompt(prompt, selectedModel) {
@@ -382,10 +434,17 @@ async function submitPrompt(prompt, selectedModel) {
   }
 
   addMessage("user", prompt);
+  const outgoingMessages = activeConversation
+    .filter((item) => item.role === "user" || item.role === "assistant")
+    .map((item) => ({ role: item.role, content: item.content }));
+  const assistantMessage = addMessage("assistant", "Pensando...");
 
   const settings = ClaudeApp.apiSettings();
   let answer = "";
-  answer = await callGateway(prompt, selectedModel);
+  answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
+    updateMessage(assistantMessage, partialAnswer);
+  });
+  updateMessage(assistantMessage, answer);
 
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex((item) => item.id === currentAccountId);
@@ -394,7 +453,6 @@ async function submitPrompt(prompt, selectedModel) {
     ClaudeApp.saveAccounts(accounts);
   }
 
-  addMessage("assistant", answer);
   createArtifactIfUseful(prompt, answer);
   renderAccount();
   renderSidePanels();
