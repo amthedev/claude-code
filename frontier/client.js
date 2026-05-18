@@ -34,6 +34,8 @@ function fillModelSelects() {
   const settings = ClaudeApp.apiSettings();
   document.querySelector("#heroModel").innerHTML = ClaudeApp.modelOptions(settings.model);
   document.querySelector("#bottomModel").innerHTML = ClaudeApp.modelOptions(settings.model);
+  const apiModel = document.querySelector("#apiModel");
+  if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptions(settings.model);
 }
 
 function loadApiForm() {
@@ -41,6 +43,7 @@ function loadApiForm() {
   const form = document.querySelector("#apiForm");
   form.elements.baseUrl.value = settings.baseUrl;
   form.elements.token.value = settings.token;
+  form.elements.model.value = settings.model;
   document.querySelector("#heroModel").value = settings.model;
   document.querySelector("#bottomModel").value = settings.model;
   renderApiInstallGuide();
@@ -162,14 +165,15 @@ PY`;
 }
 
 function renderCodeBlock(title, code, copyLabel = "Copiar") {
-  const escaped = ClaudeApp.escapeHtml(code);
+  const escapedTitle = ClaudeApp.escapeHtml(title);
+  const escapedCode = ClaudeApp.escapeHtml(code);
   return `
     <article class="api-step">
       <div class="api-step-head">
-        <strong>${ClaudeApp.escapeHtml(title)}</strong>
-        <button type="button" data-copy-value="${ClaudeApp.escapeHtml(code)}">${copyLabel}</button>
+        <strong>${escapedTitle}</strong>
+        <button type="button" data-copy-value="${escapedCode}">${copyLabel}</button>
       </div>
-      <pre><code>${escaped}</code></pre>
+      <textarea class="api-command-box" readonly spellcheck="false" aria-label="${escapedTitle}">${escapedCode}</textarea>
     </article>
   `;
 }
@@ -1088,7 +1092,7 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
   ClaudeApp.saveApiSettings({
     baseUrl: values.baseUrl || "http://127.0.0.1:8787",
     token: values.token || "local-dev-token",
-    model: ClaudeApp.apiSettings().model,
+    model: values.model || ClaudeApp.apiSettings().model,
   });
   fillModelSelects();
   loadApiForm();
@@ -1107,6 +1111,11 @@ document.querySelector("#apiInstallGuide").addEventListener("click", async (even
   window.setTimeout(() => {
     button.textContent = original;
   }, 1600);
+});
+
+document.querySelector("#apiInstallGuide").addEventListener("focusin", (event) => {
+  if (!event.target.matches(".api-command-box")) return;
+  event.target.select();
 });
 
 document.querySelector("#heroModel").addEventListener("change", (event) => {

@@ -877,6 +877,24 @@ code {
   white-space: pre-wrap;
 }
 
+.api-command-box {
+  width: 100%;
+  min-height: 132px;
+  max-height: 320px;
+  resize: vertical;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--cloud-text);
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .support-panel,
 .support-admin-chat {
   min-height: 0;
