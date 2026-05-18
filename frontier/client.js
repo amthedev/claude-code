@@ -776,6 +776,12 @@ function triggerAttachmentPicker() {
   input.click();
 }
 
+function submitComposerOnEnter(event) {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  event.preventDefault();
+  event.currentTarget.closest("form")?.requestSubmit();
+}
+
 function speechRecognitionConstructor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
@@ -987,6 +993,10 @@ document.querySelectorAll(".quick-actions button").forEach((button) => {
     textarea.value = button.dataset.prompt;
     textarea.focus();
   });
+});
+
+document.querySelectorAll("#heroComposer textarea, #bottomComposer textarea").forEach((textarea) => {
+  textarea.addEventListener("keydown", submitComposerOnEnter);
 });
 
 document.querySelector("#heroComposer").addEventListener("submit", async (event) => {
