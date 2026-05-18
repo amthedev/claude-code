@@ -105,6 +105,7 @@ launcher_path = claude_dir / "claude_api_prompt.py"
 settings_path = claude_dir / "settings.json"
 
 launcher_code = f'''#!/usr/bin/env python3
+import json
 import os
 import shutil
 import subprocess
@@ -147,12 +148,20 @@ def main():
     env = os.environ.copy()
     if wants_gateway():
         env.update(GATEWAY_KEYS)
+        settings_arg = json.dumps({{"env": GATEWAY_KEYS}})
         print("OK, usando a API configurada.")
+        return subprocess.call([
+            claude_bin,
+            "--settings",
+            settings_arg,
+            "--setting-sources",
+            "local",
+            *sys.argv[1:],
+        ], env=env)
     else:
         env = clean_gateway_env(env)
         print("OK, abrindo Claude Code sem esta API.")
-
-    return subprocess.call([claude_bin, *sys.argv[1:]], env=env)
+        return subprocess.call([claude_bin, *sys.argv[1:]], env=env)
 
 if __name__ == "__main__":
     raise SystemExit(main())
@@ -211,16 +220,18 @@ PY`;
 }
 
 function terminalCommand(config) {
-  const env = [
-    `ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
-    `ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
-    `ANTHROPIC_API_KEY=${shellQuote(config.token)}`,
-    `ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-code-economy'`,
-    `ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
-    `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-code-ultra'`,
-    `CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
-  ];
-  return `${env.join(" ")} claude`;
+  const settings = {
+    env: {
+      ANTHROPIC_BASE_URL: config.baseUrl,
+      ANTHROPIC_AUTH_TOKEN: config.token,
+      ANTHROPIC_API_KEY: config.token,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-code-economy",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: config.model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-ultra",
+      CLAUDE_CODE_SUBAGENT_MODEL: config.model,
+    },
+  };
+  return `claude --settings ${shellQuote(JSON.stringify(settings))} --setting-sources local`;
 }
 
 function claudeSettingsCommand(config) {
