@@ -66,6 +66,26 @@ With the default model set, the main paths stay well under that budget:
 
 External model ids such as `anthropic/claude-opus-4.7` are not used directly by default. They are routed back into the budget-safe internal model set unless `ALLOW_DIRECT_EXTERNAL_MODELS=true` is explicitly enabled.
 
+## Optional ChatGPT Helper
+
+You can add an OpenAI/ChatGPT key so the internal agent pipeline gets one extra review pass before the final answer:
+
+```env
+OPENAI_API_KEY=sk-proj-...
+```
+
+By default this helper runs only for admin/API-owner calls, not customer tokens, so it does not silently increase customer delivery cost. To allow it for customer chat too:
+
+```env
+OPENAI_HELPER_FOR_CUSTOMERS=true
+```
+
+The default helper model is `gpt-5-mini`. You can switch it when needed:
+
+```env
+OPENAI_HELPER_MODEL=gpt-5.2
+```
+
 ## Paid Customer Tokens
 
 For selling API access, use customer-scoped tokens instead of sharing the admin token:

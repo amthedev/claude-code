@@ -11,6 +11,7 @@ from .anthropic import (
     public_response_copy,
     with_system_prompt,
 )
+from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient
 from .routing import RouteDecision, RoutePlanner
 from .usage import UsageStore
@@ -39,6 +40,11 @@ FINAL_PROMPT = """You are the final orchestrator.
 Use the internal plan, draft, review, and test notes to produce one polished final answer.
 Do not mention hidden agent names unless directly useful. Do not invent completed local file edits."""
 
+OPENAI_HELPER_PROMPT = """You are a ChatGPT/OpenAI helper inside a cost-controlled Claude Code API.
+Review the internal plan, draft, challenger answer, and review notes.
+Return only concise, actionable improvements that would make the final answer more correct, useful, creative, or robust.
+If there is nothing important to improve, return "No important changes." """
+
 
 class MessageOrchestrator:
     def __init__(
@@ -46,16 +52,19 @@ class MessageOrchestrator:
         client: OpenRouterClient,
         planner: RoutePlanner,
         usage: UsageStore,
+        openai_helper: OpenAIHelperClient | None = None,
     ) -> None:
         self.client = client
         self.planner = planner
         self.usage = usage
+        self.openai_helper = openai_helper
 
     async def complete(
         self,
         payload: dict[str, Any],
         *,
         force_orchestration: bool = False,
+        allow_openai_helper: bool = True,
     ) -> tuple[dict[str, Any], RouteDecision]:
         decision = self.planner.plan(payload, force_orchestration=force_orchestration)
         self.usage.record_request(decision)
@@ -66,7 +75,11 @@ class MessageOrchestrator:
             self.usage.record_response(decision, response)
             return response, decision
 
-        response = await self._run_agent_pipeline(payload, decision)
+        response = await self._run_agent_pipeline(
+            payload,
+            decision,
+            allow_openai_helper=allow_openai_helper,
+        )
         self.usage.record_response(decision, response)
         return response, decision
 
@@ -74,6 +87,8 @@ class MessageOrchestrator:
         self,
         payload: dict[str, Any],
         decision: RouteDecision,
+        *,
+        allow_openai_helper: bool,
     ) -> dict[str, Any]:
         agents = decision.agents
         plan_task = self._agent_call(
@@ -134,6 +149,15 @@ class MessageOrchestrator:
             max_tokens=1600,
         )
         review_text = extract_response_text(review_response)
+        openai_helper_text = await self._openai_helper_review(
+            payload=payload,
+            plan=plan_text,
+            tests=tests_text,
+            draft=draft_text,
+            challenger=challenger_text,
+            review=review_text,
+            allow_openai_helper=allow_openai_helper,
+        )
 
         final_context = self._internal_context(
             plan=plan_text,
@@ -141,6 +165,7 @@ class MessageOrchestrator:
             draft=draft_text,
             challenger=challenger_text,
             review=review_text,
+            openai_helper=openai_helper_text,
         )
         final_payload = append_user_context(with_system_prompt(payload, FINAL_PROMPT), final_context)
         final_model = agents["ultra_fallback"] if decision.mode == "ultra" else agents["coding"]
@@ -183,6 +208,37 @@ class MessageOrchestrator:
         limited["stream"] = False
         return await self.client.complete_messages(limited, model)
 
+    async def _openai_helper_review(
+        self,
+        *,
+        payload: dict[str, Any],
+        plan: str,
+        tests: str,
+        draft: str,
+        challenger: str,
+        review: str,
+        allow_openai_helper: bool,
+    ) -> str:
+        if not allow_openai_helper or not self.openai_helper:
+            return ""
+
+        helper_context = self._internal_context(
+            user_request=self._payload_preview(payload),
+            plan=plan,
+            tests=tests,
+            draft=draft,
+            challenger=challenger,
+            review=review,
+        )
+        try:
+            return await self.openai_helper.generate_text(
+                instructions=OPENAI_HELPER_PROMPT,
+                input_text=helper_context,
+                max_output_tokens=900,
+            )
+        except Exception:
+            return ""
+
     def _max_tokens(self, payload: dict[str, Any], *, fallback: int) -> int:
         try:
             requested = int(payload.get("max_tokens") or fallback)
@@ -196,3 +252,7 @@ class MessageOrchestrator:
             if value:
                 rendered.append(f"\n[{title.upper()}]\n{value}")
         return "\n".join(rendered)
+
+    def _payload_preview(self, payload: dict[str, Any]) -> str:
+        messages = payload.get("messages")
+        return str(messages)[:12000]

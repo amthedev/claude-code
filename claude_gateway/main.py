@@ -14,6 +14,7 @@ from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, require_gateway_auth
 from .config import Settings, get_settings
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
+from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .routing import RoutePlanner, extract_prompt_text, model_profiles
@@ -25,6 +26,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
 def create_app(
     settings: Settings | None = None,
     client_factory: Callable[[Settings], OpenRouterClient] | None = None,
+    openai_helper_factory: Callable[[Settings], OpenAIHelperClient] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     app = FastAPI(title="Claude Code", version="0.1.0")
@@ -35,10 +37,13 @@ def create_app(
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
     app.state.openrouter = factory(resolved_settings)
+    helper_factory = openai_helper_factory or OpenAIHelperClient
+    app.state.openai_helper = helper_factory(resolved_settings) if resolved_settings.openai_api_key else None
     app.state.orchestrator = MessageOrchestrator(
         app.state.openrouter,
         app.state.planner,
         app.state.usage,
+        app.state.openai_helper,
     )
     _mount_frontend(app)
 
@@ -47,6 +52,7 @@ def create_app(
         return {
             "status": "ok",
             "openrouter_configured": bool(app.state.settings.openrouter_api_key),
+            "openai_helper_configured": bool(app.state.settings.openai_api_key),
             "orchestration_enabled": app.state.settings.enable_agent_orchestration,
             "cost_target": {
                 "baseline_model": CLAUDE_BASELINE_MODEL,
@@ -105,6 +111,11 @@ def create_app(
             "minimum_savings_vs_claude": 1 - app.state.settings.max_cost_ratio_vs_claude,
             "allow_premium_fallback": app.state.settings.allow_premium_fallback,
             "allow_direct_external_models": app.state.settings.allow_direct_external_models,
+            "openai_helper": {
+                "configured": bool(app.state.settings.openai_api_key),
+                "model": app.state.settings.openai_helper_model,
+                "for_customers": app.state.settings.openai_helper_for_customers,
+            },
             "max_request_output_tokens": app.state.settings.max_request_output_tokens,
             "models": {
                 role: cost_policy.estimate(model).to_dict() for role, model in models.items()
@@ -131,7 +142,10 @@ def create_app(
             )
 
         try:
-            response, _ = await app.state.orchestrator.complete(payload)
+            response, _ = await app.state.orchestrator.complete(
+                payload,
+                allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
+            )
         except OpenRouterError as exc:
             app.state.customer_usage.rollback(reservation)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
@@ -237,6 +251,7 @@ def create_app(
             response, decision = await app.state.orchestrator.complete(
                 payload,
                 force_orchestration=True,
+                allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
             )
         except OpenRouterError as exc:
             app.state.customer_usage.rollback(reservation)
@@ -305,6 +320,14 @@ def _reserve_customer_budget(
     if not auth.customer:
         return None
     return app.state.customer_usage.reserve(auth.customer, payload, decision)
+
+
+def _allow_openai_helper(auth: AuthContext, settings: Settings) -> bool:
+    if not settings.openai_api_key:
+        return False
+    if auth.customer and not settings.openai_helper_for_customers:
+        return False
+    return True
 
 
 def _require_admin(request: Request, settings: Settings) -> AuthContext:

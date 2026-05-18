@@ -45,6 +45,9 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 5. Reserva diaria por custo.
    O backend calcula um custo estimado conservador por request, aplica `COST_RESERVE_MULTIPLIER=2.0` e bloqueia quando bater o orcamento diario do cliente.
 
+6. Helper opcional da OpenAI.
+   Se `OPENAI_API_KEY` estiver configurado, a pipeline admin usa a Responses API da OpenAI como revisor extra antes da resposta final. Por padrao ele nao roda para clientes, para nao aumentar custo sem querer.
+
 ## Como vender uma conta API sem perder dinheiro
 
 Voce pode criar clientes fixos em `CUSTOMER_ACCOUNTS` ou deixar o Admin gerar gift cards. Quando o cliente resgata um gift card, o backend gera um token `cus_...` automaticamente.
@@ -90,6 +93,7 @@ Variaveis obrigatorias no painel da Square Cloud:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
+OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=um-token-admin-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
 OPENROUTER_APP_NAME=Claude Code
@@ -99,6 +103,8 @@ ALLOW_DIRECT_EXTERNAL_MODELS=false
 ACCOUNT_DATA_FILE=data/accounts.json
 CUSTOMER_ACCOUNTS=...
 ```
+
+`OPENAI_API_KEY` e opcional. Use quando quiser que o ChatGPT ajude na qualidade das respostas admin. Para liberar tambem em contas de clientes, adicione `OPENAI_HELPER_FOR_CUSTOMERS=true`, sabendo que isso aumenta custo.
 
 Depois do deploy:
 

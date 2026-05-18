@@ -34,6 +34,28 @@ class FakeOpenRouterClient:
         yield b"data: {}\n\n"
 
 
+class FakeOpenAIHelper:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate_text(
+        self,
+        *,
+        instructions: str,
+        input_text: str,
+        max_output_tokens: int | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "instructions": instructions,
+                "input_text": input_text,
+                "max_output_tokens": max_output_tokens,
+            }
+        )
+        return "Use stricter validation and explain edge cases."
+
+
 def make_settings() -> Settings:
     return Settings(
         gateway_api_keys=("test-token",),
@@ -105,6 +127,30 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["model"], "claude-code-pro")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
+
+    def test_openai_helper_can_review_agent_pipeline_for_admin(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            openai_helper_factory=FakeOpenAIHelper,
+        )
+        client = TestClient(app)
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 512,
+                "messages": [{"role": "user", "content": "Corrija esse bug difícil"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.openai_helper.calls), 1)
+        final_payload = app.state.openrouter.calls[-1][1]
+        self.assertIn("OPENAI_HELPER", str(final_payload))
+        self.assertIn("Use stricter validation", str(final_payload))
 
     def test_ultra_pipeline_uses_extra_budget_safe_candidate(self) -> None:
         response = self.client.post(
