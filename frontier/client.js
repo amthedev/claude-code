@@ -59,7 +59,7 @@ function apiConfigForCurrentUser() {
     baseUrl,
     token,
     model: settings.model,
-    plan: current?.plan || "Plano ativo",
+    plan: ClaudeApp.planDisplayName(current?.plan),
     hasAccount: Boolean(current?.apiToken),
   };
 }
@@ -278,7 +278,7 @@ function renderAccount() {
 
   const preferredName = (current.displayName || current.name || "Você").trim();
   syncCustomerApiToken(current);
-  document.querySelector("#planBadge").textContent = current.plan;
+  document.querySelector("#planBadge").textContent = "Conta ativa";
   document.querySelector("#welcomeTitle").textContent = `${preferredName} está de volta!`;
   document.querySelector("#usageTitle").textContent =
     `${ClaudeApp.integer.format(current.usedToday)} de ${ClaudeApp.integer.format(current.dailyLimit)} tokens`;
@@ -291,8 +291,8 @@ function renderAccount() {
     <code>Nome no chat: ${ClaudeApp.escapeHtml(preferredName)}</code>
     <code>Login: ${ClaudeApp.escapeHtml(current.login)}</code>
     <code>Gift card: ${ClaudeApp.escapeHtml(current.giftCardCode || "-")}</code>
-    <code>Plano: ${ClaudeApp.escapeHtml(current.plan)}</code>
-    <code>Modelos: escolha livre no seletor do chat</code>
+    <code>Plano: ${ClaudeApp.escapeHtml(ClaudeApp.planDisplayName(current.plan))}</code>
+    <code>Modelo: escolha no seletor do chat</code>
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
   `;
   document.querySelector("#previewNotice").classList.add("hidden");

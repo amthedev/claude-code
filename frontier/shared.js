@@ -15,17 +15,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-economy",
-      label: "Claude Code Economy",
+      label: "Claude Haiku 4.5",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude Code Pro",
+      label: "Claude Sonnet 4.6",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-ultra",
-      label: "Claude Code Ultra",
+      label: "Claude Opus 4.7",
       usdPerToken: 0.00000087,
     },
   };
@@ -251,6 +251,13 @@ const ClaudeApp = (() => {
       .join("");
   }
 
+  function planDisplayName(plan) {
+    const value = String(plan || "").trim();
+    if (!value) return "Plano ativo";
+    if (/claude\s+(haiku|sonnet|opus)|claude\s+code/i.test(value)) return "Plano ativo";
+    return value;
+  }
+
   return {
     ADMIN_SESSION_KEY,
     CLIENT_SESSION_KEY,
@@ -272,6 +279,7 @@ const ClaudeApp = (() => {
     estimateTokens,
     escapeHtml,
     modelOptions,
+    planDisplayName,
     normalizeModelKey,
     normalizePublicModel,
     normalizeGiftCode,

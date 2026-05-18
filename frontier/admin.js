@@ -201,7 +201,7 @@ function renderGiftCards() {
             }
           </td>
           <td>
-            ${ClaudeApp.escapeHtml(card.plan)}
+            ${ClaudeApp.escapeHtml(ClaudeApp.planDisplayName(card.plan))}
             <div class="muted">Modelos liberados no app</div>
             <div class="muted">${ClaudeApp.brl.format(card.price)}/mês</div>
           </td>
@@ -255,7 +255,7 @@ function renderAccounts() {
             <div class="muted">API: ${ClaudeApp.escapeHtml(account.apiToken)}</div>
           </td>
           <td>
-            ${ClaudeApp.escapeHtml(account.plan)}
+            ${ClaudeApp.escapeHtml(ClaudeApp.planDisplayName(account.plan))}
             <div class="muted">Modelos liberados no app</div>
             <div class="muted">${ClaudeApp.brl.format(account.price)}/mês</div>
           </td>
