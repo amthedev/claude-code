@@ -922,6 +922,51 @@ code {
   border-color: var(--accent-dark);
 }
 
+.copy-icon-button {
+  width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: var(--cloud-panel-2);
+  color: var(--cloud-muted);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.copy-icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.copy-icon-button:hover {
+  border-color: var(--accent);
+  background: rgba(193, 95, 60, 0.15);
+  color: var(--accent);
+}
+
+.copy-icon-button.copy-primary {
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  color: white;
+}
+
+.copy-icon-button.copy-primary:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+.copy-icon-button.copy-primary svg {
+  stroke: white;
+}
+
 .api-command-box-primary {
   min-height: 96px;
   font-size: 13px;

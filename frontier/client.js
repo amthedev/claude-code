@@ -264,14 +264,16 @@ print("Feche e abra o Claude Code ou reinicie a extensao para carregar a configu
 PY`;
 }
 
-function renderCodeBlock(title, code, copyLabel = "Copiar") {
+function renderCodeBlock(title, code) {
   const escapedTitle = ClaudeApp.escapeHtml(title);
   const escapedCode = ClaudeApp.escapeHtml(code);
   return `
     <article class="api-step">
       <div class="api-step-head">
         <strong>${escapedTitle}</strong>
-        <button type="button" data-copy-value="${escapedCode}">${copyLabel}</button>
+        <button type="button" class="copy-icon-button" data-copy-value="${escapedCode}" aria-label="Copiar código">
+          <svg viewBox="0 0 24 24"><path d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.5L16.5 4H8Z" /><path d="M16 4v4h4M4 12v6a2 2 0 0 0 2 2h6" /></svg>
+        </button>
       </div>
       <textarea class="api-command-box" readonly spellcheck="false" aria-label="${escapedTitle}">${escapedCode}</textarea>
     </article>
@@ -287,7 +289,9 @@ function renderPrimaryCommand(code) {
           <span class="overline">Terminal</span>
           <strong>Copie e cole para usar agora</strong>
         </div>
-        <button type="button" data-copy-value="${escapedCode}">Copiar comando</button>
+        <button type="button" class="copy-icon-button copy-primary" data-copy-value="${escapedCode}" aria-label="Copiar comando">
+          <svg viewBox="0 0 24 24"><path d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.5L16.5 4H8Z" /><path d="M16 4v4h4M4 12v6a2 2 0 0 0 2 2h6" /></svg>
+        </button>
       </div>
       <textarea class="api-command-box api-command-box-primary" readonly spellcheck="false" aria-label="Comando para terminal">${escapedCode}</textarea>
     </section>
@@ -334,9 +338,9 @@ function renderApiInstallGuide() {
       <li>No terminal, depois da instalacao, ao rodar <code>claude</code> ele pergunta antes de usar a API.</li>
       <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
     </ol>
-    ${renderCodeBlock("Instalador Python com pergunta", installCommand, "Copiar instalador")}
-    ${renderCodeBlock("Somente extensao: salvar settings.json", settingsCommand, "Copiar extensao")}
-    ${renderCodeBlock("Testar conexao", curlTest)}
+    ${renderCodeBlock("Instalador Python com pergunta", installCommand)}
+    ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand)}
+    ${renderCodeBlock("Testar conexão", curlTest)}
   `;
 }
 
@@ -1218,15 +1222,17 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
 document.querySelector("#apiInstallGuide").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy-value]");
   if (!button) return;
-  const original = button.textContent;
+  const originalSvg = button.innerHTML;
   try {
     await navigator.clipboard.writeText(button.dataset.copyValue);
-    button.textContent = "Copiado";
+    button.innerHTML = `<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" /></svg>`;
+    button.classList.add("copied");
   } catch {
-    button.textContent = "Selecione o texto";
+    button.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
   }
   window.setTimeout(() => {
-    button.textContent = original;
+    button.innerHTML = originalSvg;
+    button.classList.remove("copied");
   }, 1600);
 });
 
