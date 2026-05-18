@@ -4,6 +4,7 @@ let activeRecognition = null;
 let activeVoiceButton = null;
 let activeSupportTicket = null;
 let supportPollTimer = null;
+let pendingAttachments = [];
 
 function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
@@ -417,7 +418,7 @@ async function callGateway(selectedModel, messages, onText) {
   return answer.trim() || "Sem resposta.";
 }
 
-async function submitPrompt(prompt, selectedModel) {
+async function submitPrompt(prompt, selectedModel, attachments = []) {
   const current = account();
   if (!current || !current.active) {
     openAuthModal("clientLoginForm");
@@ -433,10 +434,12 @@ async function submitPrompt(prompt, selectedModel) {
     throw new Error(`Limite diário insuficiente. Restam ${ClaudeApp.integer.format(Math.max(0, remaining))} tokens.`);
   }
 
-  addMessage("user", prompt);
+  const visiblePrompt = attachments.length ? `${prompt}\n\nAnexos: ${attachmentLabel(attachments)}` : prompt;
+  addMessage("user", visiblePrompt);
   const outgoingMessages = activeConversation
     .filter((item) => item.role === "user" || item.role === "assistant")
     .map((item) => ({ role: item.role, content: item.content }));
+  outgoingMessages[outgoingMessages.length - 1].content = buildMessageContent(prompt, attachments);
   const assistantMessage = addMessage("assistant", "Pensando...");
 
   const settings = ClaudeApp.apiSettings();
@@ -599,6 +602,95 @@ function showChatNotice(message) {
   window.setTimeout(() => {
     if (error.textContent === message) error.textContent = "";
   }, 2600);
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(new Error(`Não consegui ler ${file.name}.`)));
+    reader.readAsDataURL(file);
+  });
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(String(reader.result || "")));
+    reader.addEventListener("error", () => reject(new Error(`Não consegui ler ${file.name}.`)));
+    reader.readAsText(file);
+  });
+}
+
+async function readAttachment(file) {
+  if (file.size > 4 * 1024 * 1024) {
+    throw new Error(`${file.name} é maior que 4 MB.`);
+  }
+
+  if (file.type.startsWith("image/")) {
+    const dataUrl = await fileToDataUrl(file);
+    const data = dataUrl.split(",", 2)[1] || "";
+    return {
+      name: file.name,
+      kind: "image",
+      mediaType: file.type || "image/png",
+      data,
+    };
+  }
+
+  const text = await fileToText(file);
+  return {
+    name: file.name,
+    kind: "text",
+    text: text.slice(0, 20000),
+    truncated: text.length > 20000,
+  };
+}
+
+function attachmentLabel(attachments = pendingAttachments) {
+  if (!attachments.length) return "";
+  return attachments.map((file) => file.name).join(", ");
+}
+
+function buildMessageContent(prompt, attachments) {
+  if (!attachments.length) return prompt;
+
+  const content = [{ type: "text", text: prompt }];
+  attachments.forEach((attachment) => {
+    if (attachment.kind === "image") {
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: attachment.mediaType,
+          data: attachment.data,
+        },
+      });
+      return;
+    }
+
+    content.push({
+      type: "text",
+      text: [
+        `Arquivo anexado: ${attachment.name}`,
+        attachment.truncated ? "Conteúdo truncado nos primeiros 20000 caracteres." : "",
+        "```",
+        attachment.text,
+        "```",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+  });
+
+  return content;
+}
+
+function triggerAttachmentPicker() {
+  const input = document.querySelector("#attachmentInput");
+  if (!input) return;
+  input.value = "";
+  input.click();
 }
 
 function speechRecognitionConstructor() {
@@ -770,6 +862,26 @@ document.querySelectorAll(".voice-button").forEach((button) => {
   });
 });
 
+document.querySelectorAll(".attach-button").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    triggerAttachmentPicker();
+  });
+});
+
+document.querySelector("#attachmentInput").addEventListener("change", async (event) => {
+  const files = Array.from(event.currentTarget.files || []);
+  if (!files.length) return;
+
+  try {
+    pendingAttachments = await Promise.all(files.slice(0, 4).map(readAttachment));
+    showChatNotice(`Anexado: ${attachmentLabel()}`);
+  } catch (error) {
+    pendingAttachments = [];
+    showChatNotice(error.message);
+  }
+});
+
 document.querySelectorAll(".quick-actions button").forEach((button) => {
   button.addEventListener("click", () => {
     const textarea = document.querySelector("#heroComposer textarea");
@@ -781,13 +893,15 @@ document.querySelectorAll(".quick-actions button").forEach((button) => {
 document.querySelector("#heroComposer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const prompt = form.elements.prompt.value.trim();
+  const prompt = form.elements.prompt.value.trim() || (pendingAttachments.length ? "Analise os anexos." : "");
   if (!prompt) return;
+  const attachments = pendingAttachments;
+  pendingAttachments = [];
   stopDictation();
   form.elements.prompt.value = "";
   document.querySelector("#chatError").textContent = "";
   try {
-    await submitPrompt(prompt, document.querySelector("#heroModel").value);
+    await submitPrompt(prompt, document.querySelector("#heroModel").value, attachments);
   } catch (error) {
     document.querySelector("#chatError").textContent = error.message;
   }
@@ -796,13 +910,15 @@ document.querySelector("#heroComposer").addEventListener("submit", async (event)
 document.querySelector("#bottomComposer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const prompt = form.elements.prompt.value.trim();
+  const prompt = form.elements.prompt.value.trim() || (pendingAttachments.length ? "Analise os anexos." : "");
   if (!prompt) return;
+  const attachments = pendingAttachments;
+  pendingAttachments = [];
   stopDictation();
   form.elements.prompt.value = "";
   document.querySelector("#chatError").textContent = "";
   try {
-    await submitPrompt(prompt, document.querySelector("#bottomModel").value);
+    await submitPrompt(prompt, document.querySelector("#bottomModel").value, attachments);
   } catch (error) {
     document.querySelector("#chatError").textContent = error.message;
   }

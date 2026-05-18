@@ -61,9 +61,9 @@
             <div class="spark">✱</div>
             <h1 id="welcomeTitle">Bem-vindo ao Claude</h1>
             <form id="heroComposer" class="hero-composer">
-              <textarea name="prompt" placeholder="Como posso ajudar você hoje?" required></textarea>
+              <textarea name="prompt" placeholder="Como posso ajudar você hoje?"></textarea>
               <div class="composer-row">
-                <button class="composer-icon auth-only hidden" type="button" data-panel="apiPanel" aria-label="Anexar">
+                <button class="composer-icon attach-button auth-only hidden" type="button" aria-label="Anexar foto ou arquivo">
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
                 <div class="composer-right">
@@ -105,9 +105,9 @@
           <div id="chatThread" class="chat-thread hidden"></div>
 
           <form id="bottomComposer" class="bottom-composer hidden">
-            <textarea name="prompt" placeholder="Responder ao Claude..." required></textarea>
+            <textarea name="prompt" placeholder="Responder ao Claude..."></textarea>
             <div class="composer-row">
-              <button class="composer-icon auth-only hidden" type="button" data-panel="apiPanel" aria-label="Anexar">
+              <button class="composer-icon attach-button auth-only hidden" type="button" aria-label="Anexar foto ou arquivo">
                 <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
               </button>
               <div class="composer-right">
@@ -270,7 +270,8 @@
       </div>
     </section>
 
-    <script src="/frontier/shared.js?v=streaming-chat-20260518"></script>
-    <script src="/frontier/client.js?v=streaming-chat-20260518"></script>
+    <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
+    <script src="/frontier/shared.js?v=attachments-20260518"></script>
+    <script src="/frontier/client.js?v=attachments-20260518"></script>
   </body>
 </html>
