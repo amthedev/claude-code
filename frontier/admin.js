@@ -7,6 +7,13 @@ function showAdminApp() {
   adminApp.classList.remove("hidden");
 }
 
+function fillAdminLoginForm() {
+  const settings = ClaudeApp.apiSettings();
+  const form = document.querySelector("#adminLoginForm");
+  form.elements.baseUrl.value = settings.baseUrl;
+  form.elements.apiToken.value = settings.token === "local-dev-token" ? "" : settings.token;
+}
+
 function rememberAdminDevice() {
   localStorage.setItem(ClaudeApp.ADMIN_SESSION_KEY, "1");
 }
@@ -279,7 +286,11 @@ document.querySelector("#adminLoginForm").addEventListener("submit", async (even
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   document.querySelector("#adminLoginError").textContent = "";
   const settings = ClaudeApp.apiSettings();
-  ClaudeApp.saveApiSettings({ ...settings, token: values.apiToken || settings.token });
+  ClaudeApp.saveApiSettings({
+    ...settings,
+    baseUrl: values.baseUrl || settings.baseUrl,
+    token: values.apiToken || settings.token,
+  });
   try {
     await refreshFromServer();
   } catch (error) {
@@ -460,6 +471,7 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
 document.querySelector("#seedDemo").addEventListener("click", seedDemo);
 
 renderPreview();
+fillAdminLoginForm();
 
 unlockRememberedAdminDevice().then((unlocked) => {
   if (!unlocked) renderAll();

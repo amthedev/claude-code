@@ -7,6 +7,7 @@ from typing import Any, Callable
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -51,6 +52,14 @@ def create_app(
     app.add_middleware(SecurityHeadersMiddleware)
     if resolved_settings.trusted_hosts and resolved_settings.trusted_hosts != ("*",):
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(resolved_settings.trusted_hosts))
+    if resolved_settings.cors_allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(resolved_settings.cors_allowed_origins),
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-API-Key", "Anthropic-Auth-Token"],
+        )
     _mount_frontend(app)
 
     @app.get("/health")

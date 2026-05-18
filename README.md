@@ -148,8 +148,17 @@ GATEWAY_API_KEYS=replace-with-a-long-random-admin-token
 TRUSTED_HOSTS=your-domain.example
 ADMIN_TRUSTED_IPS=177.200.246.8
 TRUST_PROXY_HEADERS=true
+CORS_ALLOWED_ORIGINS=http://127.0.0.1:8787,http://localhost:8787
 AUTH_RATE_LIMIT=10
 API_RATE_LIMIT=120
+```
+
+To manage the Square Cloud app from your Mac, run the app locally and open
+`http://127.0.0.1:8787/admin`. In the admin login screen set:
+
+```text
+URL da API: https://claude-code-api.squareweb.app
+Token da API admin: value from GATEWAY_API_KEYS on Square Cloud
 ```
 
 The app sets security headers, disables public OpenAPI docs, rate-limits login

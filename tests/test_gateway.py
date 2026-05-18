@@ -144,6 +144,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.json()["detected_ip"], "177.200.246.8")
         self.assertTrue(response.json()["trusted"])
 
+    def test_cors_allows_local_admin_origin_when_configured(self) -> None:
+        settings = make_settings()
+        settings.cors_allowed_origins = ("http://127.0.0.1:8787",)
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.options(
+            "/v1/admin/accounts",
+            headers={
+                "Origin": "http://127.0.0.1:8787",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://127.0.0.1:8787")
+
     def test_trusted_admin_ip_does_not_bypass_non_admin_routes(self) -> None:
         settings = make_settings()
         settings.gateway_api_keys = ("real-admin-token",)
