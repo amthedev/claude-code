@@ -55,11 +55,10 @@ function apiConfigForCurrentUser() {
     "",
   );
   const token = current?.apiToken || settings.token || "TOKEN_DA_SUA_CONTA";
-  const modelKey = ClaudeApp.normalizeModelKey(current?.modelKey || "sonnet");
   return {
     baseUrl,
     token,
-    model: ClaudeApp.backendModelForPlan(modelKey),
+    model: settings.model,
     plan: current?.plan || "Plano ativo",
     hasAccount: Boolean(current?.apiToken),
   };
@@ -293,7 +292,7 @@ function renderAccount() {
     <code>Login: ${ClaudeApp.escapeHtml(current.login)}</code>
     <code>Gift card: ${ClaudeApp.escapeHtml(current.giftCardCode || "-")}</code>
     <code>Plano: ${ClaudeApp.escapeHtml(current.plan)}</code>
-    <code>Modelo permitido: ${ClaudeApp.models[current.modelKey]?.label || "Claude Code Pro"}</code>
+    <code>Modelos: escolha livre no seletor do chat</code>
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
   `;
   document.querySelector("#previewNotice").classList.add("hidden");

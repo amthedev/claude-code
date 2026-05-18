@@ -16,9 +16,9 @@ from .security import hash_password, verify_password
 
 
 MODEL_LABELS = {
-    "haiku": "Claude Code Economy",
-    "sonnet": "Claude Code Pro",
-    "opus": "Claude Code Ultra",
+    "haiku": "Plano Econômico",
+    "sonnet": "Plano Padrão",
+    "opus": "Plano Avançado",
 }
 
 MODEL_TOKEN_PRICES = {
@@ -27,11 +27,7 @@ MODEL_TOKEN_PRICES = {
     "opus": 0.00000087,
 }
 
-BACKEND_MODELS = {
-    "haiku": "claude-code-economy",
-    "sonnet": "claude-code-pro",
-    "opus": "claude-code-ultra",
-}
+PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
 
 
 class AccountStore:
@@ -191,7 +187,7 @@ class AccountStore:
             name=account["name"],
             monthly_price_brl=float(account.get("price") or 0),
             daily_token_limit=int(account.get("dailyLimit") or 0),
-            allowed_model=BACKEND_MODELS.get(account.get("modelKey"), "claude-code-pro"),
+            allowed_model="*",
             active=bool(account.get("active")),
         )
 
@@ -335,7 +331,7 @@ def _calculate_limit(
     max_cost_brl = monthly_revenue * (1 - settings.customer_profit_margin)
     max_cost_usd = max_cost_brl / max(0.01, settings.usd_to_brl)
     daily_cost_usd = max_cost_usd / 30
-    computed = math.floor(daily_cost_usd / MODEL_TOKEN_PRICES[model_key])
+    computed = math.floor(daily_cost_usd / PLAN_LIMIT_TOKEN_PRICE)
     daily_limit = min(manual_limit, computed) if manual_limit > 0 else computed
     return {
         "dailyLimit": max(0, daily_limit),

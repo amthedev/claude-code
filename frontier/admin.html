@@ -92,19 +92,11 @@
                 </label>
                 <label>
                   Plano personalizado
-                  <input name="plan" value="Claude Code Pro" required />
+                  <input name="plan" value="Plano Padrão" required />
                 </label>
                 <label>
                   Valor mensal em R$
                   <input name="price" type="number" min="0" step="0.01" value="149.90" required />
-                </label>
-                <label>
-                  Modelo do plano
-                  <select name="model">
-                    <option value="sonnet">Claude Code Pro</option>
-                    <option value="opus">Claude Code Ultra</option>
-                    <option value="haiku">Claude Code Economy</option>
-                  </select>
                 </label>
                 <label>
                   Limite diario manual
@@ -268,7 +260,7 @@
       </section>
     </main>
 
-    <script src="/frontier/shared.js?v=real-api-20260518"></script>
-    <script src="/frontier/admin.js?v=real-api-20260518"></script>
+    <script src="/frontier/shared.js?v=model-free-plans-20260518"></script>
+    <script src="/frontier/admin.js?v=model-free-plans-20260518"></script>
   </body>
 </html>

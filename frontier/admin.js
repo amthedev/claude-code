@@ -163,7 +163,7 @@ function renderGatewaySnippet(accounts) {
         account.name,
         Number(account.price || 0).toFixed(2),
         account.dailyLimit,
-        ClaudeApp.backendModelForPlan(account.modelKey),
+        "*",
         account.active ? "true" : "false",
       ].join("|"),
     )
@@ -187,7 +187,6 @@ function renderGiftCards() {
 
   table.innerHTML = cards
     .map((card) => {
-      const model = ClaudeApp.models[card.modelKey] || ClaudeApp.models.sonnet;
       const status = giftCardStatus(card);
       const canPause = !card.usedByAccountId;
       return `
@@ -203,7 +202,7 @@ function renderGiftCards() {
           </td>
           <td>
             ${ClaudeApp.escapeHtml(card.plan)}
-            <div class="muted">${model.label}</div>
+            <div class="muted">Modelos liberados no app</div>
             <div class="muted">${ClaudeApp.brl.format(card.price)}/mês</div>
           </td>
           <td>
@@ -247,7 +246,6 @@ function renderAccounts() {
   table.innerHTML = accounts
     .map((account) => {
       const remaining = Math.max(0, account.dailyLimit - account.usedToday);
-      const model = ClaudeApp.models[account.modelKey] || ClaudeApp.models.sonnet;
       return `
         <tr>
           <td>
@@ -258,7 +256,7 @@ function renderAccounts() {
           </td>
           <td>
             ${ClaudeApp.escapeHtml(account.plan)}
-            <div class="muted">${model.label}</div>
+            <div class="muted">Modelos liberados no app</div>
             <div class="muted">${ClaudeApp.brl.format(account.price)}/mês</div>
           </td>
           <td>
@@ -364,7 +362,7 @@ function seedDemo() {
   cards.unshift(
     uniqueGiftCard({
       code: "CLAUDE-DEMO-PRO",
-      plan: "Claude Code Pro",
+      plan: "Plano Padrão",
       price: 149.9,
       model: "sonnet",
       manualLimit: "",
@@ -372,7 +370,7 @@ function seedDemo() {
     }),
     uniqueGiftCard({
       code: "CLAUDE-DEMO-ULTRA",
-      plan: "Claude Code Ultra",
+      plan: "Plano Avançado",
       price: 299.9,
       model: "opus",
       manualLimit: "45000",
@@ -475,9 +473,8 @@ giftCardForm.addEventListener("submit", async (event) => {
   }
 
   event.currentTarget.reset();
-  event.currentTarget.elements.plan.value = "Claude Code Pro";
+  event.currentTarget.elements.plan.value = "Plano Padrão";
   event.currentTarget.elements.price.value = "149.90";
-  event.currentTarget.elements.model.value = "sonnet";
   event.currentTarget.elements.active.value = "true";
   renderPreview();
   renderAll();

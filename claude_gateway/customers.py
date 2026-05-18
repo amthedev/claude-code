@@ -78,7 +78,10 @@ def parse_customer_accounts(settings: Settings) -> dict[str, CustomerPlan]:
 
 def clamp_customer_payload(payload: dict[str, Any], settings: Settings, plan: CustomerPlan) -> dict[str, Any]:
     limited = dict(payload)
-    limited["model"] = plan.allowed_model
+    if plan.allowed_model and plan.allowed_model != "*":
+        limited["model"] = plan.allowed_model
+    elif not limited.get("model"):
+        limited["model"] = settings.auto_public_model
     limited["max_tokens"] = min(_max_tokens(limited, settings), settings.max_request_output_tokens)
     return limited
 

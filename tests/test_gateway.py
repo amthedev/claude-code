@@ -463,7 +463,7 @@ class GatewayTestCase(unittest.TestCase):
                 headers=self.headers,
                 json={
                     "code": "CLAUDE-TEST-PRO",
-                    "plan": "Claude Sonnet 4.6",
+                    "plan": "Plano Padrão",
                     "price": 149.9,
                     "model": "sonnet",
                     "manualLimit": 60000,
@@ -508,7 +508,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
 
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(

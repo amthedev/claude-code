@@ -10,6 +10,7 @@ const ClaudeApp = (() => {
 
   const USD_TO_BRL = 5.5;
   const MIN_PROFIT_MARGIN = 0.5;
+  const PLAN_LIMIT_USD_PER_TOKEN = 0.00000087;
 
   const models = {
     haiku: {
@@ -80,19 +81,6 @@ const ClaudeApp = (() => {
     return models.sonnet.publicModel;
   }
 
-  function backendModelForPlan(modelKey) {
-    const aliases = {
-      haiku: "claude-code-economy",
-      economy: "claude-code-economy",
-      sonnet: "claude-code-pro",
-      pro: "claude-code-pro",
-      opus: "claude-code-ultra",
-      ultra: "claude-code-ultra",
-      ui: "claude-code-ui",
-    };
-    return aliases[modelKey] || "claude-code-pro";
-  }
-
   function apiSettings() {
     const sameOriginApi =
       window.location.origin && window.location.origin !== "null"
@@ -147,13 +135,11 @@ const ClaudeApp = (() => {
   }
 
   function calculateLimit(priceBrl, modelKey, manualLimit) {
-    const normalizedModelKey = normalizeModelKey(modelKey);
     const monthlyRevenue = Math.max(0, Number(priceBrl) || 0);
     const maxCostBrl = monthlyRevenue * (1 - MIN_PROFIT_MARGIN);
     const maxCostUsd = maxCostBrl / USD_TO_BRL;
     const dailyCostUsd = maxCostUsd / 30;
-    const price = models[normalizedModelKey]?.usdPerToken || models.sonnet.usdPerToken;
-    const computedDailyTokens = Math.floor(dailyCostUsd / price);
+    const computedDailyTokens = Math.floor(dailyCostUsd / PLAN_LIMIT_USD_PER_TOKEN);
     const manual = Number(manualLimit) || 0;
     const dailyLimit = manual > 0 ? Math.min(manual, computedDailyTokens) : computedDailyTokens;
 
@@ -209,7 +195,7 @@ const ClaudeApp = (() => {
     return recalculateGiftCard({
       id: `gift_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       code: normalizeGiftCode(values.code) || generateGiftCode(),
-      plan: values.plan.trim() || models[modelKey]?.label || "Claude Code Pro",
+      plan: values.plan.trim() || "Plano Padrão",
       price: Number(values.price) || 0,
       modelKey,
       manualLimit: Number(values.manualLimit) || 0,
@@ -230,7 +216,7 @@ const ClaudeApp = (() => {
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),
-      plan: values.plan.trim() || "Claude Code Pro",
+      plan: values.plan.trim() || "Plano Padrão",
       price: Number(values.price) || 0,
       modelKey: normalizeModelKey(values.model),
       manualLimit: Number(values.manualLimit) || 0,
@@ -289,7 +275,6 @@ const ClaudeApp = (() => {
     normalizeModelKey,
     normalizePublicModel,
     normalizeGiftCode,
-    backendModelForPlan,
     models,
     brl,
     usd,
