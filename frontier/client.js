@@ -73,51 +73,140 @@ function apiConfigForCurrentUser() {
 function pythonInstaller(config) {
   return `python3 - <<'PY'
 from pathlib import Path
-import platform
+import json
+import os
 import subprocess
+import sys
+import textwrap
 
 base_url = ${JSON.stringify(config.baseUrl)}
 api_token = ${JSON.stringify(config.token)}
 selected_model = ${JSON.stringify(config.model)}
 
-profile = Path.home() / (".zshrc" if platform.system() == "Darwin" else ".bashrc")
-lines = [
-    f'export ANTHROPIC_BASE_URL="{base_url}"',
-    f'export ANTHROPIC_AUTH_TOKEN="{api_token}"',
-    f'export ANTHROPIC_API_KEY="{api_token}"',
-    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
-    f'export ANTHROPIC_DEFAULT_SONNET_MODEL="{selected_model}"',
-    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
-    f'export CLAUDE_CODE_SUBAGENT_MODEL="{selected_model}"',
-]
+def ask(question, default=True):
+    suffix = " [S/n] " if default else " [s/N] "
+    answer = input(question + suffix).strip().lower()
+    if not answer:
+        return default
+    return answer in {"s", "sim", "y", "yes"}
+
+print("Claude Code API")
+print(f"API: {base_url}")
+print(f"Modelo padrao: {selected_model}")
+print()
+
+if not ask("Quer configurar o Claude Code para usar esta API?", True):
+    print("Cancelado. Nada foi alterado.")
+    raise SystemExit(0)
+
+claude_dir = Path.home() / ".claude"
+claude_dir.mkdir(parents=True, exist_ok=True)
+launcher_path = claude_dir / "claude_api_prompt.py"
+settings_path = claude_dir / "settings.json"
+
+launcher_code = f'''#!/usr/bin/env python3
+import os
+import shutil
+import subprocess
+import sys
+
+BASE_URL = {base_url!r}
+API_TOKEN = {api_token!r}
+SELECTED_MODEL = {selected_model!r}
+GATEWAY_KEYS = {{
+    "ANTHROPIC_BASE_URL": BASE_URL,
+    "ANTHROPIC_AUTH_TOKEN": API_TOKEN,
+    "ANTHROPIC_API_KEY": API_TOKEN,
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": SELECTED_MODEL,
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+    "CLAUDE_CODE_SUBAGENT_MODEL": SELECTED_MODEL,
+}}
+
+def wants_gateway():
+    try:
+        answer = input(f"Usar Claude Code API hospedada ({{BASE_URL}})? [S/n] ").strip().lower()
+    except EOFError:
+        answer = "s"
+    return answer not in {{"n", "nao", "não", "no"}}
+
+def clean_gateway_env(env):
+    cleaned = dict(env)
+    for key, value in GATEWAY_KEYS.items():
+        if cleaned.get(key) == value:
+            cleaned.pop(key, None)
+    return cleaned
+
+def main():
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        print("Claude Code nao foi encontrado no PATH.")
+        print("Instale o Claude Code e rode este comando de novo.")
+        return 127
+
+    env = os.environ.copy()
+    if wants_gateway():
+        env.update(GATEWAY_KEYS)
+        print("OK, usando a API configurada.")
+    else:
+        env = clean_gateway_env(env)
+        print("OK, abrindo Claude Code sem esta API.")
+
+    return subprocess.call([claude_bin, *sys.argv[1:]], env=env)
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+launcher_path.write_text(launcher_code)
+launcher_path.chmod(0o755)
+
+shell = Path(os.environ.get("SHELL", "")).name
+profile = Path.home() / (".zshrc" if shell == "zsh" else ".bashrc")
+start = "# assistente_api_claude_launcher"
+end = "# /assistente_api_claude_launcher"
+block = textwrap.dedent(f"""
+{start}
+claude() {{
+  python3 "{launcher_path}" "$@"
+}}
+{end}
+""").strip() + "\\n"
 
 existing = profile.read_text() if profile.exists() else ""
-start = "# assistente_api_config"
-end = "# /assistente_api_config"
-block = start + "\\n" + "\\n".join(lines) + "\\n" + end + "\\n"
-
 if start in existing and end in existing:
     before = existing.split(start)[0].rstrip()
     after = existing.split(end, 1)[1].lstrip()
     profile.write_text(before + "\\n\\n" + block + "\\n" + after)
 else:
-    profile.write_text(existing.rstrip() + "\\n\\n" + block)
+    profile.write_text(existing.rstrip() + "\\n\\n" + block + "\\n")
 
-print(f"Configurado em {profile}")
-print("Abra um terminal novo ou cole estes comandos agora:")
-for line in lines:
-    print(line)
+if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
+    try:
+        settings = json.loads(settings_path.read_text())
+    except Exception:
+        settings = {}
+    env = settings.setdefault("env", {})
+    env.update({
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_AUTH_TOKEN": api_token,
+        "ANTHROPIC_API_KEY": api_token,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": selected_model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+        "CLAUDE_CODE_SUBAGENT_MODEL": selected_model,
+    })
+    settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
+    print(f"Extensao configurada em {settings_path}")
 
-try:
-    result = subprocess.run(
-        ["claude", "--version"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    print("Claude Code encontrado:", result.stdout.strip() or result.stderr.strip())
-except FileNotFoundError:
-    print("Claude Code ainda nao esta instalado ou nao esta no PATH.")
+print()
+print(f"Launcher instalado em {launcher_path}")
+print(f"Atalho do terminal salvo em {profile}")
+print("Abra um terminal novo ou rode:")
+print(f"source {profile}")
+print()
+print("Depois rode: claude")
+print("O terminal vai perguntar se quer usar esta API antes de abrir.")
 PY`;
 }
 
@@ -212,13 +301,13 @@ function renderApiInstallGuide() {
       </div>
     </section>
     <ol class="api-steps">
-      <li>Para terminal, copie o comando de uma linha e cole no terminal.</li>
-      <li>Para extensao, salve a configuracao do Claude Code e reinicie a extensao.</li>
-      <li>Se ja estiver com Claude aberto, feche e abra de novo depois de salvar.</li>
+      <li>Use o instalador Python: ele pergunta se quer usar esta API e configura terminal/extensao.</li>
+      <li>No terminal, depois da instalacao, ao rodar <code>claude</code> ele pergunta antes de usar a API.</li>
+      <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
     </ol>
-    ${renderCodeBlock("Terminal: abrir Claude Code agora", sessionCommand, "Copiar terminal")}
-    ${renderCodeBlock("Extensao: salvar em ~/.claude/settings.json", settingsCommand, "Copiar extensao")}
-    ${renderCodeBlock("Shell: salvar no perfil do terminal", installCommand, "Copiar shell")}
+    ${renderCodeBlock("Instalador Python com pergunta", installCommand, "Copiar instalador")}
+    ${renderCodeBlock("Terminal rapido sem instalar", sessionCommand, "Copiar terminal")}
+    ${renderCodeBlock("Somente extensao: salvar settings.json", settingsCommand, "Copiar extensao")}
     ${renderCodeBlock("Testar conexao", curlTest)}
   `;
 }
