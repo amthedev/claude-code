@@ -72,7 +72,7 @@ class Settings:
     trusted_hosts: tuple[str, ...] = ("*",)
     admin_trusted_ips: tuple[str, ...] = ()
     trust_proxy_headers: bool = False
-    cors_allowed_origins: tuple[str, ...] = ()
+    cors_allowed_origins: tuple[str, ...] = ("http://127.0.0.1:8787", "http://localhost:8787")
 
     economy_public_model: str = "claude-code-economy"
     pro_public_model: str = "claude-code-pro"
@@ -128,7 +128,10 @@ class Settings:
             trusted_hosts=_csv_env("TRUSTED_HOSTS", "*"),
             admin_trusted_ips=_csv_env("ADMIN_TRUSTED_IPS", ""),
             trust_proxy_headers=_bool_env("TRUST_PROXY_HEADERS", False),
-            cors_allowed_origins=_csv_env("CORS_ALLOWED_ORIGINS", ""),
+            cors_allowed_origins=_csv_env(
+                "CORS_ALLOWED_ORIGINS",
+                "http://127.0.0.1:8787,http://localhost:8787",
+            ),
             economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "claude-code-economy"),
             pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "claude-code-pro"),
             ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-code-ultra"),
