@@ -81,13 +81,13 @@ class Settings:
     auto_public_model: str = "claude-code-auto"
 
     router_agent: str = "tencent/hy3-preview"
-    cheap_code_agent: str = "deepseek/deepseek-v4-flash"
-    code_agent: str = "deepseek/deepseek-v4-pro"
-    reasoning_agent: str = "deepseek/deepseek-v4-pro"
+    cheap_code_agent: str = "qwen/qwen3-coder-30b-a3b-instruct"
+    code_agent: str = "qwen/qwen3-coder-flash"
+    reasoning_agent: str = "qwen/qwen3-coder-flash"
     ui_agent: str = "moonshotai/kimi-k2.6"
     fast_agent: str = "stepfun/step-3.5-flash"
     premium_fallback: str = "moonshotai/kimi-k2.6"
-    ultra_fallback: str = "deepseek/deepseek-v4-pro"
+    ultra_fallback: str = "qwen/qwen3-coder-flash"
 
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
@@ -138,13 +138,13 @@ class Settings:
             ui_public_model=os.getenv("UI_PUBLIC_MODEL", "claude-code-ui"),
             auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "claude-code-auto"),
             router_agent=os.getenv("ROUTER_AGENT", "tencent/hy3-preview"),
-            cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "deepseek/deepseek-v4-flash"),
-            code_agent=os.getenv("CODE_AGENT", "deepseek/deepseek-v4-pro"),
-            reasoning_agent=os.getenv("REASONING_AGENT", "deepseek/deepseek-v4-pro"),
+            cheap_code_agent=os.getenv("CHEAP_CODE_AGENT", "qwen/qwen3-coder-30b-a3b-instruct"),
+            code_agent=os.getenv("CODE_AGENT", "qwen/qwen3-coder-flash"),
+            reasoning_agent=os.getenv("REASONING_AGENT", "qwen/qwen3-coder-flash"),
             ui_agent=os.getenv("UI_AGENT", "moonshotai/kimi-k2.6"),
             fast_agent=os.getenv("FAST_AGENT", "stepfun/step-3.5-flash"),
             premium_fallback=os.getenv("PREMIUM_FALLBACK", "moonshotai/kimi-k2.6"),
-            ultra_fallback=os.getenv("ULTRA_FALLBACK", "deepseek/deepseek-v4-pro"),
+            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3-coder-flash"),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",

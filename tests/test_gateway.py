@@ -282,7 +282,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-pro")
+        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-flash")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
 
     def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
@@ -425,7 +425,10 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+            self.assertEqual(
+                response.json()["content"][0]["text"],
+                "model=qwen/qwen3-coder-30b-a3b-instruct",
+            )
 
             usage = client.get("/v1/usage", headers=customer_headers)
             self.assertEqual(usage.status_code, 200)
@@ -598,7 +601,7 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = client._payload_for_model(
             {"messages": [], "reasoning": {"effort": "high", "exclude": False}},
-            "deepseek/deepseek-v4-flash",
+            "qwen/qwen3-coder-30b-a3b-instruct",
         )
 
         self.assertEqual(payload["reasoning"], {"effort": "none", "exclude": True})
