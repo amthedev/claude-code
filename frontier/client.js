@@ -81,8 +81,10 @@ profile = Path.home() / (".zshrc" if platform.system() == "Darwin" else ".bashrc
 lines = [
     f'export ANTHROPIC_BASE_URL="{base_url}"',
     f'export ANTHROPIC_AUTH_TOKEN="{api_token}"',
-    'export ANTHROPIC_API_KEY=""',
+    f'export ANTHROPIC_API_KEY="{api_token}"',
+    'export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"',
     f'export ANTHROPIC_DEFAULT_SONNET_MODEL="{selected_model}"',
+    'export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"',
     f'export CLAUDE_CODE_SUBAGENT_MODEL="{selected_model}"',
 ]
 
@@ -117,14 +119,46 @@ PY`;
 }
 
 function terminalCommand(config) {
-  return [
-    `export ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
-    `export ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
-    `export ANTHROPIC_API_KEY=''`,
-    `export ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
-    `export CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
-    "claude",
-  ].join("\n");
+  const env = [
+    `ANTHROPIC_BASE_URL=${shellQuote(config.baseUrl)}`,
+    `ANTHROPIC_AUTH_TOKEN=${shellQuote(config.token)}`,
+    `ANTHROPIC_API_KEY=${shellQuote(config.token)}`,
+    `ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-code-economy'`,
+    `ANTHROPIC_DEFAULT_SONNET_MODEL=${shellQuote(config.model)}`,
+    `ANTHROPIC_DEFAULT_OPUS_MODEL='claude-code-ultra'`,
+    `CLAUDE_CODE_SUBAGENT_MODEL=${shellQuote(config.model)}`,
+  ];
+  return `${env.join(" ")} claude`;
+}
+
+function claudeSettingsCommand(config) {
+  return `python3 - <<'PY'
+from pathlib import Path
+import json
+
+settings_path = Path.home() / ".claude" / "settings.json"
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+try:
+    settings = json.loads(settings_path.read_text())
+except Exception:
+    settings = {}
+
+env = settings.setdefault("env", {})
+env.update({
+    "ANTHROPIC_BASE_URL": ${JSON.stringify(config.baseUrl)},
+    "ANTHROPIC_AUTH_TOKEN": ${JSON.stringify(config.token)},
+    "ANTHROPIC_API_KEY": ${JSON.stringify(config.token)},
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(config.model)},
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+    "CLAUDE_CODE_SUBAGENT_MODEL": ${JSON.stringify(config.model)},
+})
+
+settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
+print(f"Configurado em {settings_path}")
+print("Feche e abra o Claude Code ou reinicie a extensao para carregar a configuracao.")
+PY`;
 }
 
 function renderCodeBlock(title, code, copyLabel = "Copiar") {
@@ -156,6 +190,7 @@ function renderApiInstallGuide() {
   )}`;
   const installCommand = pythonInstaller(config);
   const sessionCommand = terminalCommand(config);
+  const settingsCommand = claudeSettingsCommand(config);
   const loginHint = config.hasAccount
     ? "Configuracao pronta para esta conta."
     : "Entre em uma conta ativa para gerar a configuracao personalizada.";
@@ -173,12 +208,13 @@ function renderApiInstallGuide() {
       </div>
     </section>
     <ol class="api-steps">
-      <li>Para funcionar agora, copie o comando especifico abaixo e cole no terminal.</li>
-      <li>Para deixar salvo neste computador, use o instalador permanente logo depois.</li>
-      <li>O Claude web do navegador nao aceita API externa; use o Claude Code ou app compativel.</li>
+      <li>Para terminal, copie o comando de uma linha e cole no terminal.</li>
+      <li>Para extensao, salve a configuracao do Claude Code e reinicie a extensao.</li>
+      <li>Se ja estiver com Claude aberto, feche e abra de novo depois de salvar.</li>
     </ol>
-    ${renderCodeBlock("Comando para colar no terminal agora", sessionCommand, "Copiar comando")}
-    ${renderCodeBlock("Salvar configuracao neste computador", installCommand, "Copiar instalador")}
+    ${renderCodeBlock("Terminal: abrir Claude Code agora", sessionCommand, "Copiar terminal")}
+    ${renderCodeBlock("Extensao: salvar em ~/.claude/settings.json", settingsCommand, "Copiar extensao")}
+    ${renderCodeBlock("Shell: salvar no perfil do terminal", installCommand, "Copiar shell")}
     ${renderCodeBlock("Testar conexao", curlTest)}
   `;
 }
