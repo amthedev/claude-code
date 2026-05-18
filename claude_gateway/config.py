@@ -53,6 +53,7 @@ class Settings:
     max_request_output_tokens: int = 4096
     customer_accounts: str = ""
     quota_data_file: str = "data/customer_usage.json"
+    account_data_file: str = "data/accounts.json"
     customer_profit_margin: float = 0.50
     usd_to_brl: float = 5.50
     cost_reserve_multiplier: float = 2.0
@@ -92,6 +93,7 @@ class Settings:
             max_request_output_tokens=int(os.getenv("MAX_REQUEST_OUTPUT_TOKENS", "4096")),
             customer_accounts=os.getenv("CUSTOMER_ACCOUNTS", ""),
             quota_data_file=os.getenv("QUOTA_DATA_FILE", "data/customer_usage.json"),
+            account_data_file=os.getenv("ACCOUNT_DATA_FILE", "data/accounts.json"),
             customer_profit_margin=float(os.getenv("CUSTOMER_PROFIT_MARGIN", "0.50")),
             usd_to_brl=float(os.getenv("USD_TO_BRL", "5.50")),
             cost_reserve_multiplier=float(os.getenv("COST_RESERVE_MULTIPLIER", "2.0")),

@@ -9,6 +9,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, require_gateway_auth
 from .config import Settings, get_settings
@@ -30,6 +31,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.usage = UsageStore()
     app.state.customer_usage = CustomerUsageStore(resolved_settings)
+    app.state.account_store = AccountStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
     app.state.openrouter = factory(resolved_settings)
@@ -139,6 +141,70 @@ def create_app(
 
         return JSONResponse(response)
 
+    @app.post("/v1/auth/signup")
+    async def signup(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"account": app.state.account_store.signup(payload)})
+
+    @app.post("/v1/auth/login")
+    async def login(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"account": app.state.account_store.login(payload)})
+
+    @app.get("/v1/admin/gift-cards")
+    async def list_gift_cards(request: Request) -> dict[str, Any]:
+        _require_admin(request, app.state.settings)
+        return {"data": app.state.account_store.list_gift_cards()}
+
+    @app.post("/v1/admin/gift-cards")
+    async def create_gift_card(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"giftCard": app.state.account_store.create_gift_card(payload)})
+
+    @app.patch("/v1/admin/gift-cards/{card_id}")
+    async def update_gift_card(
+        card_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"giftCard": app.state.account_store.update_gift_card(card_id, payload)})
+
+    @app.delete("/v1/admin/gift-cards/{card_id}")
+    async def delete_gift_card(card_id: str, request: Request) -> dict[str, str]:
+        _require_admin(request, app.state.settings)
+        return app.state.account_store.delete_gift_card(card_id)
+
+    @app.get("/v1/admin/accounts")
+    async def list_accounts(request: Request) -> dict[str, Any]:
+        _require_admin(request, app.state.settings)
+        return {"data": app.state.account_store.list_accounts()}
+
+    @app.patch("/v1/admin/accounts/{account_id}")
+    async def update_account(
+        account_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"account": app.state.account_store.update_account(account_id, payload)})
+
+    @app.delete("/v1/admin/accounts/{account_id}")
+    async def delete_account(account_id: str, request: Request) -> dict[str, str]:
+        _require_admin(request, app.state.settings)
+        return app.state.account_store.delete_account(account_id)
+
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
         auth = require_gateway_auth(request, app.state.settings)
@@ -239,6 +305,13 @@ def _reserve_customer_budget(
     if not auth.customer:
         return None
     return app.state.customer_usage.reserve(auth.customer, payload, decision)
+
+
+def _require_admin(request: Request, settings: Settings) -> AuthContext:
+    auth = require_gateway_auth(request, settings)
+    if auth.kind != "admin":
+        raise HTTPException(status_code=403, detail="Admin token required.")
+    return auth
 
 
 app = create_app()

@@ -17,7 +17,7 @@
           </div>
         </div>
         <h1>Painel administrativo</h1>
-        <p>Entre para criar contas, definir planos personalizados e controlar limites diarios.</p>
+        <p>Entre para gerar gift cards, definir planos personalizados e controlar limites diarios.</p>
         <label>
           Login
           <input name="login" autocomplete="username" value="admin" required />
@@ -25,6 +25,10 @@
         <label>
           Senha
           <input name="password" type="password" autocomplete="current-password" value="admin" required />
+        </label>
+        <label>
+          Token da API admin
+          <input name="apiToken" autocomplete="off" value="local-dev-token" required />
         </label>
         <button class="primary" type="submit">Entrar</button>
         <div id="adminLoginError" class="form-error"></div>
@@ -41,7 +45,7 @@
           </div>
         </div>
         <nav class="admin-nav">
-          <button class="active" data-admin-tab="accountsPanel">Contas</button>
+          <button class="active" data-admin-tab="accountsPanel">Gift cards</button>
           <button data-admin-tab="financePanel">Financeiro</button>
           <button data-admin-tab="gatewayPanel">Gateway</button>
         </nav>
@@ -53,9 +57,9 @@
         <header class="admin-topbar">
           <div>
             <span class="overline">Frontier Admin</span>
-            <h1>Clientes e planos</h1>
+            <h1>Gift cards e clientes</h1>
           </div>
-          <button id="seedDemo" type="button">Criar demo</button>
+          <button id="seedDemo" type="button">Criar gift demo</button>
         </header>
 
         <section class="admin-metrics">
@@ -79,23 +83,15 @@
 
         <section id="accountsPanel" class="admin-panel active">
           <div class="admin-grid">
-            <form id="accountForm" class="panel form-stack">
+            <form id="giftCardForm" class="panel form-stack">
               <div class="panel-heading">
-                <span class="overline">Nova conta</span>
-                <h2>Gerar acesso do cliente</h2>
+                <span class="overline">Novo gift card</span>
+                <h2>Gerar código para vender</h2>
               </div>
               <div class="field-grid">
                 <label>
-                  Nome
-                  <input name="name" placeholder="Nome do cliente" required />
-                </label>
-                <label>
-                  Login
-                  <input name="login" placeholder="cliente@empresa.com" required />
-                </label>
-                <label>
-                  Senha
-                  <input name="password" placeholder="Senha inicial" required />
+                  Código do gift card
+                  <input name="code" placeholder="Deixe vazio para gerar automático" />
                 </label>
                 <label>
                   Plano personalizado
@@ -106,7 +102,7 @@
                   <input name="price" type="number" min="0" step="0.01" value="149.90" required />
                 </label>
                 <label>
-                  Modelo permitido
+                  Modelo do plano
                   <select name="model">
                     <option value="sonnet">Claude Sonnet 4.6</option>
                     <option value="opus">Claude Opus 4.7</option>
@@ -120,7 +116,7 @@
                 <label>
                   Status
                   <select name="active">
-                    <option value="true">Ativo</option>
+                    <option value="true">Disponível</option>
                     <option value="false">Pausado</option>
                   </select>
                 </label>
@@ -135,15 +131,38 @@
                   <strong id="previewCost">US$ 0,00/mês</strong>
                 </div>
               </div>
-              <button class="primary" type="submit">Criar conta</button>
-              <div id="accountError" class="form-error"></div>
+              <button class="primary" type="submit">Gerar gift card</button>
+              <div id="giftCardError" class="form-error"></div>
             </form>
 
             <section class="panel table-panel">
               <div class="panel-heading inline">
                 <div>
-                  <span class="overline">Acessos</span>
-                  <h2>Contas dos clientes</h2>
+                  <span class="overline">Venda</span>
+                  <h2>Gift cards gerados</h2>
+                </div>
+              </div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Plano</th>
+                      <th>Limite</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="giftCardsTable"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="panel table-panel wide-panel">
+              <div class="panel-heading inline">
+                <div>
+                  <span class="overline">Clientes</span>
+                  <h2>Contas resgatadas</h2>
                 </div>
               </div>
               <div class="table-scroll">
@@ -172,8 +191,8 @@
             </div>
             <div class="explain-grid">
               <div>
-                <strong>1. Receita do cliente</strong>
-                <p>Voce informa quanto ele paga por mes em reais.</p>
+                <strong>1. Valor do gift card</strong>
+                <p>Voce informa quanto vendeu aquele código em reais.</p>
               </div>
               <div>
                 <strong>2. Custo maximo</strong>
@@ -181,7 +200,7 @@
               </div>
               <div>
                 <strong>3. Limite diario</strong>
-                <p>O custo mensal permitido e dividido por 30 e convertido em tokens.</p>
+                <p>Quando o cliente resgata o gift card, a conta herda esse limite automaticamente.</p>
               </div>
             </div>
           </section>

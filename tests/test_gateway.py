@@ -235,6 +235,66 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 429)
             self.assertEqual(app.state.openrouter.calls, [])
 
+    def test_gift_card_signup_creates_customer_token(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.json"
+            settings.quota_data_file = f"{tmpdir}/usage.json"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            gift = client.post(
+                "/v1/admin/gift-cards",
+                headers=self.headers,
+                json={
+                    "code": "CLAUDE-TEST-PRO",
+                    "plan": "Claude Sonnet 4.6",
+                    "price": 149.9,
+                    "model": "sonnet",
+                    "manualLimit": 60000,
+                },
+            )
+            self.assertEqual(gift.status_code, 200)
+            self.assertEqual(gift.json()["giftCard"]["code"], "CLAUDE-TEST-PRO")
+
+            signup = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Teste",
+                    "login": "cliente@example.com",
+                    "password": "senha-segura",
+                    "giftCard": "CLAUDE-TEST-PRO",
+                },
+            )
+            self.assertEqual(signup.status_code, 200)
+            account = signup.json()["account"]
+            self.assertNotIn("passwordHash", account)
+            self.assertTrue(account["apiToken"].startswith("cus_"))
+            self.assertEqual(account["giftCardCode"], "CLAUDE-TEST-PRO")
+
+            reused = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Outro Cliente",
+                    "login": "outro@example.com",
+                    "password": "senha-segura",
+                    "giftCard": "CLAUDE-TEST-PRO",
+                },
+            )
+            self.assertEqual(reused.status_code, 400)
+
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Implemente uma API"}],
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(
             "POST",

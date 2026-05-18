@@ -219,10 +219,10 @@
         </div>
 
         <form id="clientLoginForm" class="auth-pane active">
-          <p>Use o login e senha liberados no painel Admin depois do pagamento.</p>
+          <p>Use o e-mail e a senha criados no cadastro.</p>
           <label>
-            Login
-            <input name="login" autocomplete="username" required />
+            E-mail
+            <input name="login" type="email" autocomplete="username" required />
           </label>
           <label>
             Senha
@@ -233,32 +233,24 @@
         </form>
 
         <form id="clientSignupForm" class="auth-pane">
-          <p>O cadastro cria uma conta pendente. O Admin ativa depois que o pagamento for confirmado.</p>
+          <p>Crie sua conta usando o gift card comprado.</p>
           <label>
-            Como você quer ser chamado?
-            <input name="displayName" autocomplete="nickname" placeholder="Ex: Cliente" required />
+            Nome
+            <input name="name" autocomplete="name" placeholder="Como quer ser chamado" required />
           </label>
           <label>
-            Nome completo
-            <input name="name" autocomplete="name" placeholder="Seu nome completo" required />
-          </label>
-          <label>
-            Login
-            <input name="login" autocomplete="username" required />
+            E-mail
+            <input name="login" type="email" autocomplete="username" required />
           </label>
           <label>
             Senha
             <input name="password" type="password" autocomplete="new-password" required />
           </label>
           <label>
-            Plano desejado
-            <select name="model">
-              <option value="sonnet">Claude Sonnet 4.6</option>
-              <option value="opus">Claude Opus 4.7</option>
-              <option value="haiku">Claude Haiku 4.5</option>
-            </select>
+            Gift card
+            <input name="giftCard" autocomplete="one-time-code" placeholder="CLAUDE-XXXX-XXXX-XXXX" required />
           </label>
-          <button class="primary" type="submit">Cadastrar e aguardar pagamento</button>
+          <button class="primary" type="submit">Criar conta e entrar</button>
           <div id="clientSignupMessage" class="form-error neutral"></div>
         </form>
       </div>

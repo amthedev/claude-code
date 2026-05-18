@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
 
+from .accounts import AccountStore
 from .config import Settings
 from .customers import CustomerPlan, parse_customer_accounts
 
@@ -62,6 +63,15 @@ def authenticate_request(request: Request, settings: Settings) -> AuthContext:
                     detail="Customer account is inactive.",
                 )
             return AuthContext(token=token, kind="customer", customer=customer)
+
+    customer = AccountStore(settings).customer_plan_for_token(token)
+    if customer:
+        if not customer.active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Customer account is inactive.",
+            )
+        return AuthContext(token=token, kind="customer", customer=customer)
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid gateway token.")
 

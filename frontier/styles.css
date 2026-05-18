@@ -281,6 +281,10 @@ p {
   padding: 18px;
 }
 
+.wide-panel {
+  grid-column: 1 / -1;
+}
+
 .panel-heading {
   margin-bottom: 16px;
 }

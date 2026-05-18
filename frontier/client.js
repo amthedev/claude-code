@@ -2,11 +2,6 @@ let currentAccountId = localStorage.getItem(ClaudeApp.CLIENT_SESSION_KEY);
 let activeConversation = [];
 let activeRecognition = null;
 let activeVoiceButton = null;
-const signupPrices = {
-  haiku: 49.9,
-  sonnet: 149.9,
-  opus: 299.9,
-};
 
 function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
@@ -46,10 +41,59 @@ function loadApiForm() {
   document.querySelector("#bottomModel").value = settings.model;
 }
 
+async function authRequest(path, payload) {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    error.fallback = true;
+    throw error;
+  }
+
+  if (response.status === 404) {
+    const error = new Error("Endpoint não encontrado.");
+    error.fallback = true;
+    throw error;
+  }
+
+  if (!response.ok) {
+    let detail = `API respondeu ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      // Keep the status message.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
+}
+
+function saveServerAccount(accountData) {
+  const accounts = ClaudeApp.accounts();
+  const index = accounts.findIndex(
+    (item) => item.id === accountData.id || item.login === accountData.login,
+  );
+  if (index >= 0) {
+    accounts[index] = { ...accounts[index], ...accountData };
+  } else {
+    accounts.push(accountData);
+  }
+  ClaudeApp.saveAccounts(accounts);
+  return ClaudeApp.accounts().find((item) => item.id === accountData.id) || accountData;
+}
+
 function syncCustomerApiToken(current) {
   if (!current?.apiToken) return;
   const settings = ClaudeApp.apiSettings();
-  if (settings.token && settings.token !== "local-dev-token") return;
+  if (settings.token === current.apiToken) return;
   ClaudeApp.saveApiSettings({ ...settings, token: current.apiToken });
   loadApiForm();
 }
@@ -93,6 +137,7 @@ function renderAccount() {
     <code>Cliente: ${ClaudeApp.escapeHtml(current.name)}</code>
     <code>Nome no chat: ${ClaudeApp.escapeHtml(preferredName)}</code>
     <code>Login: ${ClaudeApp.escapeHtml(current.login)}</code>
+    <code>Gift card: ${ClaudeApp.escapeHtml(current.giftCardCode || "-")}</code>
     <code>Plano: ${ClaudeApp.escapeHtml(current.plan)}</code>
     <code>Modelo permitido: ${ClaudeApp.models[current.modelKey]?.label || "Claude Sonnet 4.6"}</code>
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
@@ -391,15 +436,25 @@ function resetChat() {
   setPanel("chatPanel");
 }
 
-document.querySelector("#clientLoginForm").addEventListener("submit", (event) => {
+document.querySelector("#clientLoginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   document.querySelector("#clientLoginError").textContent = "";
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
-  const found = ClaudeApp.accounts().find(
-    (item) =>
-      item.login.toLowerCase() === values.login.trim().toLowerCase() &&
-      item.password === values.password,
-  );
+  let found = null;
+  try {
+    const data = await authRequest("/v1/auth/login", values);
+    found = saveServerAccount(data.account);
+  } catch (error) {
+    if (!error.fallback) {
+      document.querySelector("#clientLoginError").textContent = error.message;
+      return;
+    }
+    found = ClaudeApp.accounts().find(
+      (item) =>
+        item.login.toLowerCase() === values.login.trim().toLowerCase() &&
+        item.password === values.password,
+    );
+  }
 
   if (!found) {
     document.querySelector("#clientLoginError").textContent = "Login ou senha inválidos.";
@@ -408,7 +463,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", (event) =>
 
   if (!found.active) {
     document.querySelector("#clientLoginError").textContent =
-      "Plano ainda não ativo. Confirme o pagamento com o Admin.";
+      "Conta pausada. Fale com o suporte para reativar.";
     return;
   }
 
@@ -418,7 +473,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", (event) =>
   renderAccount();
 });
 
-document.querySelector("#clientSignupForm").addEventListener("submit", (event) => {
+document.querySelector("#clientSignupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = document.querySelector("#clientSignupMessage");
   message.textContent = "";
@@ -431,25 +486,59 @@ document.querySelector("#clientSignupForm").addEventListener("submit", (event) =
     return;
   }
 
-  const modelKey = ClaudeApp.normalizeModelKey(values.model);
-  accounts.push(
-    ClaudeApp.makeAccount({
-      name: values.name,
-      displayName: values.displayName,
-      login,
-      password: values.password,
-      plan: ClaudeApp.models[modelKey]?.label || "Claude Sonnet 4.6",
-      price: signupPrices[modelKey] || signupPrices.pro,
-      model: modelKey,
-      manualLimit: "",
-      active: "false",
-    }),
-  );
+  try {
+    const data = await authRequest("/v1/auth/signup", values);
+    const account = saveServerAccount(data.account);
+    currentAccountId = account.id;
+    localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, account.id);
+    event.currentTarget.reset();
+    closeAuthModal();
+    renderAccount();
+    return;
+  } catch (error) {
+    if (!error.fallback) {
+      message.textContent = error.message;
+      return;
+    }
+  }
+
+  const giftCode = ClaudeApp.normalizeGiftCode(values.giftCard);
+  const giftCards = ClaudeApp.giftCards();
+  const giftIndex = giftCards.findIndex((card) => card.code === giftCode);
+  const giftCard = giftCards[giftIndex];
+  if (!giftCard || !giftCard.active || giftCard.usedByAccountId) {
+    message.textContent = "Gift card inválido, pausado ou já usado.";
+    return;
+  }
+
+  const account = ClaudeApp.makeAccount({
+    name: values.name,
+    displayName: values.name,
+    login,
+    password: values.password,
+    plan: giftCard.plan,
+    price: giftCard.price,
+    model: giftCard.modelKey,
+    manualLimit: giftCard.manualLimit,
+    active: "true",
+    giftCardCode: giftCard.code,
+  });
+
+  giftCards[giftIndex] = {
+    ...giftCard,
+    active: false,
+    usedByAccountId: account.id,
+    usedByLogin: login,
+    usedAt: new Date().toISOString(),
+  };
+  accounts.push(account);
   ClaudeApp.saveAccounts(accounts);
+  ClaudeApp.saveGiftCards(giftCards);
   event.currentTarget.reset();
-  message.textContent =
-    "Cadastro criado. Depois do pagamento, o Admin ativa sua conta para liberar o chat.";
-  document.querySelector('#clientLoginForm input[name="login"]').value = login;
+  currentAccountId = account.id;
+  localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, account.id);
+  closeAuthModal();
+  renderAccount();
 });
 
 document.querySelectorAll("[data-panel]").forEach((button) => {

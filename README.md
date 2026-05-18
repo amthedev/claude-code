@@ -34,7 +34,7 @@ export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 Open the web app:
 
 - Client chat: `http://127.0.0.1:8787/app`
-- Admin prototype: `http://127.0.0.1:8787/admin`
+- Admin gift cards: `http://127.0.0.1:8787/admin`
 
 ## Public Models
 
@@ -76,6 +76,7 @@ CUSTOMER_PROFIT_MARGIN=0.50
 USD_TO_BRL=5.50
 COST_RESERVE_MULTIPLIER=2.0
 QUOTA_DATA_FILE=data/customer_usage.json
+ACCOUNT_DATA_FILE=data/accounts.json
 ```
 
 Format:
@@ -85,6 +86,8 @@ token|customer_name|monthly_price_brl|daily_token_limit|allowed_public_model|act
 ```
 
 When a customer token calls `/v1/messages`, the gateway forces the allowed model, clamps output tokens, reserves daily cost, and blocks requests that would exceed the plan.
+
+The Admin generates gift cards for sales through `/v1/admin/gift-cards`. Customers create their own account with name, e-mail, password, and a valid gift card through `/v1/auth/signup`. After redemption, the account receives its own API token and can use the chat/API with server-side limits.
 
 ## Square Cloud
 
@@ -128,6 +131,11 @@ POST /v1/messages
 GET  /v1/usage
 POST /v1/router/debug
 POST /v1/agent/run
+POST /v1/auth/signup
+POST /v1/auth/login
+GET  /v1/admin/gift-cards
+POST /v1/admin/gift-cards
+GET  /v1/admin/accounts
 ```
 
 ## Smoke Test

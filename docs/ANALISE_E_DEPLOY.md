@@ -6,7 +6,7 @@ Data da revisao: 2026-05-17.
 
 O projeto e um gateway FastAPI compativel com o formato da Anthropic Messages API. Ele deixa Claude Code e o chat web chamarem nomes publicos como `claude-code-pro`, enquanto o backend roteia para modelos OpenRouter mais baratos.
 
-O `frontier` e uma interface HTML/CSS/JS estatica com app de cliente e Admin. Ela serve bem como prototipo e painel operacional local, mas a protecao real precisa ficar no backend. Por isso agora o backend tem tokens de cliente e reserva diaria de custo por token.
+O `frontier` e uma interface HTML/CSS/JS estatica com app de cliente e Admin. O Admin gera gift cards para venda; o cliente cria a propria conta com nome, e-mail, senha e gift card. O backend tambem salva gift cards e contas em `ACCOUNT_DATA_FILE`, entao o resgate funciona entre navegadores diferentes. A protecao real fica no backend: tokens de cliente e reserva diaria de custo por token.
 
 ## Modelos usados
 
@@ -47,7 +47,7 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 
 ## Como vender uma conta API sem perder dinheiro
 
-Defina clientes em `CUSTOMER_ACCOUNTS` no ambiente da Square Cloud:
+Voce pode criar clientes fixos em `CUSTOMER_ACCOUNTS` ou deixar o Admin gerar gift cards. Quando o cliente resgata um gift card, o backend gera um token `cus_...` automaticamente.
 
 ```env
 CUSTOMER_ACCOUNTS=cus_live_abc|Cliente|149.90|60000|claude-code-pro|true;cus_live_xyz|Maria|299.90|120000|claude-code-ultra|true
@@ -96,6 +96,7 @@ OPENROUTER_APP_NAME=Claude Code
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
+ACCOUNT_DATA_FILE=data/accounts.json
 CUSTOMER_ACCOUNTS=...
 ```
 
@@ -112,8 +113,8 @@ curl https://SEU-SUBDOMINIO.squareweb.app/v1/budget \
 1. Banco de dados real para clientes.
    Hoje `CUSTOMER_ACCOUNTS` e otimo para comecar controlado, mas para escalar precisa de Postgres/Supabase/Firebase ou outro banco.
 
-2. Admin server-side.
-   O Admin visual ainda usa `localStorage`. Ele ajuda a montar limites e tokens, mas criar/pausar cliente em producao deve chamar endpoints protegidos no backend.
+2. Banco duravel para gift cards.
+   Hoje o backend usa JSON em `ACCOUNT_DATA_FILE`. Funciona para comecar, mas para escalar precisa migrar gift cards, contas e senhas para Postgres/Supabase/Firebase ou outro banco.
 
 3. Pagamento com webhook.
    Stripe/Mercado Pago devem ativar, pausar ou renovar clientes automaticamente.

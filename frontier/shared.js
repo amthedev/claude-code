@@ -6,6 +6,7 @@ const ClaudeApp = (() => {
   const HISTORY_KEY = "claude_frontier_history";
   const PROJECTS_KEY = "claude_frontier_projects";
   const ARTIFACTS_KEY = "claude_frontier_artifacts";
+  const GIFT_CARDS_KEY = "claude_frontier_gift_cards";
 
   const USD_TO_BRL = 5.5;
   const MIN_PROFIT_MARGIN = 0.5;
@@ -134,6 +135,14 @@ const ClaudeApp = (() => {
     save(ARTIFACTS_KEY, value);
   }
 
+  function giftCards() {
+    return load(GIFT_CARDS_KEY, []).map(recalculateGiftCard);
+  }
+
+  function saveGiftCards(value) {
+    save(GIFT_CARDS_KEY, value.map(recalculateGiftCard));
+  }
+
   function calculateLimit(priceBrl, modelKey, manualLimit) {
     const normalizedModelKey = normalizeModelKey(modelKey);
     const monthlyRevenue = Math.max(0, Number(priceBrl) || 0);
@@ -167,6 +176,48 @@ const ClaudeApp = (() => {
     };
   }
 
+  function normalizeGiftCode(code) {
+    return String(code || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function generateGiftCode() {
+    const chunk = () => Math.random().toString(36).slice(2, 6).toUpperCase();
+    return `CLAUDE-${chunk()}-${chunk()}-${chunk()}`;
+  }
+
+  function recalculateGiftCard(card) {
+    const limit = calculateLimit(card.price, card.modelKey, card.manualLimit);
+    return {
+      ...card,
+      code: normalizeGiftCode(card.code),
+      modelKey: normalizeModelKey(card.modelKey),
+      dailyLimit: limit.dailyLimit,
+      computedDailyTokens: limit.computedDailyTokens,
+      maxCostUsd: limit.maxCostUsd,
+    };
+  }
+
+  function makeGiftCard(values) {
+    const modelKey = normalizeModelKey(values.model);
+    return recalculateGiftCard({
+      id: `gift_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      code: normalizeGiftCode(values.code) || generateGiftCode(),
+      plan: values.plan.trim() || models[modelKey]?.label || "Claude Sonnet 4.6",
+      price: Number(values.price) || 0,
+      modelKey,
+      manualLimit: Number(values.manualLimit) || 0,
+      active: values.active !== "false",
+      usedByAccountId: "",
+      usedByLogin: "",
+      usedAt: "",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
   function makeAccount(values) {
     const account = {
       id: `acct_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -182,6 +233,7 @@ const ClaudeApp = (() => {
       modelKey: normalizeModelKey(values.model),
       manualLimit: Number(values.manualLimit) || 0,
       active: values.active !== "false",
+      giftCardCode: values.giftCardCode || "",
       usedToday: 0,
       createdAt: new Date().toISOString(),
     };
@@ -238,13 +290,17 @@ const ClaudeApp = (() => {
     saveProjects,
     artifacts,
     saveArtifacts,
+    giftCards,
+    saveGiftCards,
     calculateLimit,
     makeAccount,
+    makeGiftCard,
     estimateTokens,
     escapeHtml,
     modelOptions,
     normalizeModelKey,
     normalizePublicModel,
+    normalizeGiftCode,
     backendModelForPlan,
     demoReply,
     models,
