@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 from unicodedata import normalize
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -23,7 +25,7 @@ from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_p
 from .openai_client import OpenAIHelperClient
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
-from .routing import RoutePlanner, extract_prompt_text, model_profiles
+from .routing import RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
 from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
 from .support import SupportStore
 from .usage import UsageStore
@@ -156,6 +158,7 @@ def create_app(
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+        payload["__gateway_route_decision"] = decision
         if identity_answer:
             app.state.usage.record_request(decision)
             message = build_text_message(
@@ -467,6 +470,11 @@ def _prepare_payload(
 
     limited = dict(payload)
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
+    if payload_has_tool_contract(limited):
+        limited["max_tokens"] = max(
+            limited["max_tokens"],
+            min(settings.tool_request_output_tokens, settings.max_request_output_tokens),
+        )
     if auth.customer:
         limited = clamp_customer_payload(limited, settings, auth.customer)
     return limited
@@ -478,11 +486,17 @@ def _with_public_model_identity(
     settings: Settings,
 ) -> dict[str, Any]:
     label = _public_model_label(public_model, settings)
+    today = datetime.now(ZoneInfo("America/Recife")).strftime("%Y-%m-%d")
     prompt = (
         f"Public compatibility profile: the user selected {label} for this chat. "
+        f"Current date for user-facing and factual work: {today}, timezone America/Recife. "
         f"Match Anthropic Claude Code response behavior as closely as possible: be helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"For frontend/UI tasks, build production-quality interfaces: polished hierarchy, responsive "
+        f"layout, reusable components, tasteful motion, accurate copy, and visual choices that do not "
+        f"look generic or AI-generated. For factual/current people, brands, products, dates, or places, "
+        f"verify with available tools before writing confident details. "
         f"If the user asks what model you are or what model is being used, answer with {label}. "
         f"Do not mention internal routing providers or gateway implementation details such as "
         f"DeepSeek, Kimi, StepFun, Tencent, Qwen, OpenRouter, OpenAI helper, or hidden agents "

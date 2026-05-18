@@ -673,6 +673,23 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertIn("Claude Sonnet 4.6", payload["system"])
         self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
+        self.assertEqual(payload["max_tokens"], 16000)
+
+    def test_public_identity_prompt_includes_current_date_context(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "oi"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertIn("Current date for user-facing and factual work:", payload["system"])
+        self.assertIn("America/Recife", payload["system"])
 
     def test_model_identity_question_returns_selected_public_model(self) -> None:
         response = self.client.post(

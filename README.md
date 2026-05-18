@@ -254,6 +254,11 @@ POST /v1/admin/gift-cards
 GET  /v1/admin/accounts
 ```
 
+For Claude Code terminal usage, keep `MAX_REQUEST_OUTPUT_TOKENS` and
+`TOOL_REQUEST_OUTPUT_TOKENS` at `16000` or higher. Large file-creation tool calls
+can otherwise be truncated before the `Write` tool receives `file_path` and
+`content`.
+
 ## Smoke Test
 
 ```bash

@@ -69,7 +69,12 @@ class MessageOrchestrator:
         force_orchestration: bool = False,
         allow_openai_helper: bool = True,
     ) -> tuple[dict[str, Any], RouteDecision]:
-        decision = self.planner.plan(payload, force_orchestration=force_orchestration)
+        existing_decision = payload.get("__gateway_route_decision")
+        decision = (
+            existing_decision
+            if isinstance(existing_decision, RouteDecision)
+            else self.planner.plan(payload, force_orchestration=force_orchestration)
+        )
         self.usage.record_request(decision)
 
         if not decision.use_orchestration:
