@@ -208,6 +208,18 @@
               <span class="overline">Projeto atual</span>
               <h2>Claude Code API usada pelo app</h2>
             </div>
+            <form id="adminApiTargetForm" class="settings-form">
+              <label>
+                URL da API
+                <input name="baseUrl" placeholder="https://claude-code-api.squareweb.app" required />
+              </label>
+              <label>
+                Token da API admin
+                <input name="apiToken" autocomplete="off" required />
+              </label>
+              <button type="submit">Salvar API</button>
+              <div id="adminApiTargetMessage" class="form-error"></div>
+            </form>
             <div class="code-list">
               <code>POST /v1/messages</code>
               <code>GET /v1/models</code>

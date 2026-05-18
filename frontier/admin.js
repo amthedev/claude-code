@@ -14,6 +14,14 @@ function fillAdminLoginForm() {
   form.elements.apiToken.value = settings.token === "local-dev-token" ? "" : settings.token;
 }
 
+function fillAdminApiTargetForm() {
+  const settings = ClaudeApp.apiSettings();
+  const form = document.querySelector("#adminApiTargetForm");
+  if (!form) return;
+  form.elements.baseUrl.value = settings.baseUrl;
+  form.elements.apiToken.value = settings.token === "local-dev-token" ? "" : settings.token;
+}
+
 function rememberAdminDevice() {
   localStorage.setItem(ClaudeApp.ADMIN_SESSION_KEY, "1");
 }
@@ -32,6 +40,7 @@ async function unlockRememberedAdminDevice() {
   }
   rememberAdminDevice();
   showAdminApp();
+  fillAdminApiTargetForm();
   renderAll();
   return true;
 }
@@ -300,12 +309,34 @@ document.querySelector("#adminLoginForm").addEventListener("submit", async (even
   }
   rememberAdminDevice();
   showAdminApp();
+  fillAdminApiTargetForm();
   renderAll();
 });
 
 document.querySelector("#adminLogout").addEventListener("click", () => {
   forgetAdminDevice();
   location.reload();
+});
+
+document.querySelector("#adminApiTargetForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const message = document.querySelector("#adminApiTargetMessage");
+  message.textContent = "";
+  const settings = ClaudeApp.apiSettings();
+  ClaudeApp.saveApiSettings({
+    ...settings,
+    baseUrl: values.baseUrl || settings.baseUrl,
+    token: values.apiToken || settings.token,
+  });
+  try {
+    await refreshFromServer();
+    rememberAdminDevice();
+    fillAdminApiTargetForm();
+    renderAll();
+  } catch (error) {
+    message.textContent = error.fallback ? "API admin indisponível." : error.message;
+  }
 });
 
 document.querySelectorAll("[data-admin-tab]").forEach((button) => {
@@ -472,6 +503,7 @@ document.querySelector("#seedDemo").addEventListener("click", seedDemo);
 
 renderPreview();
 fillAdminLoginForm();
+fillAdminApiTargetForm();
 
 unlockRememberedAdminDevice().then((unlocked) => {
   if (!unlocked) renderAll();
