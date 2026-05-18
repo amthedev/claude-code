@@ -810,7 +810,8 @@ code {
 }
 
 .api-summary,
-.api-step {
+.api-step,
+.api-primary-command {
   border: 1px solid var(--cloud-line);
   border-radius: 8px;
   background: var(--cloud-panel);
@@ -854,14 +855,16 @@ code {
   gap: 10px;
 }
 
-.api-step-head {
+.api-step-head,
+.api-primary-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.api-step-head button {
+.api-step-head button,
+.api-primary-head button {
   min-height: 34px;
   border-color: var(--cloud-line);
   background: transparent;
@@ -893,6 +896,29 @@ code {
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.api-primary-command {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--cloud-line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--cloud-panel));
+}
+
+.api-primary-head strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.api-primary-head button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.api-command-box-primary {
+  min-height: 96px;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.26);
 }
 
 .support-panel,

@@ -278,6 +278,22 @@ function renderCodeBlock(title, code, copyLabel = "Copiar") {
   `;
 }
 
+function renderPrimaryCommand(code) {
+  const escapedCode = ClaudeApp.escapeHtml(code);
+  return `
+    <section class="api-primary-command">
+      <div class="api-primary-head">
+        <div>
+          <span class="overline">Terminal</span>
+          <strong>Copie e cole para usar agora</strong>
+        </div>
+        <button type="button" data-copy-value="${escapedCode}">Copiar comando</button>
+      </div>
+      <textarea class="api-command-box api-command-box-primary" readonly spellcheck="false" aria-label="Comando para terminal">${escapedCode}</textarea>
+    </section>
+  `;
+}
+
 function renderApiInstallGuide() {
   const guide = document.querySelector("#apiInstallGuide");
   if (!guide) return;
@@ -300,6 +316,7 @@ function renderApiInstallGuide() {
     : "Entre em uma conta ativa para gerar a configuracao personalizada.";
 
   guide.innerHTML = `
+    ${renderPrimaryCommand(sessionCommand)}
     <section class="api-summary">
       <div>
         <span class="overline">Acesso da conta</span>
@@ -312,12 +329,12 @@ function renderApiInstallGuide() {
       </div>
     </section>
     <ol class="api-steps">
+      <li>O comando acima ja vem com os dados da conta logada e o modelo escolhido.</li>
       <li>Use o instalador Python: ele pergunta se quer usar esta API e configura terminal/extensao.</li>
       <li>No terminal, depois da instalacao, ao rodar <code>claude</code> ele pergunta antes de usar a API.</li>
       <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
     </ol>
     ${renderCodeBlock("Instalador Python com pergunta", installCommand, "Copiar instalador")}
-    ${renderCodeBlock("Terminal rapido sem instalar", sessionCommand, "Copiar terminal")}
     ${renderCodeBlock("Somente extensao: salvar settings.json", settingsCommand, "Copiar extensao")}
     ${renderCodeBlock("Testar conexao", curlTest)}
   `;
