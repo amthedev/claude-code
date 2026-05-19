@@ -348,7 +348,9 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
-        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertEqual(len(self.app.state.openrouter.calls), 2)
+        self.assertEqual(self.app.state.openrouter.calls[0][0], "google/gemini-2.5-flash-lite")
+        self.assertIn("Internal Gemini coding guidance", self.app.state.openrouter.calls[-1][1]["system"])
 
     def test_auto_routes_terminal_file_edits_to_pro_coder(self) -> None:
         response = self.client.post(
@@ -608,9 +610,11 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(app.state.openai_helper.calls), 1)
-        self.assertEqual(len(app.state.openrouter.calls), 1)
+        self.assertEqual(len(app.state.openrouter.calls), 2)
+        self.assertEqual(app.state.openrouter.calls[0][0], "google/gemini-2.5-flash-lite")
         payload = app.state.openrouter.calls[-1][1]
         self.assertIn("Internal execution guidance", payload["system"])
+        self.assertIn("Internal Gemini coding guidance", payload["system"])
         self.assertIn("Use stricter validation", payload["system"])
 
     def test_openai_decision_director_guides_pro_tool_requests(self) -> None:

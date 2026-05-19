@@ -25,6 +25,10 @@ TEST_PROMPT = """You are an internal testing pass for an Anthropic-compatible co
 List the focused tests, edge cases, and regression risks that should be checked for this request.
 Keep it concise and actionable. Do not mention internal providers or hidden agents."""
 
+GEMINI_CODE_PROMPT = """You are an internal code-writing helper for an Anthropic-compatible coding assistant.
+Suggest concrete implementation choices, file structure, API boundaries, edge cases, and verification steps.
+Prefer one good path over multiple options. Keep it concise. Do not mention internal providers or hidden agents."""
+
 CODING_PROMPT = """You are drafting the implementation answer for an Anthropic-compatible coding assistant.
 Match Claude Code's practical coding style: concrete, concise, file-aware, command-aware, and careful about tests.
 Do not mention internal providers, hidden agents, or routing."""
@@ -111,11 +115,26 @@ class MessageOrchestrator:
             prompt=TEST_PROMPT,
             max_tokens=1000,
         )
-        plan_response, tests_response = await asyncio.gather(plan_task, tests_task)
+        gemini_task = self._agent_call(
+            payload,
+            model=agents["gemini_code_helper"],
+            prompt=GEMINI_CODE_PROMPT,
+            max_tokens=900,
+        )
+        plan_response, tests_response, gemini_response = await asyncio.gather(
+            plan_task,
+            tests_task,
+            gemini_task,
+        )
 
         plan_text = extract_response_text(plan_response)
         tests_text = extract_response_text(tests_response)
-        draft_context = self._internal_context(plan=plan_text, tests=tests_text)
+        gemini_text = extract_response_text(gemini_response)
+        draft_context = self._internal_context(
+            plan=plan_text,
+            tests=tests_text,
+            code_helper=gemini_text,
+        )
         draft_payload = append_user_context(with_system_prompt(payload, CODING_PROMPT), draft_context)
         draft_task = self._complete_with_limit(
             draft_payload,
@@ -146,6 +165,7 @@ class MessageOrchestrator:
         review_context = self._internal_context(
             plan=plan_text,
             tests=tests_text,
+            code_helper=gemini_text,
             draft=draft_text,
             challenger=challenger_text,
         )
@@ -161,6 +181,7 @@ class MessageOrchestrator:
             payload=payload,
             plan=plan_text,
             tests=tests_text,
+            code_helper=gemini_text,
             draft=draft_text,
             challenger=challenger_text,
             review=review_text,
@@ -187,6 +208,7 @@ class MessageOrchestrator:
         usage = merge_usage(
             plan_response,
             tests_response,
+            gemini_response,
             *candidate_responses,
             review_response,
             final_response,
@@ -222,6 +244,7 @@ class MessageOrchestrator:
         payload: dict[str, Any],
         plan: str,
         tests: str,
+        code_helper: str,
         draft: str,
         challenger: str,
         review: str,
@@ -234,6 +257,7 @@ class MessageOrchestrator:
             user_request=self._payload_preview(payload),
             plan=plan,
             tests=tests,
+            code_helper=code_helper,
             draft=draft,
             challenger=challenger,
             review=review,

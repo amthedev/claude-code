@@ -19,6 +19,8 @@ FRONTEND_REASONING_AGENT=tencent/hy3-preview
 BACKEND_PARTNER_AGENT=moonshotai/kimi-k2.6
 PROJECT_REASONING_AGENT=qwen/qwen3-235b-a22b-thinking-2507
 DEEP_REASONING_AGENT=deepseek/deepseek-r1
+GEMINI_CODE_HELPER_AGENT=google/gemini-2.5-flash-lite
+ENABLE_GEMINI_CODE_HELPER=true
 
 OPENAI_HELPER_MODEL=gpt-5.4-mini
 OPENAI_HELPER_REASONING_EFFORT=low
@@ -45,13 +47,14 @@ ENABLE_AGENT_ORCHESTRATION=true
 | Backend partner | `moonshotai/kimi-k2.6` | backend, projetos grandes, revisão e alternativa independente |
 | Project reasoning | `qwen/qwen3-235b-a22b-thinking-2507` | análise integral de projeto e arquitetura |
 | Deep reasoning | `deepseek/deepseek-r1` | somente tarefas críticas que pedem raciocínio profundo |
+| Gemini code helper | `google/gemini-2.5-flash-lite` | ajuda barata para estrutura, edge cases e verificação de código |
 | OpenAI helper | `gpt-5.4-mini` | escolhe defaults, reduz perguntas desnecessárias e revisa/design director em frontend e modo forte |
 
 ## Regras do roteador
 
 - `claude-code-economy`: força o caminho barato.
-- `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools/streaming incompatível, faz pipeline com DeepSeek/Kimi.
-- `claude-code-ultra`: adiciona Qwen Thinking, Kimi e só sobe para DeepSeek R1 em tarefas críticas.
+- `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools/streaming incompatível, faz pipeline com DeepSeek/Kimi/Gemini.
+- `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e só sobe para DeepSeek R1 em tarefas críticas.
 - `claude-code-ui`: usa Qwen3 Coder Next para construir frontend, DeepSeek Flash para correções simples e Hy3 para raciocínio de UI.
 - `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
 
@@ -84,6 +87,6 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 
 ## Fontes usadas
 
-- OpenRouter pages, consultadas em 2026-05-18: IDs e preços para Qwen3 Coder Next, DeepSeek V4 Flash/Pro, DeepSeek R1, Hy3 Preview, Kimi K2.6 e Qwen3 235B Thinking.
+- OpenRouter pages, consultadas em 2026-05-18: IDs e preços para Qwen3 Coder Next, DeepSeek V4 Flash/Pro, DeepSeek R1, Hy3 Preview, Kimi K2.6, Gemini 2.5 Flash Lite e Qwen3 235B Thinking.
 - OpenAI docs: o helper usa Responses API com reasoning effort baixo e modelo configurável; o preset usa `gpt-5.4-mini` por custo.
 - Anthropic Claude Code docs: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` e `ANTHROPIC_BASE_URL` são os pontos corretos para mapear aliases/modelos no Claude Code.

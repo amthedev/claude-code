@@ -383,6 +383,7 @@ class RoutePlanner:
             "backend_partner": self.settings.backend_partner_agent,
             "project_reasoning": self.settings.project_reasoning_agent,
             "deep_reasoning": self.settings.deep_reasoning_agent,
+            "gemini_code_helper": self.settings.gemini_code_helper_agent,
         }
         if mode == "economy":
             agents["coding"] = self.settings.cheap_code_agent
@@ -478,6 +479,7 @@ class RoutePlanner:
             return [
                 agents["reasoning"],
                 agents["fast"],
+                agents["gemini_code_helper"],
                 agents["coding"],
                 agents["ultra_fallback"],
                 agents["premium_review"],
@@ -487,6 +489,7 @@ class RoutePlanner:
             return [
                 agents["reasoning"],
                 agents["fast"],
+                agents["gemini_code_helper"],
                 agents["coding"],
                 agents["review"],
                 agents["coding"],

@@ -36,6 +36,7 @@ DEFAULT_PRICES: dict[str, ModelPrice] = {
     "deepseek/deepseek-v4-pro": ModelPrice(prompt=0.000000435, completion=0.00000087),
     "deepseek/deepseek-v4-flash": ModelPrice(prompt=0.000000112, completion=0.000000224),
     "deepseek/deepseek-r1": ModelPrice(prompt=0.0000007, completion=0.0000025),
+    "google/gemini-2.5-flash-lite": ModelPrice(prompt=0.0000001, completion=0.0000004),
     "moonshotai/kimi-k2.6": ModelPrice(prompt=0.00000073, completion=0.00000349),
     "qwen/qwen3.6-flash": ModelPrice(prompt=0.0000001875, completion=0.000001125),
     "qwen/qwen3-235b-a22b-thinking-2507": ModelPrice(prompt=0.00000011, completion=0.0000006),

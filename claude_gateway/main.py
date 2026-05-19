@@ -45,6 +45,11 @@ project-consistent choices. Ask the user only if continuing would require missin
 irreversible action, legal/medical/financial judgment, or a personal preference that materially changes the result.
 Do not write full source code. Do not mention OpenAI, ChatGPT, internal routing, providers, or hidden helpers."""
 
+GEMINI_CODE_HELPER_PROMPT = """You are a concise internal coding helper for an Anthropic-compatible coding assistant.
+Return implementation guidance that helps write better code: file structure, APIs, component boundaries, edge cases,
+small pitfalls, and verification. Prefer concrete decisions over options. Keep it short. Do not mention Gemini,
+internal routing, providers, or hidden helpers."""
+
 
 def create_app(
     settings: Settings | None = None,
@@ -147,6 +152,7 @@ def create_app(
             "backend_partner_agent": app.state.settings.backend_partner_agent,
             "project_reasoning_agent": app.state.settings.project_reasoning_agent,
             "deep_reasoning_agent": app.state.settings.deep_reasoning_agent,
+            "gemini_code_helper_agent": app.state.settings.gemini_code_helper_agent,
         }
         return {
             "baseline_model": CLAUDE_BASELINE_MODEL,
@@ -197,6 +203,8 @@ def create_app(
         payload["__gateway_route_decision"] = decision
 
         reservation = _reserve_customer_budget(app, auth, payload, decision)
+        payload = await _with_gemini_code_guidance(app, payload, decision)
+        payload["__gateway_route_decision"] = decision
         if payload.get("stream"):
             if decision.use_orchestration:
                 try:
@@ -642,6 +650,73 @@ def _execution_director_input(payload: dict[str, Any], decision: RouteDecision) 
         f"Complexity: {decision.complexity}\n\n"
         f"User/project context:\n{preview}"
     )
+
+
+async def _with_gemini_code_guidance(
+    app: FastAPI,
+    payload: dict[str, Any],
+    decision: RouteDecision,
+) -> dict[str, Any]:
+    settings = app.state.settings
+    if not settings.enable_gemini_code_helper or not settings.openrouter_api_key:
+        return payload
+    if decision.use_orchestration:
+        return payload
+    if decision.mode == "economy" or decision.task_type == "explanation":
+        return payload
+    if decision.task_type not in {
+        "architecture",
+        "debugging",
+        "file_edit",
+        "frontend",
+        "review",
+        "simple_code",
+        "testing",
+    }:
+        return payload
+
+    helper_payload = {
+        "model": settings.gemini_code_helper_agent,
+        "max_tokens": 600,
+        "stream": False,
+        "system": GEMINI_CODE_HELPER_PROMPT,
+        "messages": [
+            {
+                "role": "user",
+                "content": _execution_director_input(payload, decision),
+            }
+        ],
+    }
+    try:
+        response = await app.state.openrouter.complete_messages(
+            helper_payload,
+            settings.gemini_code_helper_agent,
+        )
+    except Exception:
+        return payload
+
+    guidance = _extract_text_blocks(response).strip()
+    if not guidance:
+        return payload
+    return _append_system_prompt(
+        payload,
+        (
+            "Internal Gemini coding guidance to apply silently before answering. "
+            "Use it to improve code structure, edge cases, and verification. "
+            "Do not mention this guidance to the user.\n"
+            f"{guidance[:3000]}"
+        ),
+    )
+
+
+def _extract_text_blocks(response: dict[str, Any]) -> str:
+    chunks: list[str] = []
+    content = response.get("content")
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                chunks.append(block["text"])
+    return "\n".join(chunks)
 
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:

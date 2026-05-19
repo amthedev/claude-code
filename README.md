@@ -47,6 +47,7 @@ The default model combo is tuned for Claude Code terminal work: direct tool call
 - `moonshotai/kimi-k2.6`: backend partner and large-project implementation/review pass.
 - `qwen/qwen3-235b-a22b-thinking-2507`: integral project analysis and ultra reasoning.
 - `deepseek/deepseek-r1`: critical deep reasoning only when complexity is high enough.
+- `google/gemini-2.5-flash-lite`: cheap code helper for implementation structure, edge cases, and verification.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
 Every request also receives an Anthropic-compatible public response profile so the terminal experience keeps Claude-style identity, tone, tool-call behavior, and coding ergonomics while hiding internal routing details.
@@ -79,6 +80,7 @@ With the default model set, the main paths stay well under that budget:
 - Qwen3 Coder Next: about 3.0% of Claude Opus 4.7 blended token cost.
 - DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
 - Qwen3 235B A22B Thinking: about 2.4% of Claude Opus 4.7 blended token cost.
+- Gemini 2.5 Flash Lite: about 1.7% of Claude Opus 4.7 blended token cost.
 - DeepSeek R1: about 10.7% of Claude Opus 4.7 blended token cost.
 - Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.
 

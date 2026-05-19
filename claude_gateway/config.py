@@ -97,6 +97,8 @@ class Settings:
     backend_partner_agent: str = "moonshotai/kimi-k2.6"
     project_reasoning_agent: str = "qwen/qwen3-235b-a22b-thinking-2507"
     deep_reasoning_agent: str = "deepseek/deepseek-r1"
+    gemini_code_helper_agent: str = "google/gemini-2.5-flash-lite"
+    enable_gemini_code_helper: bool = True
 
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
@@ -166,6 +168,11 @@ class Settings:
                 "qwen/qwen3-235b-a22b-thinking-2507",
             ),
             deep_reasoning_agent=os.getenv("DEEP_REASONING_AGENT", "deepseek/deepseek-r1"),
+            gemini_code_helper_agent=os.getenv(
+                "GEMINI_CODE_HELPER_AGENT",
+                "google/gemini-2.5-flash-lite",
+            ),
+            enable_gemini_code_helper=_bool_env("ENABLE_GEMINI_CODE_HELPER", True),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",
