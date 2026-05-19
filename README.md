@@ -47,7 +47,7 @@ The default model combo is tuned for Claude Code terminal work: direct tool call
 - `moonshotai/kimi-k2.6`: backend partner and large-project implementation/review pass.
 - `qwen/qwen3-235b-a22b-thinking-2507`: integral project analysis and ultra reasoning.
 - `deepseek/deepseek-r1`: critical deep reasoning only when complexity is high enough.
-- `gpt-5.4-mini`: optional OpenAI helper/design-director pass when `OPENAI_API_KEY` is configured.
+- `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
 Every request also receives an Anthropic-compatible public response profile so the terminal experience keeps Claude-style identity, tone, tool-call behavior, and coding ergonomics while hiding internal routing details.
 
@@ -94,7 +94,7 @@ You can add an OpenAI/ChatGPT key so the internal agent pipeline gets one extra 
 OPENAI_API_KEY=sk-proj-...
 ```
 
-By default this helper can run for customer/admin frontend and strongest-mode calls as a concise design director/reviewer. To disable it for customer chat:
+By default this helper can run for customer/admin pro, frontend, and strongest-mode calls as a concise decision director. It chooses practical defaults so the assistant executes instead of asking the user to pick between options. To disable it for customer chat:
 
 ```env
 OPENAI_HELPER_FOR_CUSTOMERS=false

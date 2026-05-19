@@ -51,6 +51,7 @@ class Settings:
     openai_helper_reasoning_effort: str = "low"
     openai_helper_for_customers: bool = True
     enable_openai_design_director: bool = True
+    enable_openai_decision_director: bool = True
     request_timeout_seconds: float = 120.0
     enable_agent_orchestration: bool = True
     max_cost_ratio_vs_claude: float = 0.50
@@ -115,6 +116,7 @@ class Settings:
             openai_helper_reasoning_effort=os.getenv("OPENAI_HELPER_REASONING_EFFORT", "low"),
             openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", True),
             enable_openai_design_director=_bool_env("ENABLE_OPENAI_DESIGN_DIRECTOR", True),
+            enable_openai_decision_director=_bool_env("ENABLE_OPENAI_DECISION_DIRECTOR", True),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),

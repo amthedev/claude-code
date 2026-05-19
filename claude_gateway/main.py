@@ -38,6 +38,13 @@ Focus on premium SaaS polish, layout hierarchy, responsive behavior, component s
 copy quality, spacing, states, accessibility, and verification. Do not write full source code. Do not mention
 OpenAI, ChatGPT, internal routing, providers, or that another model is helping."""
 
+OPENAI_DECISION_DIRECTOR_PROMPT = """You are a concise decision director for a coding assistant.
+Choose the best practical defaults so the assistant can execute instead of asking the user to choose.
+Return only actionable decisions, assumptions, and next steps. Prefer proceeding with reversible, conventional,
+project-consistent choices. Ask the user only if continuing would require missing credentials, payment, destructive
+irreversible action, legal/medical/financial judgment, or a personal preference that materially changes the result.
+Do not write full source code. Do not mention OpenAI, ChatGPT, internal routing, providers, or hidden helpers."""
+
 
 def create_app(
     settings: Settings | None = None,
@@ -171,7 +178,6 @@ def create_app(
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
-        payload = await _with_openai_design_guidance(app, auth, payload, decision)
         payload["__gateway_route_decision"] = decision
         if identity_answer:
             app.state.usage.record_request(decision)
@@ -186,6 +192,9 @@ def create_app(
                     media_type="text/event-stream",
                 )
             return JSONResponse(message)
+
+        payload = await _with_openai_execution_guidance(app, auth, payload, decision)
+        payload["__gateway_route_decision"] = decision
 
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         if payload.get("stream"):
@@ -434,7 +443,7 @@ def create_app(
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
-        payload = await _with_openai_design_guidance(app, auth, payload, decision)
+        payload = await _with_openai_execution_guidance(app, auth, payload, decision)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         try:
             response, decision = await app.state.orchestrator.complete(
@@ -562,6 +571,11 @@ def _with_public_model_identity(
         f"Match Anthropic Claude Code response behavior as closely as possible: be helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"Act with strong execution autonomy: when the user has given a reasonable goal, choose sensible "
+        f"project-consistent defaults and proceed instead of asking them to pick between options. State "
+        f"brief assumptions only when helpful. Ask a clarifying question only when blocked by missing "
+        f"credentials, irreversible destructive actions, safety/legal/financial risk, or a preference that "
+        f"materially changes the result. "
         f"For frontend/UI tasks, build production-quality interfaces: polished hierarchy, responsive "
         f"layout, reusable components, tasteful motion, accurate copy, and visual choices that do not "
         f"look generic or AI-generated. For factual/current people, brands, products, dates, or places, "
@@ -574,24 +588,33 @@ def _with_public_model_identity(
     return _append_system_prompt(payload, prompt)
 
 
-async def _with_openai_design_guidance(
+async def _with_openai_execution_guidance(
     app: FastAPI,
     auth: AuthContext,
     payload: dict[str, Any],
     decision: RouteDecision,
 ) -> dict[str, Any]:
     settings = app.state.settings
-    if not settings.enable_openai_design_director:
-        return payload
     if not _allow_openai_helper(auth, settings) or not app.state.openai_helper:
         return payload
-    if decision.task_type != "frontend" and decision.mode not in {"ultra", "ui"}:
+
+    wants_design = settings.enable_openai_design_director and (
+        decision.task_type == "frontend" or decision.mode in {"ultra", "ui"}
+    )
+    wants_decision = settings.enable_openai_decision_director and (
+        decision.mode in {"pro", "ultra", "ui"} and decision.task_type != "explanation"
+    )
+    if not wants_design and not wants_decision:
         return payload
+
+    instructions = OPENAI_DECISION_DIRECTOR_PROMPT
+    if wants_design:
+        instructions = f"{OPENAI_DECISION_DIRECTOR_PROMPT}\n\n{OPENAI_DESIGN_DIRECTOR_PROMPT}"
 
     try:
         guidance = await app.state.openai_helper.generate_text(
-            instructions=OPENAI_DESIGN_DIRECTOR_PROMPT,
-            input_text=_design_director_input(payload, decision),
+            instructions=instructions,
+            input_text=_execution_director_input(payload, decision),
             max_output_tokens=min(settings.openai_helper_max_output_tokens, 900),
         )
     except Exception:
@@ -602,14 +625,15 @@ async def _with_openai_design_guidance(
         return payload
 
     prompt = (
-        "Internal frontend quality guidance to apply silently before answering. "
-        "Use it to improve the implementation; do not mention this guidance to the user.\n"
+        "Internal execution guidance to apply silently before answering. "
+        "Use it to choose defaults, proceed with the best path, and reduce unnecessary questions. "
+        "Do not mention this guidance to the user.\n"
         f"{guidance[:4000]}"
     )
     return _append_system_prompt(payload, prompt)
 
 
-def _design_director_input(payload: dict[str, Any], decision: RouteDecision) -> str:
+def _execution_director_input(payload: dict[str, Any], decision: RouteDecision) -> str:
     preview = extract_prompt_text(payload)[:12000]
     return (
         f"Public model: {decision.public_model}\n"

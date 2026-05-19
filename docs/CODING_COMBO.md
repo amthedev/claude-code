@@ -25,6 +25,7 @@ OPENAI_HELPER_REASONING_EFFORT=low
 OPENAI_HELPER_MAX_OUTPUT_TOKENS=900
 OPENAI_HELPER_FOR_CUSTOMERS=true
 ENABLE_OPENAI_DESIGN_DIRECTOR=true
+ENABLE_OPENAI_DECISION_DIRECTOR=true
 
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
@@ -44,7 +45,7 @@ ENABLE_AGENT_ORCHESTRATION=true
 | Backend partner | `moonshotai/kimi-k2.6` | backend, projetos grandes, revisão e alternativa independente |
 | Project reasoning | `qwen/qwen3-235b-a22b-thinking-2507` | análise integral de projeto e arquitetura |
 | Deep reasoning | `deepseek/deepseek-r1` | somente tarefas críticas que pedem raciocínio profundo |
-| OpenAI helper | `gpt-5.4-mini` | revisão/design director opcional em frontend e modo forte |
+| OpenAI helper | `gpt-5.4-mini` | escolhe defaults, reduz perguntas desnecessárias e revisa/design director em frontend e modo forte |
 
 ## Regras do roteador
 

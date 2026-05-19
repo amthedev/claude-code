@@ -405,7 +405,9 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(app.state.openai_helper.calls), 1)
+        self.assertEqual(len(app.state.openai_helper.calls), 2)
+        self.assertIn("decision director", app.state.openai_helper.calls[0]["instructions"])
+        self.assertIn("helper reviewing", app.state.openai_helper.calls[1]["instructions"])
         final_payload = app.state.openrouter.calls[-1][1]
         self.assertIn("OPENAI_HELPER", str(final_payload))
         self.assertIn("Use stricter validation", str(final_payload))
@@ -608,8 +610,41 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(len(app.state.openai_helper.calls), 1)
         self.assertEqual(len(app.state.openrouter.calls), 1)
         payload = app.state.openrouter.calls[-1][1]
-        self.assertIn("Internal frontend quality guidance", payload["system"])
+        self.assertIn("Internal execution guidance", payload["system"])
         self.assertIn("Use stricter validation", payload["system"])
+
+    def test_openai_decision_director_guides_pro_tool_requests(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            openai_helper_factory=FakeOpenAIHelper,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 256,
+                "tools": [{"name": "write_file", "input_schema": {"type": "object"}}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Implemente uma API e escolha a melhor estrutura de arquivos",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.openai_helper.calls), 1)
+        self.assertIn("decision director", app.state.openai_helper.calls[0]["instructions"])
+        payload = app.state.openrouter.calls[-1][1]
+        self.assertIn("Internal execution guidance", payload["system"])
+        self.assertIn("choose defaults", payload["system"])
 
     def test_customer_quota_blocks_before_upstream_call(self) -> None:
         with TemporaryDirectory() as tmpdir:
