@@ -6,10 +6,10 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=claude-compact-20260520" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=claude-functional-20260520" />
   </head>
   <body class="client-page">
-    <main id="clientApp" class="cloud-shell">
+    <main id="clientApp" class="cloud-shell sidebar-open">
       <aside class="icon-rail">
         <button id="sidebarOpen" class="icon-button" title="Menu" type="button" aria-label="Abrir menu lateral" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M9 6v12" /></svg>
@@ -28,9 +28,6 @@
         </button>
         <button class="icon-button" title="Artefatos" data-panel="artifactsPanel" aria-label="Artefatos">
           <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
-        </button>
-        <button class="icon-button dimmed" title="Código" data-panel="chatPanel" aria-label="Código">
-          <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
         </button>
         <button class="icon-button auth-only hidden" title="Claude Code API" data-panel="apiPanel" aria-label="Claude Code API">
           <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
@@ -73,11 +70,6 @@
             <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
             <span>Artefatos</span>
           </button>
-          <button class="sidebar-action disabled" type="button" data-sidebar-panel="chatPanel">
-            <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
-            <span>Código</span>
-            <span class="sidebar-upgrade">Fazer Upgrade</span>
-          </button>
           <button class="sidebar-action" type="button" data-sidebar-panel="settingsPanel">
             <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
             <span>Personalizar</span>
@@ -96,6 +88,15 @@
             <span id="sidebarAccountPlan">Entre para usar</span>
           </span>
         </button>
+        <div id="accountMenu" class="account-menu hidden" role="menu" aria-label="Configurações da conta">
+          <div id="accountMenuLogin" class="account-menu-email">Entre para usar</div>
+          <button type="button" data-account-action="settings">Configurações <span>⇧⌘,</span></button>
+          <button type="button" data-account-action="support">Receber ajuda</button>
+          <hr />
+          <button type="button" data-account-action="apps">Obter apps e extensões</button>
+          <hr />
+          <button type="button" data-account-action="logout">Sair</button>
+        </div>
       </aside>
 
       <section class="cloud-main">
@@ -121,11 +122,17 @@
             <form id="heroComposer" class="hero-composer">
               <textarea name="prompt" placeholder="Como posso ajudar você hoje?"></textarea>
               <div class="composer-row">
-                <button class="composer-icon attach-button" type="button" aria-label="Anexar foto ou arquivo">
-                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-                </button>
+                <div class="composer-menu-wrap">
+                  <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
+                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                  </button>
+                </div>
                 <div class="composer-right">
-                  <select id="heroModel"></select>
+                  <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
+                  <button class="model-trigger" type="button" data-model-trigger="heroModel" aria-label="Modelo">
+                    <span data-model-label="heroModel">Sonnet 4.6</span>
+                    <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+                  </button>
                   <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                     <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                   </button>
@@ -136,26 +143,30 @@
               </div>
             </form>
             <div class="quick-actions">
-              <button data-prompt="Crie uma API FastAPI com autenticação simples">
+              <button data-suggestion-category="code" data-prompt="Crie uma API FastAPI com autenticação simples">
                 <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
                 Código
               </button>
-              <button data-prompt="Escreva um texto profissional para meu cliente">
+              <button data-suggestion-category="writing" data-prompt="Escreva um texto profissional para meu cliente">
                 <svg viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16v4ZM13 7l4 4" /></svg>
                 Escrever
               </button>
-              <button data-prompt="Me ensine este erro passo a passo">
+              <button data-suggestion-category="learning" data-prompt="Me ensine este erro passo a passo">
                 <svg viewBox="0 0 24 24"><path d="M4 9 12 5l8 4-8 4-8-4Z" /><path d="M7 11v4c0 1.5 2.2 3 5 3s5-1.5 5-3v-4" /></svg>
                 Aprender
               </button>
-              <button data-prompt="Organize minhas tarefas de hoje">
+              <button data-suggestion-category="personal" data-prompt="Organize minhas tarefas de hoje">
                 <svg viewBox="0 0 24 24"><path d="M5 10h14v7a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-7ZM8 10V6M16 10V6M9 6h6" /></svg>
                 Assuntos pessoais
               </button>
-              <button data-prompt="Escolha o melhor modelo para esta tarefa">
+              <button data-suggestion-category="choice" data-prompt="Escolha o melhor modelo para esta tarefa">
                 <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-3 11.2V17h6v-2.8A6 6 0 0 0 12 3ZM10 21h4" /></svg>
                 Escolha do Claude
               </button>
+            </div>
+            <div id="suggestionPanel" class="suggestion-panel hidden" aria-live="polite"></div>
+            <div id="incognitoNotice" class="incognito-notice hidden">
+              Chats anônimos não são salvos, adicionados à memória ou usados para treinar modelos.
             </div>
             <div id="previewNotice" class="preview-notice">
               Entre em uma conta ativa para usar o chat.
@@ -167,11 +178,17 @@
           <form id="bottomComposer" class="bottom-composer hidden">
             <textarea name="prompt" placeholder="Responder ao Claude..."></textarea>
             <div class="composer-row">
-              <button class="composer-icon attach-button" type="button" aria-label="Anexar foto ou arquivo">
-                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
-              </button>
+              <div class="composer-menu-wrap">
+                <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+              </div>
               <div class="composer-right">
-                <select id="bottomModel"></select>
+                <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
+                <button class="model-trigger" type="button" data-model-trigger="bottomModel" aria-label="Modelo">
+                  <span data-model-label="bottomModel">Sonnet 4.6</span>
+                  <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+                </button>
                 <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                   <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                 </button>
@@ -184,43 +201,55 @@
           <div id="chatError" class="form-error chat-error"></div>
         </section>
 
-        <section id="searchPanel" class="client-panel side-panel">
-          <div class="panel-header">
-            <span class="overline">Busca</span>
-            <h2>Pesquisar conversas</h2>
+        <section id="searchPanel" class="client-panel command-panel" role="dialog" aria-label="Pesquisar conversas, projetos e artefatos">
+          <div class="command-dialog">
+            <div class="command-search-row">
+              <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+              <input id="searchInput" placeholder="Pesquisar conversas, projetos e artefatos" />
+              <button id="searchClose" type="button" aria-label="Fechar">Fechar</button>
+            </div>
+            <div id="searchResults" class="command-results"></div>
           </div>
-          <input id="searchInput" placeholder="Buscar no historico..." />
-          <div id="searchResults" class="result-list"></div>
         </section>
 
-        <section id="historyPanel" class="client-panel side-panel">
-          <div class="panel-header">
-            <span class="overline">Conversas</span>
-            <h2>Histórico</h2>
+        <section id="historyPanel" class="client-panel workspace-panel">
+          <div class="workspace-header">
+            <h1>Conversas</h1>
+            <div class="workspace-actions">
+              <button id="newChat" class="primary" type="button">Novo bate-papo</button>
+            </div>
           </div>
-          <button id="newChat" class="primary">Nova conversa</button>
-          <div id="historyList" class="result-list"></div>
+          <label class="workspace-search">
+            <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+            <input id="historySearch" placeholder="Pesquisar chats..." />
+          </label>
+          <div id="historyList" class="table-list"></div>
         </section>
 
-        <section id="projectsPanel" class="client-panel side-panel">
-          <div class="panel-header">
-            <span class="overline">Projetos</span>
-            <h2>Contextos salvos</h2>
+        <section id="projectsPanel" class="client-panel workspace-panel">
+          <div class="workspace-header">
+            <h1>Projetos</h1>
+            <div class="workspace-actions">
+              <button id="openProjectModal" class="primary" type="button">Novo projeto</button>
+            </div>
           </div>
-          <form id="projectForm" class="mini-form">
-            <input name="name" placeholder="Nome do projeto" required />
-            <textarea name="context" placeholder="Instruções ou contexto do projeto"></textarea>
-            <button class="primary" type="submit">Salvar projeto</button>
-          </form>
-          <div id="projectList" class="result-list"></div>
+          <label class="workspace-search">
+            <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+            <input id="projectSearch" placeholder="Pesquisar projetos" />
+          </label>
+          <div id="projectList" class="project-list"></div>
         </section>
 
-        <section id="artifactsPanel" class="client-panel side-panel">
-          <div class="panel-header">
-            <span class="overline">Artefatos</span>
-            <h2>Arquivos gerados localmente</h2>
+        <section id="artifactsPanel" class="client-panel workspace-panel">
+          <div class="workspace-header">
+            <h1>Artefatos</h1>
+            <button id="newArtifact" class="primary" type="button">Novo artefato</button>
           </div>
-          <div id="artifactList" class="result-list"></div>
+          <label class="workspace-search">
+            <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+            <input id="artifactSearch" placeholder="Pesquisar seus artefatos" />
+          </label>
+          <div id="artifactList" class="artifact-list"></div>
         </section>
 
         <section id="apiPanel" class="client-panel side-panel">
@@ -279,6 +308,71 @@
         </section>
       </section>
     </main>
+
+    <button id="incognitoToggle" class="incognito-toggle" type="button" aria-label="Usar incógnito">
+      <svg viewBox="0 0 24 24"><path d="M6 11V9a6 6 0 0 1 12 0v2" /><path d="M4 11h16v4a8 8 0 0 1-16 0v-4Z" /><path d="M8.5 15h0M15.5 15h0" /></svg>
+      <span>Chat anônimo</span>
+    </button>
+
+    <div id="attachMenu" class="floating-menu hidden" role="menu" aria-label="Adicionar arquivos e projetos">
+      <button type="button" data-attach-action="files"><span>＋</span>Adicionar arquivos ou fotos <kbd>⌘U</kbd></button>
+      <button type="button" data-attach-action="project"><span>▤</span>Abrir projetos</button>
+    </div>
+
+    <div id="modelMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Modelo">
+      <button type="button" data-model-value="claude-code-ultra">
+        <strong>Opus 4.7</strong>
+        <span>Mais capaz para trabalhos ambiciosos</span>
+      </button>
+      <button type="button" data-model-value="claude-code-pro">
+        <strong>Sonnet 4.6</strong>
+        <span>Rápido para o trabalho diário</span>
+      </button>
+      <button type="button" data-model-value="claude-code-economy">
+        <strong>Haiku 4.5</strong>
+        <span>Mais rápido e econômico</span>
+      </button>
+    </div>
+
+    <section id="projectModal" class="auth-modal hidden" aria-modal="true" role="dialog" aria-label="Criar um projeto">
+      <form id="projectForm" class="project-dialog dark-card">
+        <div class="modal-header">
+          <h2>Criar um projeto</h2>
+          <button id="projectModalClose" type="button">Fechar</button>
+        </div>
+        <label>
+          No que você está trabalhando?
+          <input name="name" placeholder="Dê um nome ao projeto" required />
+        </label>
+        <label>
+          O que você quer realizar?
+          <textarea name="context" placeholder="Descreva seu projeto, objetivos, assunto, etc..."></textarea>
+        </label>
+        <div class="modal-actions">
+          <button id="projectModalCancel" type="button">Cancelar</button>
+          <button class="primary" type="submit">Criar projeto</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="artifactStartModal" class="auth-modal hidden" aria-modal="true" role="dialog" aria-label="Novo artefato">
+      <div class="artifact-dialog dark-card">
+        <div class="modal-header">
+          <h2>Novo artefato</h2>
+          <button id="artifactStartClose" type="button">Fechar</button>
+        </div>
+        <p>Mãos à obra! Escolha uma categoria de artefato ou comece a construir sua ideia do zero.</p>
+        <div class="artifact-categories">
+          <button type="button" data-artifact-prompt="Crie um aplicativo ou site com layout responsivo">Aplicativos e sites</button>
+          <button type="button" data-artifact-prompt="Crie um documento ou modelo reutilizável">Documentos e modelos</button>
+          <button type="button" data-artifact-prompt="Crie um jogo simples e polido">Jogos</button>
+          <button type="button" data-artifact-prompt="Crie uma ferramenta de produtividade">Ferramentas de produtividade</button>
+          <button type="button" data-artifact-prompt="Crie um projeto criativo">Projetos criativos</button>
+          <button type="button" data-artifact-prompt="Crie um quiz ou pesquisa">Quiz ou pesquisa</button>
+          <button type="button" data-artifact-prompt="">Começar do zero</button>
+        </div>
+      </div>
+    </section>
 
     <section id="authModal" class="auth-modal hidden" aria-modal="true" role="dialog">
       <div class="auth-dialog dark-card">
@@ -340,6 +434,6 @@
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
     <script src="/frontier/shared.js?v=claude-light-20260520"></script>
-    <script src="/frontier/client.js?v=claude-sidebar-avatar-20260520"></script>
+    <script src="/frontier/client.js?v=claude-functional-20260520"></script>
   </body>
 </html>

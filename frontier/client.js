@@ -7,6 +7,62 @@ let supportPollTimer = null;
 let pendingAttachments = [];
 let activeConversationId = null;
 let serverHistory = [];
+let activeFloatingMenu = null;
+let activeModelSelectId = "heroModel";
+let incognitoMode = false;
+
+const promptSuggestions = {
+  code: {
+    title: "Código",
+    items: [
+      "Desenhar wireframes de UI/UX",
+      "Avalie minha abordagem para depuração de problemas",
+      "Projetar sistemas de registro",
+      "Projetar planos de escalabilidade",
+      "Planejar um roadmap de desenvolvimento",
+    ],
+  },
+  writing: {
+    title: "Escrever",
+    items: [
+      "Escrever estudos de caso",
+      "Desenvolver modelos de conteúdo",
+      "Criar roteiros de apresentação",
+      "Crie algo que seja lido diferentemente dependendo do humor do leitor",
+      "Criar recursos de FAQ",
+    ],
+  },
+  learning: {
+    title: "Aprender",
+    items: [
+      "Criar resumos de estudo",
+      "Criar cronogramas de aprendizado",
+      "Desenvolva uma abordagem de aprendizado que abraça contradições interessantes",
+      "Preparar para uma prova ou entrevista",
+      "Desenvolver estruturas de aprendizagem",
+    ],
+  },
+  personal: {
+    title: "Assuntos pessoais",
+    items: [
+      "Organize minhas tarefas de hoje",
+      "Planeje uma semana equilibrada",
+      "Crie uma lista de compras por refeições",
+      "Ajude a escrever uma mensagem difícil",
+      "Monte um plano de viagem enxuto",
+    ],
+  },
+  choice: {
+    title: "Escolha do Claude",
+    items: [
+      "Escolha o melhor modelo para esta tarefa",
+      "Transforme uma ideia solta em plano",
+      "Faça perguntas para entender meu objetivo",
+      "Compare abordagens e escolha uma",
+      "Sugira o próximo passo mais útil",
+    ],
+  },
+};
 
 function account() {
   return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
@@ -34,6 +90,38 @@ function closeSidebar() {
   setSidebarOpen(false);
 }
 
+function closeFloatingMenus() {
+  document.querySelectorAll(".floating-menu, #accountMenu").forEach((menu) => {
+    menu.classList.add("hidden");
+  });
+  activeFloatingMenu = null;
+}
+
+function positionMenu(menu, anchor, align = "left") {
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth || 280;
+  const height = menu.offsetHeight || 320;
+  const left =
+    align === "right"
+      ? Math.max(10, Math.min(window.innerWidth - width - 10, rect.right - width))
+      : Math.max(10, Math.min(window.innerWidth - width - 10, rect.left));
+  const preferredTop = rect.bottom + 8;
+  const top = Math.max(10, Math.min(window.innerHeight - height - 10, preferredTop));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function toggleFloatingMenu(menuId, anchor, align = "left") {
+  const menu = document.querySelector(menuId);
+  if (!menu) return;
+  const wasOpen = !menu.classList.contains("hidden") && activeFloatingMenu === menu;
+  closeFloatingMenus();
+  if (wasOpen) return;
+  menu.classList.remove("hidden");
+  positionMenu(menu, anchor, align);
+  activeFloatingMenu = menu;
+}
+
 function setAuthTab(tabId) {
   document.querySelectorAll("[data-auth-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.authTab === tabId);
@@ -49,6 +137,21 @@ function fillModelSelects() {
   document.querySelector("#bottomModel").innerHTML = ClaudeApp.modelOptions(settings.model);
   const apiModel = document.querySelector("#apiModel");
   if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptions(settings.model);
+  updateModelButtons();
+}
+
+function modelLabel(value) {
+  const option = Array.from(document.querySelectorAll("#heroModel option")).find(
+    (item) => item.value === value,
+  );
+  return option?.textContent || "Sonnet 4.6";
+}
+
+function updateModelButtons() {
+  document.querySelectorAll("[data-model-label]").forEach((label) => {
+    const select = document.querySelector(`#${label.dataset.modelLabel}`);
+    label.textContent = select ? modelLabel(select.value) : "Sonnet 4.6";
+  });
 }
 
 function loadApiForm() {
@@ -59,6 +162,7 @@ function loadApiForm() {
   form.elements.model.value = settings.model;
   document.querySelector("#heroModel").value = settings.model;
   document.querySelector("#bottomModel").value = settings.model;
+  updateModelButtons();
   renderApiInstallGuide();
 }
 
@@ -498,7 +602,8 @@ function renderAccount() {
 
   if (!current || !current.active) {
     document.querySelector("#planBadge").textContent = "Entrar para usar";
-    document.querySelector("#welcomeTitle").textContent = "Como posso ajudar hoje?";
+    document.querySelector("#welcomeTitle").textContent = incognitoMode ? "Olá, seja quem for você" : "Como posso ajudar hoje?";
+    document.querySelector("#accountMenuLogin").textContent = "Entre para usar";
     sidebarName.textContent = "Entrar";
     sidebarPlan.textContent = "Entre para usar";
     sidebarAvatar.textContent = "";
@@ -524,7 +629,10 @@ function renderAccount() {
   const preferredName = (current.displayName || current.name || "Você").trim();
   syncCustomerApiToken(current);
   document.querySelector("#planBadge").textContent = ClaudeApp.planDisplayName(current.plan);
-  document.querySelector("#welcomeTitle").textContent = `De volta ao trabalho, ${preferredName}?`;
+  document.querySelector("#welcomeTitle").textContent = incognitoMode
+    ? "Olá, seja quem for você"
+    : `De volta ao trabalho, ${preferredName}?`;
+  document.querySelector("#accountMenuLogin").textContent = current.login || preferredName;
   sidebarName.textContent = preferredName;
   sidebarPlan.textContent = ClaudeApp.planDisplayName(current.plan);
   sidebarAvatar.textContent = accountInitial(current);
@@ -553,8 +661,9 @@ function renderAccount() {
 }
 
 function setPanel(panelId) {
+  closeFloatingMenus();
   document.querySelectorAll(".client-panel").forEach((panel) => panel.classList.remove("active"));
-  document.querySelector(`#${panelId}`).classList.add("active");
+  document.querySelector(`#${panelId}`)?.classList.add("active");
   document.querySelectorAll(".icon-rail [data-panel]").forEach((button) => {
     button.classList.toggle("active", button.dataset.panel === panelId);
   });
@@ -564,6 +673,10 @@ function setPanel(panelId) {
   document.querySelector("#sidebarNewChat").classList.toggle("active", panelId === "chatPanel");
   renderSidePanels();
   if (panelId === "supportPanel") refreshSupportTicket();
+  if (panelId === "searchPanel") {
+    searchLocal(document.querySelector("#searchInput")?.value || "");
+    window.setTimeout(() => document.querySelector("#searchInput")?.focus(), 0);
+  }
 }
 
 function addMessage(role, text) {
@@ -631,7 +744,7 @@ async function loadServerHistory() {
 }
 
 async function saveConversation() {
-  if (!activeConversation.length || !account()?.active) return;
+  if (incognitoMode || !activeConversation.length || !account()?.active) return;
 
   try {
     const data = await conversationRequest("/v1/conversations", {
@@ -809,8 +922,10 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
     ClaudeApp.saveAccounts(accounts);
   }
 
-  await saveConversation();
-  createArtifactIfUseful(prompt, answer);
+  if (!incognitoMode) {
+    await saveConversation();
+    createArtifactIfUseful(prompt, answer);
+  }
   renderAccount();
   renderSidePanels();
 }
@@ -840,12 +955,20 @@ function historyDate(item) {
 
 function historyItemMarkup(item) {
   return `
-    <button class="result-item history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
-      <span class="history-title">${ClaudeApp.escapeHtml(item.title)}</span>
-      <span class="history-meta">
+    <button class="table-row history-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
+      <span>
+        <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
         <span>${historyDate(item)}</span>
-        <span>Abrir</span>
       </span>
+    </button>
+  `;
+}
+
+function commandItemMarkup(item) {
+  return `
+    <button class="command-option" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
+      <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
+      <span>${historyDate(item)}</span>
     </button>
   `;
 }
@@ -859,11 +982,15 @@ function sidebarRecentMarkup(item) {
 }
 
 function renderSidePanels() {
-  document.querySelector("#historyList").innerHTML = serverHistory.length
-    ? serverHistory
+  const historyQuery = (document.querySelector("#historySearch")?.value || "").trim().toLowerCase();
+  const visibleHistory = historyQuery
+    ? serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(historyQuery))
+    : serverHistory;
+  document.querySelector("#historyList").innerHTML = visibleHistory.length
+    ? visibleHistory
         .map((item) => historyItemMarkup(item))
         .join("")
-    : `<div class="result-item"><p>Nenhuma conversa salva no banco ainda.</p></div>`;
+    : `<div class="empty-workspace"><p>${historyQuery ? "Nenhuma conversa encontrada." : "Nenhuma conversa salva no banco ainda."}</p></div>`;
   document.querySelector("#sidebarRecentList").innerHTML = serverHistory.length
     ? serverHistory
         .slice(0, 8)
@@ -871,43 +998,79 @@ function renderSidePanels() {
         .join("")
     : `<div class="sidebar-empty">Nenhuma conversa recente.</div>`;
 
+  const projectQuery = (document.querySelector("#projectSearch")?.value || "").trim().toLowerCase();
   const projects = ClaudeApp.projects();
-  document.querySelector("#projectList").innerHTML = projects.length
-    ? projects
+  const visibleProjects = projectQuery
+    ? projects.filter((item) => `${item.name} ${item.context}`.toLowerCase().includes(projectQuery))
+    : projects;
+  document.querySelector("#projectList").innerHTML = visibleProjects.length
+    ? visibleProjects
         .map(
           (item) => `
-            <div class="result-item">
-              <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
-              <p>${ClaudeApp.escapeHtml(item.context || "Sem contexto adicional.")}</p>
-            </div>
+            <article class="project-card">
+              <div>
+                <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
+                <p>${ClaudeApp.escapeHtml(item.context || "Sem contexto adicional.")}</p>
+                <span class="badge">Projeto local</span>
+              </div>
+            </article>
           `,
         )
         .join("")
-    : `<div class="result-item"><p>Nenhum projeto local.</p></div>`;
+    : `<div class="empty-workspace"><p>${projectQuery ? "Nenhum projeto encontrado." : "Nenhum projeto local. Crie um projeto para guardar contexto e instruções."}</p></div>`;
 
+  const artifactQuery = (document.querySelector("#artifactSearch")?.value || "").trim().toLowerCase();
   const artifacts = ClaudeApp.artifacts();
-  document.querySelector("#artifactList").innerHTML = artifacts.length
-    ? artifacts
+  const visibleArtifacts = artifactQuery
+    ? artifacts.filter((item) => `${item.title} ${item.body}`.toLowerCase().includes(artifactQuery))
+    : artifacts;
+  document.querySelector("#artifactList").innerHTML = visibleArtifacts.length
+    ? visibleArtifacts
         .map(
           (item) => `
-            <div class="result-item">
+            <article class="artifact-card">
               <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
               <p>${ClaudeApp.escapeHtml(item.body.slice(0, 180))}</p>
-            </div>
+            </article>
           `,
         )
         .join("")
-    : `<div class="result-item"><p>Nenhum artefato gerado.</p></div>`;
+    : `<div class="empty-workspace"><strong>${artifactQuery ? "Nenhum artefato encontrado." : "O que você vai construir com artefatos?"}</strong><p>${artifactQuery ? "Tente outra busca." : "Transforme apps, jogos, templates e ferramentas de ideias em realidade."}</p></div>`;
 }
 
 function searchLocal(query) {
   const q = query.trim().toLowerCase();
-  const results = serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(q));
-  document.querySelector("#searchResults").innerHTML = results.length
-    ? results
-        .map((item) => historyItemMarkup(item))
-        .join("")
-    : `<div class="result-item"><p>Nenhum resultado.</p></div>`;
+  const conversationResults = q
+    ? serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(q))
+    : serverHistory;
+  const projects = q
+    ? ClaudeApp.projects().filter((item) => `${item.name} ${item.context}`.toLowerCase().includes(q))
+    : [];
+  const artifacts = q
+    ? ClaudeApp.artifacts().filter((item) => `${item.title} ${item.body}`.toLowerCase().includes(q))
+    : [];
+  document.querySelector("#searchResults").innerHTML =
+    conversationResults.length || projects.length || artifacts.length
+      ? [
+          ...conversationResults.map((item) => commandItemMarkup(item)),
+          ...projects.map(
+            (item) => `
+              <button class="command-option" type="button" data-open-panel="projectsPanel">
+                <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
+                <span>Projeto local</span>
+              </button>
+            `,
+          ),
+          ...artifacts.map(
+            (item) => `
+              <button class="command-option" type="button" data-open-panel="artifactsPanel">
+                <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
+                <span>Artefato local</span>
+              </button>
+            `,
+          ),
+        ].join("")
+      : `<div class="command-option"><p>Nenhum resultado.</p></div>`;
 }
 
 function supportStatusText(ticket) {
@@ -1063,6 +1226,64 @@ function triggerAttachmentPicker() {
   if (!input) return;
   input.value = "";
   input.click();
+}
+
+function textareaForFormId(formId) {
+  return document.querySelector(`#${formId} textarea`);
+}
+
+function updateComposerDraftState(textarea) {
+  const form = textarea.closest("form");
+  form?.classList.toggle("has-draft", Boolean(textarea.value.trim()));
+}
+
+function fillHeroPrompt(text) {
+  const textarea = textareaForFormId("heroComposer");
+  if (!textarea) return;
+  textarea.value = text;
+  textarea.focus();
+  updateComposerDraftState(textarea);
+}
+
+function renderSuggestionPanel(category) {
+  const panel = document.querySelector("#suggestionPanel");
+  const config = promptSuggestions[category];
+  if (!panel || !config) return;
+  panel.innerHTML = `
+    <div class="suggestion-head">
+      <span>${ClaudeApp.escapeHtml(config.title)}</span>
+      <button type="button" data-close-suggestions aria-label="Fechar sugestões">×</button>
+    </div>
+    <div class="suggestion-list">
+      ${config.items
+        .map(
+          (item) => `
+            <button type="button" data-suggestion-prompt="${ClaudeApp.escapeHtml(item)}">
+              ${ClaudeApp.escapeHtml(item)}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  panel.classList.remove("hidden");
+}
+
+function closeSuggestionPanel() {
+  const panel = document.querySelector("#suggestionPanel");
+  if (panel) panel.classList.add("hidden");
+}
+
+function setIncognitoMode(enabled) {
+  incognitoMode = enabled;
+  if (enabled) setPanel("chatPanel");
+  document.querySelector("#clientApp").classList.toggle("incognito-mode", enabled);
+  document.querySelector("#incognitoNotice").classList.toggle("hidden", !enabled);
+  document.querySelector("#incognitoToggle").setAttribute(
+    "aria-label",
+    enabled ? "Sair do modo anônimo" : "Usar incógnito",
+  );
+  renderAccount();
 }
 
 function submitComposerOnEnter(event) {
@@ -1259,7 +1480,12 @@ document.querySelector("#sidebarRecentList").addEventListener("click", (event) =
 
 document.querySelector("#searchResults").addEventListener("click", (event) => {
   const item = event.target.closest("[data-conversation-id]");
-  if (item) openConversation(item.dataset.conversationId);
+  if (item) {
+    openConversation(item.dataset.conversationId);
+    return;
+  }
+  const panel = event.target.closest("[data-open-panel]");
+  if (panel) setPanel(panel.dataset.openPanel);
 });
 
 document.querySelectorAll(".voice-button").forEach((button) => {
@@ -1271,8 +1497,44 @@ document.querySelectorAll(".voice-button").forEach((button) => {
 document.querySelectorAll(".attach-button").forEach((button) => {
   button.addEventListener("click", (event) => {
     event.preventDefault();
-    triggerAttachmentPicker();
+    toggleFloatingMenu("#attachMenu", button);
   });
+});
+
+document.querySelector("#attachMenu").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-attach-action]");
+  if (!button) return;
+  const action = button.dataset.attachAction;
+  closeFloatingMenus();
+  if (action === "files") {
+    triggerAttachmentPicker();
+    return;
+  }
+  if (action === "project") {
+    setPanel("projectsPanel");
+    return;
+  }
+});
+
+document.querySelectorAll("[data-model-trigger]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    activeModelSelectId = button.dataset.modelTrigger;
+    toggleFloatingMenu("#modelMenu", button, "right");
+    event.preventDefault();
+  });
+});
+
+document.querySelector("#modelMenu").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-model-value]");
+  if (!item) return;
+  const select = document.querySelector(`#${activeModelSelectId}`);
+  if (!select) return;
+  select.value = item.dataset.modelValue;
+  const settings = ClaudeApp.apiSettings();
+  ClaudeApp.saveApiSettings({ ...settings, model: select.value });
+  fillModelSelects();
+  loadApiForm();
+  closeFloatingMenus();
 });
 
 document.querySelector("#attachmentInput").addEventListener("change", async (event) => {
@@ -1290,14 +1552,23 @@ document.querySelector("#attachmentInput").addEventListener("change", async (eve
 
 document.querySelectorAll(".quick-actions button").forEach((button) => {
   button.addEventListener("click", () => {
-    const textarea = document.querySelector("#heroComposer textarea");
-    textarea.value = button.dataset.prompt;
-    textarea.focus();
+    renderSuggestionPanel(button.dataset.suggestionCategory);
   });
+});
+
+document.querySelector("#suggestionPanel").addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-suggestions]")) {
+    closeSuggestionPanel();
+    return;
+  }
+  const suggestion = event.target.closest("[data-suggestion-prompt]");
+  if (!suggestion) return;
+  fillHeroPrompt(suggestion.dataset.suggestionPrompt);
 });
 
 document.querySelectorAll("#heroComposer textarea, #bottomComposer textarea").forEach((textarea) => {
   textarea.addEventListener("keydown", submitComposerOnEnter);
+  textarea.addEventListener("input", () => updateComposerDraftState(textarea));
 });
 
 document.querySelector("#heroComposer").addEventListener("submit", async (event) => {
@@ -1394,6 +1665,7 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
   });
   ClaudeApp.saveProjects(projects);
   event.currentTarget.reset();
+  closeProjectModal();
   renderSidePanels();
 });
 
@@ -1424,7 +1696,48 @@ document.querySelector("#searchInput").addEventListener("input", (event) => {
   searchLocal(event.target.value);
 });
 
+document.querySelector("#historySearch").addEventListener("input", renderSidePanels);
+document.querySelector("#projectSearch").addEventListener("input", renderSidePanels);
+document.querySelector("#artifactSearch").addEventListener("input", renderSidePanels);
+
+document.querySelector("#searchClose").addEventListener("click", () => {
+  setPanel("chatPanel");
+});
+
 document.querySelector("#newChat").addEventListener("click", resetChat);
+
+document.querySelector("#openProjectModal").addEventListener("click", () => {
+  document.querySelector("#projectModal").classList.remove("hidden");
+  window.setTimeout(() => document.querySelector("#projectForm input[name='name']")?.focus(), 0);
+});
+
+function closeProjectModal() {
+  document.querySelector("#projectModal").classList.add("hidden");
+}
+
+document.querySelector("#projectModalClose").addEventListener("click", closeProjectModal);
+document.querySelector("#projectModalCancel").addEventListener("click", closeProjectModal);
+
+document.querySelector("#newArtifact").addEventListener("click", () => {
+  document.querySelector("#artifactStartModal").classList.remove("hidden");
+});
+
+document.querySelector("#artifactStartClose").addEventListener("click", () => {
+  document.querySelector("#artifactStartModal").classList.add("hidden");
+});
+
+document.querySelector("#artifactStartModal").addEventListener("click", (event) => {
+  if (event.target.id === "artifactStartModal") {
+    document.querySelector("#artifactStartModal").classList.add("hidden");
+    return;
+  }
+  const button = event.target.closest("[data-artifact-prompt]");
+  if (!button) return;
+  document.querySelector("#artifactStartModal").classList.add("hidden");
+  resetChat().then(() => {
+    if (button.dataset.artifactPrompt) fillHeroPrompt(button.dataset.artifactPrompt);
+  });
+});
 
 document.querySelector("#clientLogout").addEventListener("click", async () => {
   await saveConversation();
@@ -1441,12 +1754,29 @@ document.querySelector("#clientLogout").addEventListener("click", async () => {
   renderAccount();
 });
 
-document.querySelector("#sidebarAccountButton").addEventListener("click", () => {
-  if (account()?.active) {
-    setPanel("settingsPanel");
+document.querySelector("#sidebarAccountButton").addEventListener("click", (event) => {
+  if (!account()?.active) {
+    openAuthModal("clientLoginForm");
     return;
   }
-  openAuthModal("clientLoginForm");
+  toggleFloatingMenu("#accountMenu", event.currentTarget);
+});
+
+document.querySelector("#accountMenu").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-account-action]");
+  if (!button) return;
+  closeFloatingMenus();
+  const action = button.dataset.accountAction;
+  if (action === "settings") setPanel("settingsPanel");
+  if (action === "support") setPanel("supportPanel");
+  if (action === "apps") setPanel("apiPanel");
+  if (action === "logout") {
+    document.querySelector("#clientLogout").click();
+  }
+});
+
+document.querySelector("#incognitoToggle").addEventListener("click", () => {
+  setIncognitoMode(!incognitoMode);
 });
 
 document.querySelector("#authOpen").addEventListener("click", () => openAuthModal("clientLoginForm"));
@@ -1456,6 +1786,26 @@ document.querySelector("#authModal").addEventListener("click", (event) => {
 });
 document.querySelectorAll("[data-auth-tab]").forEach((button) => {
   button.addEventListener("click", () => setAuthTab(button.dataset.authTab));
+});
+
+document.addEventListener("click", (event) => {
+  if (
+    event.target.closest(
+      ".floating-menu, #accountMenu, .attach-button, .model-trigger, #sidebarAccountButton",
+    )
+  ) {
+    return;
+  }
+  closeFloatingMenus();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeFloatingMenus();
+    if (document.querySelector("#searchPanel").classList.contains("active")) setPanel("chatPanel");
+    document.querySelector("#projectModal").classList.add("hidden");
+    document.querySelector("#artifactStartModal").classList.add("hidden");
+  }
 });
 
 fillModelSelects();
