@@ -7,6 +7,7 @@ const ClaudeApp = (() => {
   const PROJECTS_KEY = "claude_frontier_projects";
   const ARTIFACTS_KEY = "claude_frontier_artifacts";
   const GIFT_CARDS_KEY = "claude_frontier_gift_cards";
+  const PURCHASES_KEY = "claude_frontier_purchases";
 
   const USD_TO_BRL = 5.5;
   const MIN_PROFIT_MARGIN = 0.5;
@@ -29,6 +30,45 @@ const ClaudeApp = (() => {
       usdPerToken: 0.00000087,
     },
   };
+
+  const planCatalog = [
+    {
+      id: "free",
+      name: "Grátis",
+      description: "Para testar com respostas básicas.",
+      price: 0,
+      modelKey: "haiku",
+      manualLimit: 2500,
+      checkoutMode: "instant",
+    },
+    {
+      id: "starter",
+      name: "Econômico",
+      description: "Modelo barato para uso leve.",
+      price: 49.9,
+      modelKey: "haiku",
+      manualLimit: 12000,
+      checkoutMode: "manual",
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      description: "Libera Sonnet para trabalho diário.",
+      price: 149.9,
+      modelKey: "sonnet",
+      manualLimit: 45000,
+      checkoutMode: "manual",
+    },
+    {
+      id: "ultra",
+      name: "Ultra",
+      description: "Libera o roteamento mais forte.",
+      price: 299.9,
+      modelKey: "opus",
+      manualLimit: 90000,
+      checkoutMode: "manual",
+    },
+  ];
 
   const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
   const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -137,6 +177,14 @@ const ClaudeApp = (() => {
 
   function saveGiftCards(value) {
     save(GIFT_CARDS_KEY, value.map(recalculateGiftCard));
+  }
+
+  function purchases() {
+    return load(PURCHASES_KEY, []);
+  }
+
+  function savePurchases(value) {
+    save(PURCHASES_KEY, value);
   }
 
   function calculateLimit(priceBrl, modelKey, manualLimit) {
@@ -256,6 +304,29 @@ const ClaudeApp = (() => {
       .join("");
   }
 
+  function allowedPublicModelsForAccount(account) {
+    const key = normalizeModelKey(account?.modelKey);
+    if (key === "haiku") return [models.haiku.publicModel];
+    if (key === "sonnet") return [models.haiku.publicModel, models.sonnet.publicModel];
+    return [models.haiku.publicModel, models.sonnet.publicModel, models.opus.publicModel];
+  }
+
+  function modelOptionsForAccount(account, selectedPublicModel) {
+    const selectedModel = normalizePublicModel(selectedPublicModel);
+    const allowed = new Set(allowedPublicModelsForAccount(account));
+    return Object.values(models)
+      .map((model) => {
+        const selected = model.publicModel === selectedModel ? "selected" : "";
+        const disabled = allowed.has(model.publicModel) ? "" : "disabled";
+        return `<option value="${model.publicModel}" ${selected} ${disabled}>${model.label}</option>`;
+      })
+      .join("");
+  }
+
+  function paidPlans() {
+    return planCatalog.filter((plan) => plan.id !== "free");
+  }
+
   function planDisplayName(plan) {
     const value = String(plan || "").trim();
     if (!value) return "Plano ativo";
@@ -278,12 +349,18 @@ const ClaudeApp = (() => {
     saveArtifacts,
     giftCards,
     saveGiftCards,
+    purchases,
+    savePurchases,
     calculateLimit,
     makeAccount,
     makeGiftCard,
     estimateTokens,
     escapeHtml,
     modelOptions,
+    modelOptionsForAccount,
+    allowedPublicModelsForAccount,
+    paidPlans,
+    planCatalog,
     planDisplayName,
     normalizeModelKey,
     normalizePublicModel,

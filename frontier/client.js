@@ -133,10 +133,14 @@ function setAuthTab(tabId) {
 
 function fillModelSelects() {
   const settings = ClaudeApp.apiSettings();
-  document.querySelector("#heroModel").innerHTML = ClaudeApp.modelOptions(settings.model);
-  document.querySelector("#bottomModel").innerHTML = ClaudeApp.modelOptions(settings.model);
+  const current = account();
+  const allowed = ClaudeApp.allowedPublicModelsForAccount(current);
+  const selected = allowed.includes(settings.model) ? settings.model : allowed[0];
+  if (selected !== settings.model) ClaudeApp.saveApiSettings({ ...settings, model: selected });
+  document.querySelector("#heroModel").innerHTML = ClaudeApp.modelOptionsForAccount(current, selected);
+  document.querySelector("#bottomModel").innerHTML = ClaudeApp.modelOptionsForAccount(current, selected);
   const apiModel = document.querySelector("#apiModel");
-  if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptions(settings.model);
+  if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptionsForAccount(current, selected);
   updateModelButtons();
 }
 
@@ -570,6 +574,33 @@ async function supportRequest(path, options = {}) {
   return response.json();
 }
 
+async function customerRequest(path, options = {}) {
+  const settings = ClaudeApp.apiSettings();
+  const current = account();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${current?.apiToken || settings.token}`,
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    let detail = `API respondeu ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      // Keep status text.
+    }
+    throw new Error(detail);
+  }
+
+  return response.json();
+}
+
 function saveServerAccount(accountData) {
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex(
@@ -590,6 +621,83 @@ function syncCustomerApiToken(current) {
   if (settings.token === current.apiToken) return;
   ClaudeApp.saveApiSettings({ ...settings, token: current.apiToken });
   loadApiForm();
+}
+
+function modelKeyLabel(modelKey) {
+  const key = ClaudeApp.normalizeModelKey(modelKey);
+  if (key === "haiku") return "Haiku 4.5";
+  if (key === "sonnet") return "Sonnet 4.6";
+  return "Opus 4.7";
+}
+
+function renderPlanCards() {
+  const current = account();
+  const target = document.querySelector("#planCards");
+  if (!target) return;
+  target.innerHTML = ClaudeApp.paidPlans()
+    .map((plan) => {
+      const currentPlan =
+        current &&
+        ClaudeApp.planDisplayName(current.plan).toLowerCase() ===
+          ClaudeApp.planDisplayName(plan.name).toLowerCase();
+      return `
+        <article class="plan-card ${currentPlan ? "current" : ""}">
+          <div>
+            <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
+            <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
+            <p>${ClaudeApp.escapeHtml(plan.description)}</p>
+          </div>
+          <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
+          <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
+          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" ${!current || currentPlan ? "disabled" : ""}>
+            ${!current ? "Entre para comprar" : currentPlan ? "Plano atual" : "Solicitar upgrade"}
+          </button>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderPurchases() {
+  const purchases = ClaudeApp.purchases().filter((item) => !account() || item.accountId === account()?.id);
+  const target = document.querySelector("#purchaseList");
+  if (!target) return;
+  if (!purchases.length) {
+    target.innerHTML = `<div class="empty-workspace"><p>Nenhum pedido de plano nesta conta.</p></div>`;
+    return;
+  }
+  target.innerHTML = purchases
+    .map(
+      (purchase) => `
+        <article class="purchase-row">
+          <div>
+            <strong>${ClaudeApp.escapeHtml(purchase.plan)}</strong>
+            <span>${new Date(purchase.createdAt).toLocaleString("pt-BR")}</span>
+          </div>
+          <span>${ClaudeApp.brl.format(purchase.price)}</span>
+          <span class="badge ${purchase.status === "paid" ? "ok" : purchase.status === "canceled" ? "bad" : ""}">
+            ${purchase.status === "paid" ? "Pago" : purchase.status === "canceled" ? "Cancelado" : "Pendente"}
+          </span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderBilling() {
+  renderPlanCards();
+  renderPurchases();
+}
+
+async function loadPurchases() {
+  if (!account()?.apiToken) return;
+  try {
+    const data = await customerRequest("/v1/billing/purchases");
+    ClaudeApp.savePurchases(data.data || []);
+    renderBilling();
+  } catch {
+    renderBilling();
+  }
 }
 
 function renderAccount() {
@@ -622,6 +730,8 @@ function renderAccount() {
     authOpen.classList.remove("hidden");
     logout.classList.add("hidden");
     logout.textContent = "";
+    renderBilling();
+    fillModelSelects();
     stopSupportPolling();
     return;
   }
@@ -657,6 +767,8 @@ function renderAccount() {
   authOpen.classList.add("hidden");
   logout.classList.remove("hidden");
   logout.textContent = accountInitial(current);
+  renderBilling();
+  fillModelSelects();
   startSupportPolling();
 }
 
@@ -673,6 +785,7 @@ function setPanel(panelId) {
   document.querySelector("#sidebarNewChat").classList.toggle("active", panelId === "chatPanel");
   renderSidePanels();
   if (panelId === "supportPanel") refreshSupportTicket();
+  if (panelId === "plansPanel") renderBilling();
   if (panelId === "searchPanel") {
     searchLocal(document.querySelector("#searchInput")?.value || "");
     window.setTimeout(() => document.querySelector("#searchInput")?.focus(), 0);
@@ -1424,13 +1537,15 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
   closeAuthModal();
   renderAccount();
   loadServerHistory();
+  loadPurchases();
 });
 
 document.querySelector("#clientSignupForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   const message = document.querySelector("#clientSignupMessage");
   message.textContent = "";
-  const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const values = Object.fromEntries(new FormData(form).entries());
   const accounts = ClaudeApp.accounts();
   const login = values.login.trim();
   const exists = accounts.some((item) => item.login.toLowerCase() === login.toLowerCase());
@@ -1444,10 +1559,11 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     const account = saveServerAccount(data.account);
     currentAccountId = account.id;
     localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, account.id);
-    event.currentTarget.reset();
+    form.reset();
     closeAuthModal();
     renderAccount();
     loadServerHistory();
+    loadPurchases();
     return;
   } catch (error) {
     message.textContent = error.fallback ? "API indisponível para criar conta." : error.message;
@@ -1527,6 +1643,13 @@ document.querySelectorAll("[data-model-trigger]").forEach((button) => {
 document.querySelector("#modelMenu").addEventListener("click", (event) => {
   const item = event.target.closest("[data-model-value]");
   if (!item) return;
+  const current = account();
+  if (!ClaudeApp.allowedPublicModelsForAccount(current).includes(item.dataset.modelValue)) {
+    closeFloatingMenus();
+    setPanel("plansPanel");
+    showChatNotice("Esse modelo exige upgrade de plano.");
+    return;
+  }
   const select = document.querySelector(`#${activeModelSelectId}`);
   if (!select) return;
   select.value = item.dataset.modelValue;
@@ -1535,6 +1658,33 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
   fillModelSelects();
   loadApiForm();
   closeFloatingMenus();
+});
+
+document.querySelector("#planCards").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-buy-plan]");
+  if (!button || button.disabled) return;
+  if (!account()?.active) {
+    openAuthModal("clientLoginForm");
+    return;
+  }
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = "Registrando...";
+  try {
+    const data = await customerRequest("/v1/billing/purchases", {
+      method: "POST",
+      body: JSON.stringify({ planId: button.dataset.buyPlan }),
+    });
+    const purchases = ClaudeApp.purchases();
+    purchases.unshift(data.purchase);
+    ClaudeApp.savePurchases(purchases);
+    renderBilling();
+    showChatNotice("Pedido criado. O plano entra quando o admin confirmar o pagamento.");
+  } catch (error) {
+    showChatNotice(error.message);
+    button.disabled = false;
+    button.textContent = original;
+  }
 });
 
 document.querySelector("#attachmentInput").addEventListener("change", async (event) => {

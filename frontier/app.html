@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=claude-functional-20260520" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=plans-20260520" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell sidebar-open">
@@ -74,6 +74,10 @@
             <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
             <span>Personalizar</span>
           </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="plansPanel">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16v10H4V7Z" /><path d="M7 11h3M14 11h3M7 15h10" /></svg>
+            <span>Planos</span>
+          </button>
         </nav>
 
         <section class="sidebar-recents" aria-label="Conversas recentes">
@@ -104,7 +108,7 @@
           <div class="plan-pill">
             <span id="planBadge">Entrar para usar</span>
             <span>•</span>
-            <button data-panel="settingsPanel" type="button">Conta</button>
+            <button data-panel="plansPanel" type="button">Planos</button>
           </div>
           <div class="top-actions">
             <button class="ghost-top" data-panel="settingsPanel" type="button" aria-label="Ajuda">
@@ -306,6 +310,25 @@
           </div>
           <div id="accountDetails" class="details-list"></div>
         </section>
+
+        <section id="plansPanel" class="client-panel workspace-panel">
+          <div class="workspace-header">
+            <div>
+              <h1>Planos</h1>
+              <p class="workspace-subtitle">Escolha um plano. O upgrade pago fica pendente até o admin confirmar o pagamento.</p>
+            </div>
+          </div>
+          <div id="planCards" class="plan-grid"></div>
+          <div class="panel table-panel billing-panel">
+            <div class="panel-heading inline">
+              <div>
+                <span class="overline">Compras</span>
+                <h2>Pedidos desta conta</h2>
+              </div>
+            </div>
+            <div id="purchaseList" class="purchase-list"></div>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -409,7 +432,7 @@
         </form>
 
         <form id="clientSignupForm" class="auth-pane">
-          <p>Crie sua conta usando o gift card comprado.</p>
+          <p>Crie uma conta grátis agora. Se tiver gift card, ele libera o plano comprado.</p>
           <label>
             Nome
             <input name="name" autocomplete="name" placeholder="Como quer ser chamado" required />
@@ -423,8 +446,8 @@
             <input name="password" type="password" autocomplete="new-password" required />
           </label>
           <label>
-            Gift card
-            <input name="giftCard" autocomplete="one-time-code" placeholder="CLAUDE-XXXX-XXXX-XXXX" required />
+            Gift card opcional
+            <input name="giftCard" autocomplete="one-time-code" placeholder="CLAUDE-XXXX-XXXX-XXXX" />
           </label>
           <button class="primary" type="submit">Criar conta e entrar</button>
           <div id="clientSignupMessage" class="form-error neutral"></div>
@@ -433,7 +456,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=claude-light-20260520"></script>
-    <script src="/frontier/client.js?v=claude-functional-20260520"></script>
+    <script src="/frontier/shared.js?v=plans-20260520"></script>
+    <script src="/frontier/client.js?v=plans-20260520"></script>
   </body>
 </html>

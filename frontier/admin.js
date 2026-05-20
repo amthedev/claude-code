@@ -5,6 +5,7 @@ let supportState = { waiting: [], active: [], closed: [] };
 let activeSupportTicket = null;
 let supportPollTimer = null;
 let adminSetupConfigured = true;
+let purchaseState = [];
 
 function showAdminApp() {
   adminLogin.classList.add("hidden");
@@ -133,12 +134,15 @@ async function adminAuthRequest(path, payload) {
 }
 
 async function refreshFromServer() {
-  const [giftCards, accounts] = await Promise.all([
+  const [giftCards, accounts, purchases] = await Promise.all([
     adminRequest("/v1/admin/gift-cards"),
     adminRequest("/v1/admin/accounts"),
+    adminRequest("/v1/admin/purchases"),
   ]);
   ClaudeApp.saveGiftCards(giftCards.data || []);
   ClaudeApp.saveAccounts(accounts.data || []);
+  purchaseState = purchases.data || [];
+  ClaudeApp.savePurchases(purchaseState);
 }
 
 async function refreshSupportFromServer() {
@@ -182,15 +186,68 @@ function renderPreview() {
 function renderMetrics(accounts) {
   const active = accounts.filter((account) => account.active);
   const revenue = active.reduce((sum, account) => sum + account.price, 0);
+  const collected = purchaseState
+    .filter((purchase) => purchase.status === "paid")
+    .reduce((sum, purchase) => sum + Number(purchase.price || 0), 0);
   const usage = active.reduce((sum, account) => sum + account.usedToday, 0);
   const limits = active.reduce((sum, account) => sum + account.dailyLimit, 0);
 
   document.querySelector("#metricRevenue").textContent = ClaudeApp.brl.format(revenue);
+  document.querySelector("#metricCollected").textContent = ClaudeApp.brl.format(collected);
   document.querySelector("#metricProfit").textContent = ClaudeApp.brl.format(
     revenue * ClaudeApp.MIN_PROFIT_MARGIN,
   );
   document.querySelector("#metricLimit").textContent = ClaudeApp.integer.format(limits);
   document.querySelector("#metricUsage").textContent = ClaudeApp.integer.format(usage);
+}
+
+function purchaseStatusLabel(status) {
+  if (status === "paid") return "Pago";
+  if (status === "canceled") return "Cancelado";
+  return "Pendente";
+}
+
+function renderPurchases() {
+  const table = document.querySelector("#purchasesTable");
+  if (!table) return;
+  if (!purchaseState.length) {
+    table.innerHTML = `<tr><td colspan="5" class="muted">Nenhum pedido de upgrade.</td></tr>`;
+    return;
+  }
+
+  table.innerHTML = purchaseState
+    .map(
+      (purchase) => `
+        <tr>
+          <td>
+            <strong>${ClaudeApp.escapeHtml(purchase.name)}</strong>
+            <div class="muted">${ClaudeApp.escapeHtml(purchase.login)}</div>
+            <div class="muted">${new Date(purchase.createdAt).toLocaleString("pt-BR")}</div>
+          </td>
+          <td>
+            ${ClaudeApp.escapeHtml(purchase.plan)}
+            <div class="muted">${ClaudeApp.integer.format(purchase.dailyLimit)} tokens/dia</div>
+          </td>
+          <td>${ClaudeApp.brl.format(purchase.price)}</td>
+          <td>
+            <span class="badge ${purchase.status === "paid" ? "ok" : purchase.status === "canceled" ? "bad" : ""}">
+              ${purchaseStatusLabel(purchase.status)}
+            </span>
+          </td>
+          <td>
+            ${
+              purchase.status === "pending"
+                ? `<div class="row-actions">
+                    <button data-purchase-action="approve" data-id="${purchase.id}">Confirmar pagamento</button>
+                    <button data-purchase-action="cancel" data-id="${purchase.id}">Cancelar</button>
+                  </div>`
+                : ""
+            }
+          </td>
+        </tr>
+      `,
+    )
+    .join("");
 }
 
 function renderGatewaySnippet(accounts) {
@@ -386,6 +443,7 @@ function renderSupportAdmin() {
 function renderAll() {
   renderGiftCards();
   renderAccounts();
+  renderPurchases();
   renderSupportAdmin();
 }
 
@@ -638,6 +696,29 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
   }
 
   ClaudeApp.saveAccounts(accounts);
+  renderAll();
+});
+
+document.querySelector("#purchasesTable").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-purchase-action]");
+  if (!button) return;
+
+  const index = purchaseState.findIndex((purchase) => purchase.id === button.dataset.id);
+  if (index < 0) return;
+  const action = button.dataset.purchaseAction;
+  const endpoint = action === "approve" ? "approve" : "cancel";
+  if (action === "approve" && !confirm(`Confirmar pagamento de ${purchaseState[index].login}?`)) return;
+  if (action === "cancel" && !confirm(`Cancelar pedido de ${purchaseState[index].login}?`)) return;
+
+  try {
+    const data = await adminRequest(`/v1/admin/purchases/${purchaseState[index].id}/${endpoint}`, {
+      method: "POST",
+    });
+    purchaseState[index] = data.purchase;
+    await refreshFromServer();
+  } catch (error) {
+    alert(error.message);
+  }
   renderAll();
 });
 

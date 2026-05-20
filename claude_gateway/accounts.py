@@ -21,6 +21,51 @@ MODEL_LABELS = {
     "opus": "Plano Avançado",
 }
 
+PUBLIC_MODELS_BY_KEY = {
+    "haiku": "claude-code-economy",
+    "sonnet": "claude-code-pro",
+    "opus": "*",
+}
+
+PLAN_CATALOG = (
+    {
+        "id": "free",
+        "name": "Grátis",
+        "description": "Para testar o chat com respostas básicas.",
+        "price": 0.0,
+        "modelKey": "haiku",
+        "manualLimit": 2500,
+        "checkoutMode": "instant",
+    },
+    {
+        "id": "starter",
+        "name": "Econômico",
+        "description": "Modelo barato para uso leve e estudos.",
+        "price": 49.90,
+        "modelKey": "haiku",
+        "manualLimit": 12000,
+        "checkoutMode": "manual",
+    },
+    {
+        "id": "pro",
+        "name": "Pro",
+        "description": "Libera Sonnet para trabalho diário.",
+        "price": 149.90,
+        "modelKey": "sonnet",
+        "manualLimit": 45000,
+        "checkoutMode": "manual",
+    },
+    {
+        "id": "ultra",
+        "name": "Ultra",
+        "description": "Libera o roteamento mais forte do app.",
+        "price": 299.90,
+        "modelKey": "opus",
+        "manualLimit": 90000,
+        "checkoutMode": "manual",
+    },
+)
+
 MODEL_TOKEN_PRICES = {
     "haiku": 0.000000224,
     "sonnet": 0.00000087,
@@ -46,6 +91,25 @@ class AccountStore:
         with self._lock, self._connect() as db:
             rows = db.execute("SELECT * FROM accounts ORDER BY created_at DESC").fetchall()
         return [_public_account(_account_from_row(row)) for row in rows]
+
+    def list_plans(self) -> list[dict[str, Any]]:
+        return [_public_plan(plan, self.settings) for plan in PLAN_CATALOG]
+
+    def list_purchases(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as db:
+            rows = db.execute("SELECT * FROM purchases ORDER BY created_at DESC").fetchall()
+        return [_purchase_from_row(row) for row in rows]
+
+    def list_purchases_for_token(self, token: str) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as db:
+            account_row = db.execute("SELECT id FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not account_row:
+                raise HTTPException(status_code=404, detail="Account not found.")
+            rows = db.execute(
+                "SELECT * FROM purchases WHERE account_id = ? ORDER BY created_at DESC",
+                (account_row["id"],),
+            ).fetchall()
+        return [_purchase_from_row(row) for row in rows]
 
     def create_gift_card(self, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
@@ -97,8 +161,8 @@ class AccountStore:
         password = str(values.get("password") or "")
         gift_code = _normalize_gift_code(values.get("giftCard") or values.get("gift_card"))
 
-        if not name or not login or not password or not gift_code:
-            raise HTTPException(status_code=400, detail="Name, e-mail, password, and gift card are required.")
+        if not name or not login or not password:
+            raise HTTPException(status_code=400, detail="Name, e-mail, and password are required.")
         if "@" not in login or len(login) > 254:
             raise HTTPException(status_code=400, detail="Use a valid e-mail.")
 
@@ -106,11 +170,13 @@ class AccountStore:
             if self._login_exists(db, login):
                 raise HTTPException(status_code=409, detail="This e-mail is already registered.")
 
-            gift_card = self._gift_card_by_code(db, gift_code)
-            if not gift_card or not gift_card.get("active") or gift_card.get("usedByAccountId"):
-                raise HTTPException(status_code=400, detail="Gift card is invalid, paused, or already used.")
-
-            account = _account_from_gift_card(gift_card, name, login, password)
+            if gift_code:
+                gift_card = self._gift_card_by_code(db, gift_code)
+                if not gift_card or not gift_card.get("active") or gift_card.get("usedByAccountId"):
+                    raise HTTPException(status_code=400, detail="Gift card is invalid, paused, or already used.")
+                account = _account_from_gift_card(gift_card, name, login, password)
+            else:
+                account = _free_account(name, login, password, self.settings)
             db.execute(
                 """
                 INSERT INTO accounts (
@@ -121,14 +187,15 @@ class AccountStore:
                 """,
                 _account_values(account),
             )
-            db.execute(
-                """
-                UPDATE gift_cards
-                   SET active = 0, used_by_account_id = ?, used_by_login = ?, used_at = ?
-                 WHERE id = ?
-                """,
-                (account["id"], login, _now(), gift_card["id"]),
-            )
+            if gift_code:
+                db.execute(
+                    """
+                    UPDATE gift_cards
+                       SET active = 0, used_by_account_id = ?, used_by_login = ?, used_at = ?
+                     WHERE id = ?
+                    """,
+                    (account["id"], login, _now(), gift_card["id"]),
+                )
             db.commit()
         return _public_account(account)
 
@@ -236,6 +303,75 @@ class AccountStore:
             db.commit()
         return _public_account(account)
 
+    def create_purchase(self, token: str, values: dict[str, Any]) -> dict[str, Any]:
+        plan_id = str(values.get("planId") or values.get("plan_id") or "").strip().lower()
+        plan = _plan_by_id(plan_id)
+        if not plan or plan["id"] == "free":
+            raise HTTPException(status_code=400, detail="Choose a paid plan.")
+
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Account not found.")
+            account = _account_from_row(row)
+            purchase = _purchase_for_plan(account, plan, self.settings)
+            db.execute(
+                """
+                INSERT INTO purchases (
+                    id, account_id, login, name, plan_id, plan, price, model_key,
+                    manual_limit, daily_limit, max_cost_usd, status, payment_method,
+                    created_at, paid_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _purchase_values(purchase),
+            )
+            db.commit()
+        return purchase
+
+    def approve_purchase(self, purchase_id: str) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            purchase = self._find_purchase(db, purchase_id)
+            if purchase["status"] != "paid":
+                account = self._find_account(db, purchase["accountId"])
+                upgraded = _apply_plan_to_account(account, purchase)
+                paid_at = _now()
+                db.execute(
+                    """
+                    UPDATE accounts
+                       SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
+                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        upgraded["plan"],
+                        upgraded["price"],
+                        upgraded["modelKey"],
+                        upgraded["manualLimit"],
+                        upgraded["dailyLimit"],
+                        upgraded["computedDailyTokens"],
+                        upgraded["maxCostUsd"],
+                        upgraded["id"],
+                    ),
+                )
+                db.execute(
+                    "UPDATE purchases SET status = 'paid', paid_at = ? WHERE id = ?",
+                    (paid_at, purchase_id),
+                )
+                db.commit()
+                purchase["status"] = "paid"
+                purchase["paidAt"] = paid_at
+        return purchase
+
+    def cancel_purchase(self, purchase_id: str) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            purchase = self._find_purchase(db, purchase_id)
+            if purchase["status"] == "paid":
+                raise HTTPException(status_code=409, detail="Paid purchases cannot be canceled.")
+            db.execute("UPDATE purchases SET status = 'canceled' WHERE id = ?", (purchase_id,))
+            db.commit()
+            purchase["status"] = "canceled"
+        return purchase
+
     def delete_account(self, account_id: str) -> dict[str, str]:
         with self._lock, self._connect() as db:
             cursor = db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
@@ -255,7 +391,7 @@ class AccountStore:
             name=account["name"],
             monthly_price_brl=float(account.get("price") or 0),
             daily_token_limit=int(account.get("dailyLimit") or 0),
-            allowed_model="*",
+            allowed_model=PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
             active=bool(account.get("active")),
         )
 
@@ -325,6 +461,27 @@ class AccountStore:
                 )
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS purchases (
+                    id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL,
+                    login TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    plan TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    model_key TEXT NOT NULL,
+                    manual_limit INTEGER NOT NULL,
+                    daily_limit INTEGER NOT NULL,
+                    max_cost_usd REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    payment_method TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    paid_at TEXT NOT NULL
+                )
+                """
+            )
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -355,6 +512,12 @@ class AccountStore:
         if not row:
             raise HTTPException(status_code=404, detail="Account not found.")
         return _account_from_row(row)
+
+    def _find_purchase(self, db: sqlite3.Connection, purchase_id: str) -> dict[str, Any]:
+        row = db.execute("SELECT * FROM purchases WHERE id = ?", (purchase_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Purchase not found.")
+        return _purchase_from_row(row)
 
     def _admin_setting(self, db: sqlite3.Connection, key: str) -> str:
         row = db.execute("SELECT value FROM admin_settings WHERE key = ?", (key,)).fetchone()
@@ -428,6 +591,85 @@ def _account_from_gift_card(
     }
 
 
+def _free_account(name: str, login: str, password: str, settings: Settings) -> dict[str, Any]:
+    plan = _plan_by_id("free") or PLAN_CATALOG[0]
+    limit = _calculate_limit(plan["price"], plan["modelKey"], plan["manualLimit"], settings)
+    return {
+        "id": f"acct_{secrets.token_hex(12)}",
+        "apiToken": _generate_api_token(),
+        "name": name,
+        "displayName": name,
+        "login": login,
+        "passwordHash": hash_password(password),
+        "plan": plan["name"],
+        "price": plan["price"],
+        "modelKey": plan["modelKey"],
+        "manualLimit": plan["manualLimit"],
+        "active": True,
+        "giftCardCode": "",
+        "usedToday": 0,
+        "dailyLimit": limit["dailyLimit"],
+        "computedDailyTokens": limit["computedDailyTokens"],
+        "maxCostUsd": limit["maxCostUsd"],
+        "createdAt": _now(),
+    }
+
+
+def _plan_by_id(plan_id: str) -> dict[str, Any] | None:
+    for plan in PLAN_CATALOG:
+        if plan["id"] == plan_id:
+            return dict(plan)
+    return None
+
+
+def _public_plan(plan: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    limit = _calculate_limit(plan["price"], plan["modelKey"], plan["manualLimit"], settings)
+    return {
+        **dict(plan),
+        "dailyLimit": limit["dailyLimit"],
+        "computedDailyTokens": limit["computedDailyTokens"],
+        "maxCostUsd": limit["maxCostUsd"],
+        "allowedModel": PUBLIC_MODELS_BY_KEY.get(plan["modelKey"], settings.economy_public_model),
+    }
+
+
+def _purchase_for_plan(account: dict[str, Any], plan: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    limit = _calculate_limit(plan["price"], plan["modelKey"], plan["manualLimit"], settings)
+    return {
+        "id": f"purchase_{secrets.token_hex(12)}",
+        "accountId": account["id"],
+        "login": account["login"],
+        "name": account["name"],
+        "planId": plan["id"],
+        "plan": plan["name"],
+        "price": plan["price"],
+        "modelKey": plan["modelKey"],
+        "manualLimit": plan["manualLimit"],
+        "dailyLimit": limit["dailyLimit"],
+        "maxCostUsd": limit["maxCostUsd"],
+        "status": "pending",
+        "paymentMethod": "manual",
+        "createdAt": _now(),
+        "paidAt": "",
+    }
+
+
+def _apply_plan_to_account(account: dict[str, Any], purchase: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(account)
+    upgraded.update(
+        {
+            "plan": purchase["plan"],
+            "price": purchase["price"],
+            "modelKey": purchase["modelKey"],
+            "manualLimit": purchase["manualLimit"],
+            "dailyLimit": purchase["dailyLimit"],
+            "computedDailyTokens": purchase["dailyLimit"],
+            "maxCostUsd": purchase["maxCostUsd"],
+        }
+    )
+    return upgraded
+
+
 def _calculate_limit(
     price_brl: float,
     model_key: str,
@@ -435,6 +677,12 @@ def _calculate_limit(
     settings: Settings,
 ) -> dict[str, float | int]:
     monthly_revenue = max(0.0, price_brl)
+    if monthly_revenue <= 0 and manual_limit > 0:
+        return {
+            "dailyLimit": manual_limit,
+            "computedDailyTokens": manual_limit,
+            "maxCostUsd": 0.0,
+        }
     max_cost_brl = monthly_revenue * (1 - settings.customer_profit_margin)
     max_cost_usd = max_cost_brl / max(0.01, settings.usd_to_brl)
     daily_cost_usd = max_cost_usd / 30
@@ -498,6 +746,26 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _purchase_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "accountId": row["account_id"],
+        "login": row["login"],
+        "name": row["name"],
+        "planId": row["plan_id"],
+        "plan": row["plan"],
+        "price": row["price"],
+        "modelKey": row["model_key"],
+        "manualLimit": row["manual_limit"],
+        "dailyLimit": row["daily_limit"],
+        "maxCostUsd": row["max_cost_usd"],
+        "status": row["status"],
+        "paymentMethod": row["payment_method"],
+        "createdAt": row["created_at"],
+        "paidAt": row["paid_at"],
+    }
+
+
 def _gift_card_values(card: dict[str, Any]) -> tuple[Any, ...]:
     return (
         card["id"],
@@ -536,6 +804,26 @@ def _account_values(account: dict[str, Any]) -> tuple[Any, ...]:
         account["computedDailyTokens"],
         account["maxCostUsd"],
         account["createdAt"],
+    )
+
+
+def _purchase_values(purchase: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        purchase["id"],
+        purchase["accountId"],
+        purchase["login"],
+        purchase["name"],
+        purchase["planId"],
+        purchase["plan"],
+        purchase["price"],
+        purchase["modelKey"],
+        purchase["manualLimit"],
+        purchase["dailyLimit"],
+        purchase["maxCostUsd"],
+        purchase["status"],
+        purchase["paymentMethod"],
+        purchase["createdAt"],
+        purchase["paidAt"],
     )
 
 

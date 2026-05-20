@@ -139,6 +139,10 @@ def create_app(
             ]
         }
 
+    @app.get("/v1/plans")
+    async def list_public_plans() -> dict[str, Any]:
+        return {"data": app.state.account_store.list_plans()}
+
     @app.post("/v1/responses")
     async def create_openai_response(
         request: Request,
@@ -316,6 +320,23 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"account": app.state.account_store.login(payload)})
 
+    @app.post("/v1/billing/purchases")
+    async def create_purchase(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"purchase": app.state.account_store.create_purchase(auth.token, payload)})
+
+    @app.get("/v1/billing/purchases")
+    async def list_customer_purchases(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return {"data": app.state.account_store.list_purchases_for_token(auth.token)}
+
     @app.get("/v1/admin/setup-status")
     async def admin_setup_status() -> dict[str, bool]:
         return {"configured": app.state.account_store.admin_configured()}
@@ -383,6 +404,24 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
         return {"data": app.state.account_store.list_accounts()}
+
+    @app.get("/v1/admin/purchases")
+    async def list_purchases(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return {"data": app.state.account_store.list_purchases()}
+
+    @app.post("/v1/admin/purchases/{purchase_id}/approve")
+    async def approve_purchase(purchase_id: str, request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return JSONResponse({"purchase": app.state.account_store.approve_purchase(purchase_id)})
+
+    @app.post("/v1/admin/purchases/{purchase_id}/cancel")
+    async def cancel_purchase(purchase_id: str, request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return JSONResponse({"purchase": app.state.account_store.cancel_purchase(purchase_id)})
 
     @app.patch("/v1/admin/accounts/{account_id}")
     async def update_account(

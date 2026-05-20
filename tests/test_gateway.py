@@ -252,6 +252,85 @@ class GatewayTestCase(unittest.TestCase):
             response = client.post(f"/v1/admin/support/tickets/{ticket_two['id']}/claim", headers=self.headers)
             self.assertEqual(response.status_code, 200)
 
+    def test_signup_without_gift_card_creates_free_economy_account(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Gratis",
+                    "login": "gratis@example.com",
+                    "password": "secret-free",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            account = response.json()["account"]
+            self.assertEqual(account["plan"], "Grátis")
+            self.assertEqual(account["modelKey"], "haiku")
+            self.assertEqual(account["price"], 0)
+            self.assertGreater(account["dailyLimit"], 0)
+
+            message = client.post(
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 64,
+                    "messages": [{"role": "user", "content": "Explique soma"}],
+                },
+            )
+            self.assertEqual(message.status_code, 200)
+            self.assertEqual(message.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+
+    def test_purchase_approval_upgrades_account_and_tracks_revenue(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Upgrade",
+                    "login": "upgrade@example.com",
+                    "password": "secret-upgrade",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            purchase = client.post(
+                "/v1/billing/purchases",
+                headers=customer_headers,
+                json={"planId": "pro"},
+            )
+            self.assertEqual(purchase.status_code, 200)
+            purchase_id = purchase.json()["purchase"]["id"]
+            self.assertEqual(purchase.json()["purchase"]["status"], "pending")
+
+            admin_purchases = client.get("/v1/admin/purchases", headers=self.headers)
+            self.assertEqual(admin_purchases.status_code, 200)
+            self.assertEqual(admin_purchases.json()["data"][0]["price"], 149.9)
+
+            approved = client.post(
+                f"/v1/admin/purchases/{purchase_id}/approve",
+                headers=self.headers,
+            )
+            self.assertEqual(approved.status_code, 200)
+            self.assertEqual(approved.json()["purchase"]["status"], "paid")
+
+            accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
+            upgraded = next(item for item in accounts if item["login"] == "upgrade@example.com")
+            self.assertEqual(upgraded["modelKey"], "sonnet")
+            self.assertEqual(upgraded["price"], 149.9)
+
     def test_cors_allows_local_admin_origin_when_configured(self) -> None:
         settings = make_settings()
         settings.cors_allowed_origins = ("http://127.0.0.1:8787",)
@@ -760,7 +839,8 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
