@@ -1,12 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1280" role="img" aria-label="Claude">
   <g fill="#d97757">
-    <rect x="28" y="4" width="8" height="24" rx="3" />
-    <rect x="28" y="36" width="8" height="24" rx="3" />
-    <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(45 32 32)" />
-    <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(45 32 32)" />
-    <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(90 32 32)" />
-    <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(90 32 32)" />
-    <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(135 32 32)" />
-    <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(135 32 32)" />
+    <polygon points="0 610 28 591 520 618 526 689 27 666 0 623" />
+    <polygon points="98 278 132 240 191 246 556 535 514 589 106 331" />
+    <polygon points="296 61 337 0 422 8 444 31 665 536 590 560 309 132" />
+    <polygon points="688 93 708 45 748 20 784 36 807 70 717 570 646 555" />
+    <polygon points="1015 144 1071 143 1110 204 1092 264 766 677 706 618" />
+    <polygon points="982 478 1228 504 1280 535 1258 589 736 700 714 630" />
+    <polygon points="842 744 1215 710 1268 747 1280 768 1275 795 1208 828 720 714" />
+    <polygon points="738 798 838 865 1134 1088 1150 1158 1130 1186 1109 1180 706 846" />
+    <polygon points="659 810 702 856 989 1177 994 1224 957 1246 917 1174" />
+    <polygon points="630 815 705 856 646 1263 608 1280 578 1264" />
+    <polygon points="566 775 630 815 345 1176 322 1186 282 1167 289 1129" />
+    <polygon points="505 708 566 775 207 994 160 1001 134 980 136 935 149 917" />
+    <polygon points="500 570 546 515 612 486 690 500 752 556 773 635 750 710 690 775 612 815 535 789 486 720 463 640" />
   </g>
 </svg>
