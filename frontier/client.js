@@ -88,6 +88,11 @@ function apiConfigForCurrentUser() {
   };
 }
 
+function accountInitial(current) {
+  const label = (current?.displayName || current?.name || current?.login || "").trim();
+  return label ? label.charAt(0).toUpperCase() : "";
+}
+
 function pythonInstaller(config) {
   return `python3 - <<'PY'
 from pathlib import Path
@@ -496,7 +501,8 @@ function renderAccount() {
     document.querySelector("#welcomeTitle").textContent = "Como posso ajudar hoje?";
     sidebarName.textContent = "Entrar";
     sidebarPlan.textContent = "Entre para usar";
-    sidebarAvatar.textContent = "A";
+    sidebarAvatar.textContent = "";
+    sidebarAvatar.classList.add("empty");
     document.querySelector("#usageTitle").textContent = "Entre para usar o chat";
     document.querySelector("#usageText").textContent =
       "O envio exige uma conta ativa.";
@@ -521,7 +527,8 @@ function renderAccount() {
   document.querySelector("#welcomeTitle").textContent = `De volta ao trabalho, ${preferredName}?`;
   sidebarName.textContent = preferredName;
   sidebarPlan.textContent = ClaudeApp.planDisplayName(current.plan);
-  sidebarAvatar.textContent = preferredName.charAt(0).toUpperCase();
+  sidebarAvatar.textContent = accountInitial(current);
+  sidebarAvatar.classList.toggle("empty", !sidebarAvatar.textContent);
   document.querySelector("#usageTitle").textContent =
     `${ClaudeApp.integer.format(current.usedToday)} de ${ClaudeApp.integer.format(current.dailyLimit)} tokens`;
   document.querySelector("#usageText").textContent =
@@ -541,7 +548,7 @@ function renderAccount() {
   document.querySelectorAll(".auth-only").forEach((item) => item.classList.remove("hidden"));
   authOpen.classList.add("hidden");
   logout.classList.remove("hidden");
-  logout.textContent = preferredName.charAt(0).toUpperCase();
+  logout.textContent = accountInitial(current);
   startSupportPolling();
 }
 

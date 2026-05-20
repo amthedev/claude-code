@@ -703,6 +703,11 @@ code {
   font-weight: 700;
 }
 
+.sidebar-avatar.empty {
+  background: #efede7;
+  color: transparent;
+}
+
 .sidebar-account-text {
   min-width: 0;
   display: grid;
