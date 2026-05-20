@@ -15,17 +15,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-economy",
-      label: "Claude Haiku 4.5",
+      label: "Haiku 4.5",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude Sonnet 4.6",
+      label: "Sonnet 4.6",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-ultra",
-      label: "Claude Opus 4.7",
+      label: "Opus 4.7",
       usdPerToken: 0.00000087,
     },
   };
@@ -89,7 +89,7 @@ const ClaudeApp = (() => {
     const settings = load(API_SETTINGS_KEY, {
       baseUrl: sameOriginApi,
       token: "",
-      model: models.opus.publicModel,
+      model: models.sonnet.publicModel,
     });
     const storedBaseUrl = String(settings.baseUrl || "");
     const shouldUseSameOrigin =

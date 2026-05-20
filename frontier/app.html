@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Claude</title>
-    <link rel="stylesheet" href="/frontier/styles.css?v=chat-layout-history-20260518" />
+    <link rel="icon" href="/frontier/claude-mark.svg" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=claude-light-20260520" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell">
       <aside class="icon-rail">
         <button class="icon-button" title="Menu" data-panel="historyPanel" aria-label="Menu">
-          <svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M9 6v12" /></svg>
         </button>
         <button id="railNewChat" class="icon-button active" title="Novo chat" type="button" aria-label="Novo chat">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
@@ -22,10 +23,10 @@
           <svg viewBox="0 0 24 24"><path d="M5 17.5 3.5 21l4-1.2a8.7 8.7 0 0 0 4.5 1.2c4.7 0 8.5-3.4 8.5-7.6S16.7 5.8 12 5.8 3.5 9.2 3.5 13.4c0 1.5.5 2.9 1.5 4.1Z" /></svg>
         </button>
         <button class="icon-button" title="Projetos" data-panel="projectsPanel" aria-label="Projetos">
-          <svg viewBox="0 0 24 24"><path d="M4 7.5h6l1.6 2H20v8.8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7.5Z" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M6 8h12l-1 11H7L6 8Z" /><path d="M9 8V5h6v3M5 8h14" /></svg>
         </button>
         <button class="icon-button" title="Artefatos" data-panel="artifactsPanel" aria-label="Artefatos">
-          <svg viewBox="0 0 24 24"><path d="M8 4h8l4 4v12H8V4Z" /><path d="M15.5 4v4.5H20M4 8v12h4" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
         </button>
         <button class="icon-button dimmed" title="Código" data-panel="chatPanel" aria-label="Código">
           <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
@@ -58,12 +59,25 @@
 
         <section id="chatPanel" class="client-panel active">
           <div id="emptyState" class="chat-empty">
-            <div class="spark">✱</div>
-            <h1 id="welcomeTitle">Bem-vindo ao Claude</h1>
+            <div class="welcome-lockup">
+              <svg class="claude-mark" viewBox="0 0 64 64" aria-hidden="true">
+                <g>
+                  <rect x="28" y="4" width="8" height="24" rx="3" />
+                  <rect x="28" y="36" width="8" height="24" rx="3" />
+                  <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(45 32 32)" />
+                  <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(45 32 32)" />
+                  <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(90 32 32)" />
+                  <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(90 32 32)" />
+                  <rect x="28" y="4" width="8" height="24" rx="3" transform="rotate(135 32 32)" />
+                  <rect x="28" y="36" width="8" height="24" rx="3" transform="rotate(135 32 32)" />
+                </g>
+              </svg>
+              <h1 id="welcomeTitle">Como posso ajudar hoje?</h1>
+            </div>
             <form id="heroComposer" class="hero-composer">
               <textarea name="prompt" placeholder="Como posso ajudar você hoje?"></textarea>
               <div class="composer-row">
-                <button class="composer-icon attach-button auth-only hidden" type="button" aria-label="Anexar foto ou arquivo">
+                <button class="composer-icon attach-button" type="button" aria-label="Anexar foto ou arquivo">
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
                 <div class="composer-right">
@@ -71,7 +85,9 @@
                   <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                     <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                   </button>
-                  <button class="primary send-button" type="submit">Enviar</button>
+                  <button class="composer-icon send-button" type="submit" aria-label="Enviar mensagem">
+                    <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+                  </button>
                 </div>
               </div>
             </form>
@@ -107,7 +123,7 @@
           <form id="bottomComposer" class="bottom-composer hidden">
             <textarea name="prompt" placeholder="Responder ao Claude..."></textarea>
             <div class="composer-row">
-              <button class="composer-icon attach-button auth-only hidden" type="button" aria-label="Anexar foto ou arquivo">
+              <button class="composer-icon attach-button" type="button" aria-label="Anexar foto ou arquivo">
                 <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
               </button>
               <div class="composer-right">
@@ -115,7 +131,9 @@
                 <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                   <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                 </button>
-                <button class="primary send-button" type="submit">Enviar</button>
+                <button class="composer-icon send-button" type="submit" aria-label="Enviar mensagem">
+                  <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+                </button>
               </div>
             </div>
           </form>
@@ -275,7 +293,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=orange-copy-command-20260518"></script>
-    <script src="/frontier/client.js?v=max-default-20260518"></script>
+    <script src="/frontier/shared.js?v=claude-light-20260520"></script>
+    <script src="/frontier/client.js?v=claude-light-20260520"></script>
   </body>
 </html>

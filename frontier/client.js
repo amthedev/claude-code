@@ -477,7 +477,7 @@ function renderAccount() {
 
   if (!current || !current.active) {
     document.querySelector("#planBadge").textContent = "Entrar para usar";
-    document.querySelector("#welcomeTitle").textContent = "Bem-vindo ao Claude";
+    document.querySelector("#welcomeTitle").textContent = "Como posso ajudar hoje?";
     document.querySelector("#usageTitle").textContent = "Entre para usar o chat";
     document.querySelector("#usageText").textContent =
       "O envio exige uma conta ativa.";
@@ -498,8 +498,8 @@ function renderAccount() {
 
   const preferredName = (current.displayName || current.name || "Você").trim();
   syncCustomerApiToken(current);
-  document.querySelector("#planBadge").textContent = "Conta ativa";
-  document.querySelector("#welcomeTitle").textContent = `${preferredName} está de volta!`;
+  document.querySelector("#planBadge").textContent = ClaudeApp.planDisplayName(current.plan);
+  document.querySelector("#welcomeTitle").textContent = `De volta ao trabalho, ${preferredName}?`;
   document.querySelector("#usageTitle").textContent =
     `${ClaudeApp.integer.format(current.usedToday)} de ${ClaudeApp.integer.format(current.dailyLimit)} tokens`;
   document.querySelector("#usageText").textContent =
