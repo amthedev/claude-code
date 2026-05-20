@@ -4,6 +4,7 @@ const giftCardForm = document.querySelector("#giftCardForm");
 let supportState = { waiting: [], active: [], closed: [] };
 let activeSupportTicket = null;
 let supportPollTimer = null;
+let adminSetupConfigured = true;
 
 function showAdminApp() {
   adminLogin.classList.add("hidden");
@@ -11,10 +12,8 @@ function showAdminApp() {
 }
 
 function fillAdminLoginForm() {
-  const settings = ClaudeApp.apiSettings();
   const form = document.querySelector("#adminLoginForm");
-  form.elements.baseUrl.value = settings.baseUrl;
-  form.elements.apiToken.value = settings.token === "local-dev-token" ? "" : settings.token;
+  form.elements.login.value = form.elements.login.value || "admin";
 }
 
 function fillAdminApiTargetForm() {
@@ -22,7 +21,6 @@ function fillAdminApiTargetForm() {
   const form = document.querySelector("#adminApiTargetForm");
   if (!form) return;
   form.elements.baseUrl.value = settings.baseUrl;
-  form.elements.apiToken.value = settings.token === "local-dev-token" ? "" : settings.token;
 }
 
 function rememberAdminDevice() {
@@ -88,6 +86,49 @@ async function adminRequest(path, options = {}) {
     throw new Error(detail);
   }
 
+  return response.json();
+}
+
+async function loadAdminSetupStatus() {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const hint = document.querySelector("#adminSetupHint");
+  const submit = document.querySelector("#adminLoginForm button[type='submit']");
+  try {
+    const response = await fetch(`${baseUrl}/v1/admin/setup-status`);
+    const data = await response.json();
+    adminSetupConfigured = Boolean(data.configured);
+  } catch {
+    adminSetupConfigured = true;
+  }
+
+  if (!adminSetupConfigured) {
+    hint.textContent = "Primeiro acesso: crie a senha admin. Ela sera salva como hash no backend.";
+    submit.textContent = "Criar senha admin";
+  } else {
+    hint.textContent = "";
+    submit.textContent = "Entrar";
+  }
+}
+
+async function adminAuthRequest(path, payload) {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let detail = `API respondeu ${response.status}`;
+    try {
+      const data = await response.json();
+      detail = data.detail || detail;
+    } catch {
+      // Keep the status message.
+    }
+    throw new Error(detail);
+  }
   return response.json();
 }
 
@@ -386,11 +427,20 @@ document.querySelector("#adminLoginForm").addEventListener("submit", async (even
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   document.querySelector("#adminLoginError").textContent = "";
   const settings = ClaudeApp.apiSettings();
-  ClaudeApp.saveApiSettings({
-    ...settings,
-    baseUrl: values.baseUrl || settings.baseUrl,
-    token: values.apiToken || settings.token,
-  });
+  let authData;
+  try {
+    authData = await adminAuthRequest(adminSetupConfigured ? "/v1/admin/login" : "/v1/admin/setup", values);
+  } catch (error) {
+    document.querySelector("#adminLoginError").textContent = error.message;
+    return;
+  }
+
+  const token = authData.admin?.token;
+  if (!token) {
+    document.querySelector("#adminLoginError").textContent = "Login admin nao retornou sessao.";
+    return;
+  }
+  ClaudeApp.saveApiSettings({ ...settings, token });
   try {
     await refreshFromServer();
   } catch (error) {
@@ -420,7 +470,6 @@ document.querySelector("#adminApiTargetForm").addEventListener("submit", async (
   ClaudeApp.saveApiSettings({
     ...settings,
     baseUrl: values.baseUrl || settings.baseUrl,
-    token: values.apiToken || settings.token,
   });
   try {
     await refreshFromServer();
@@ -645,6 +694,7 @@ document.querySelector("#seedDemo").addEventListener("click", seedDemo);
 renderPreview();
 fillAdminLoginForm();
 fillAdminApiTargetForm();
+loadAdminSetupStatus();
 
 unlockRememberedAdminDevice().then((unlocked) => {
   if (!unlocked) renderAll();

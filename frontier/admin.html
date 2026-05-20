@@ -19,14 +19,15 @@
         <h1>Painel administrativo</h1>
         <p>Entre para gerar gift cards, definir planos personalizados e controlar limites diarios.</p>
         <label>
-          URL da API
-          <input name="baseUrl" autocomplete="url" placeholder="https://claude-code-api.squareweb.app" required />
+          Usuario
+          <input name="login" autocomplete="username" value="admin" required />
         </label>
         <label>
-          Token da API admin
-          <input name="apiToken" autocomplete="off" required />
+          Senha
+          <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <button class="primary" type="submit">Entrar</button>
+        <p id="adminSetupHint" class="muted"></p>
         <div id="adminLoginError" class="form-error"></div>
       </form>
     </main>
@@ -233,10 +234,6 @@
               <label>
                 URL da API
                 <input name="baseUrl" placeholder="https://claude-code-api.squareweb.app" required />
-              </label>
-              <label>
-                Token da API admin
-                <input name="apiToken" autocomplete="off" required />
               </label>
               <button type="submit">Salvar API</button>
               <div id="adminApiTargetMessage" class="form-error"></div>

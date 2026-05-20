@@ -104,6 +104,38 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_admin_password_can_be_configured_in_backend_database(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.admin_password = ""
+            settings.admin_password_hash = ""
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            status = client.get("/v1/admin/setup-status")
+            self.assertEqual(status.status_code, 200)
+            self.assertFalse(status.json()["configured"])
+
+            setup = client.post(
+                "/v1/admin/setup",
+                json={"login": "admin", "password": "senha-admin-forte"},
+            )
+            self.assertEqual(setup.status_code, 200)
+            token = setup.json()["admin"]["token"]
+            self.assertTrue(token.startswith("sk-admin-"))
+
+            response = client.get("/v1/admin/accounts", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(response.status_code, 200)
+
+            login = client.post(
+                "/v1/admin/login",
+                json={"login": "admin", "password": "senha-admin-forte"},
+            )
+            self.assertEqual(login.status_code, 200)
+            self.assertTrue(login.json()["admin"]["token"].startswith("sk-admin-"))
+
     def test_trusted_admin_ip_can_open_admin_routes_without_token(self) -> None:
         settings = make_settings()
         settings.gateway_api_keys = ("real-admin-token",)
@@ -704,7 +736,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(signup.status_code, 200)
             account = signup.json()["account"]
             self.assertNotIn("passwordHash", account)
-            self.assertTrue(account["apiToken"].startswith("cus_"))
+            self.assertTrue(account["apiToken"].startswith("sk-"))
             self.assertEqual(account["giftCardCode"], "CLAUDE-TEST-PRO")
 
             reused = client.post(
@@ -729,6 +761,38 @@ class GatewayTestCase(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
+
+    def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
+        response = self.client.post(
+            "/v1/responses",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "input": "Escreva uma função pequena",
+                "max_output_tokens": 128,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["object"], "response")
+        self.assertEqual(body["model"], "claude-code-pro")
+        self.assertEqual(body["output"][0]["content"][0]["type"], "output_text")
+
+    def test_openai_chat_completions_endpoint_accepts_gateway_token(self) -> None:
+        response = self.client.post(
+            "/v1/chat/completions",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "messages": [{"role": "user", "content": "Diga oi"}],
+                "max_tokens": 128,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["object"], "chat.completion")
+        self.assertEqual(body["model"], "claude-code-pro")
+        self.assertEqual(body["choices"][0]["message"]["role"], "assistant")
 
     def test_customer_conversations_are_saved_in_database(self) -> None:
         with TemporaryDirectory() as tmpdir:

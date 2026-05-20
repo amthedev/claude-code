@@ -88,11 +88,16 @@ const ClaudeApp = (() => {
         : "http://127.0.0.1:8787";
     const settings = load(API_SETTINGS_KEY, {
       baseUrl: sameOriginApi,
-      token: "local-dev-token",
+      token: "",
       model: models.opus.publicModel,
     });
+    const storedBaseUrl = String(settings.baseUrl || "");
+    const shouldUseSameOrigin =
+      sameOriginApi !== "http://127.0.0.1:8787" &&
+      (storedBaseUrl.includes("127.0.0.1") || storedBaseUrl.includes("localhost"));
     return {
       ...settings,
+      baseUrl: shouldUseSameOrigin ? sameOriginApi : settings.baseUrl || sameOriginApi,
       demoMode: false,
       model: normalizePublicModel(settings.model),
     };
@@ -157,7 +162,7 @@ const ClaudeApp = (() => {
       ...account,
       apiToken:
         account.apiToken ||
-        `cus_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+        `sk-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       modelKey: normalizeModelKey(account.modelKey),
       dailyLimit: limit.dailyLimit,
       computedDailyTokens: limit.computedDailyTokens,
@@ -212,7 +217,7 @@ const ClaudeApp = (() => {
       id: `acct_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       apiToken:
         values.apiToken ||
-        `cus_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+        `sk-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),

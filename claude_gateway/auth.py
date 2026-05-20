@@ -52,6 +52,10 @@ def authenticate_request(request: Request, settings: Settings) -> AuthContext:
         if hmac.compare_digest(token, expected):
             return AuthContext(token=token, kind="admin")
 
+    admin_session = AccountStore(settings).admin_session_for_token(token)
+    if admin_session:
+        return AuthContext(token=token, kind="admin")
+
     try:
         customer_accounts = parse_customer_accounts(settings)
     except ValueError as exc:

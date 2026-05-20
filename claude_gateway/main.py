@@ -17,12 +17,20 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
-from .auth import AuthContext, client_ip_for_debug, require_gateway_auth
+from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
 from .anthropic import build_text_message
 from .config import Settings, get_settings
 from .conversations import ConversationStore
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
 from .openai_client import OpenAIHelperClient
+from .openai_compat import (
+    anthropic_to_chat_completion,
+    anthropic_to_response,
+    chat_to_anthropic,
+    chat_to_sse,
+    response_to_sse,
+    responses_to_anthropic,
+)
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .routing import RouteDecision, RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
@@ -130,6 +138,50 @@ def create_app(
                 for profile in profiles
             ]
         }
+
+    @app.post("/v1/responses")
+    async def create_openai_response(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        require_gateway_auth(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+        anthropic_payload = responses_to_anthropic(payload)
+        stream = bool(payload.get("stream"))
+        anthropic_payload["stream"] = False
+        response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
+        openai_response = anthropic_to_response(response, payload, public_model)
+        if stream:
+            return StreamingResponse(
+                _iter_bytes(response_to_sse(openai_response)),
+                media_type="text/event-stream",
+            )
+        return JSONResponse(openai_response)
+
+    @app.post("/v1/chat/completions")
+    async def create_chat_completion(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        require_gateway_auth(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+        anthropic_payload = chat_to_anthropic(payload)
+        stream = bool(payload.get("stream"))
+        anthropic_payload["stream"] = False
+        response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
+        completion = anthropic_to_chat_completion(response, payload, public_model)
+        if stream:
+            return StreamingResponse(
+                _iter_bytes(chat_to_sse(completion)),
+                media_type="text/event-stream",
+            )
+        return JSONResponse(completion)
 
     @app.get("/v1/budget")
     async def budget(request: Request) -> dict[str, Any]:
@@ -264,14 +316,28 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"account": app.state.account_store.login(payload)})
 
-    @app.post("/v1/admin/login")
-    async def admin_login(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, str]:
+    @app.get("/v1/admin/setup-status")
+    async def admin_setup_status() -> dict[str, bool]:
+        return {"configured": app.state.account_store.admin_configured()}
+
+    @app.post("/v1/admin/setup")
+    async def admin_setup(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "admin-auth", app.state.settings.auth_rate_limit)
-        _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"admin": app.state.account_store.setup_admin(payload)})
+
+    @app.post("/v1/admin/login")
+    async def admin_login(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        _rate_limit(request, app, "admin-auth", app.state.settings.auth_rate_limit)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        if app.state.account_store.admin_configured():
+            return {"status": "ok", "admin": app.state.account_store.login_admin(payload)}
+
+        _require_admin(request, app.state.settings)
         verify_admin_login(payload, app.state.settings)
-        return {"status": "ok"}
+        return {"status": "ok", "admin": {"token": extract_bearer_token(request) or ""}}
 
     @app.get("/v1/admin/ip-check")
     async def admin_ip_check(request: Request) -> dict[str, object]:
@@ -488,6 +554,49 @@ def _mount_frontend(app: FastAPI) -> None:
     @app.get("/admin", include_in_schema=False)
     async def admin_page() -> FileResponse:
         return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+async def _complete_gateway_message(
+    request: Request,
+    app: FastAPI,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    auth = require_gateway_auth(request, app.state.settings)
+    payload = _prepare_payload(payload, app.state.settings, auth)
+    payload = _with_customer_power_tier(payload, app, auth)
+    decision = app.state.planner.plan(payload)
+    identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
+    payload = _with_gateway_reasoning(payload, decision)
+    payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+    payload["__gateway_route_decision"] = decision
+    if identity_answer:
+        app.state.usage.record_request(decision)
+        return (
+            build_text_message(
+                decision.public_model,
+                identity_answer,
+                usage={"input_tokens": 0, "output_tokens": len(identity_answer.split())},
+            ),
+            decision.public_model,
+        )
+
+    payload = await _with_openai_execution_guidance(app, auth, payload, decision)
+    payload["__gateway_route_decision"] = decision
+    reservation = _reserve_customer_budget(app, auth, payload, decision)
+    payload = await _with_gemini_code_guidance(app, payload, decision)
+    payload["__gateway_route_decision"] = decision
+    try:
+        response, _ = await app.state.orchestrator.complete(
+            payload,
+            allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
+        )
+    except OpenRouterError as exc:
+        app.state.customer_usage.rollback(reservation)
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    except Exception:
+        app.state.customer_usage.rollback(reservation)
+        raise
+    return response, decision.public_model
 
 
 def _prepare_payload(
@@ -798,6 +907,11 @@ async def _stream_text_message(message: dict[str, Any]):
     ).encode()
     yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
     yield b"event: data\ndata: [DONE]\n\n"
+
+
+async def _iter_bytes(chunks: list[bytes]):
+    for chunk in chunks:
+        yield chunk
 
 
 async def _public_model_stream(chunks: Any, public_model: str):

@@ -53,6 +53,11 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
+function openAiCompatBaseUrl(baseUrl) {
+  const normalized = String(baseUrl || "").replace(/\/$/, "");
+  return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+}
+
 function apiConfigForCurrentUser() {
   const settings = ClaudeApp.apiSettings();
   const current = account();
@@ -272,6 +277,21 @@ print("Feche e abra o Claude Code ou reinicie a extensao para carregar a configu
 PY`;
 }
 
+function codexConfigToml(config) {
+  return `model = ${JSON.stringify(config.model)}
+model_provider = "claude_gateway"
+
+[model_providers.claude_gateway]
+name = "Claude Gateway"
+base_url = ${JSON.stringify(openAiCompatBaseUrl(config.baseUrl))}
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"`;
+}
+
+function openAiEnvCommand(config) {
+  return `export OPENAI_API_KEY=${shellQuote(config.token)}`;
+}
+
 function renderCodeBlock(title, code) {
   const escapedTitle = ClaudeApp.escapeHtml(title);
   const escapedCode = ClaudeApp.escapeHtml(code);
@@ -323,6 +343,18 @@ function renderApiInstallGuide() {
   const installCommand = pythonInstaller(config);
   const sessionCommand = terminalCommand(config);
   const settingsCommand = claudeSettingsCommand(config);
+  const codexConfig = codexConfigToml(config);
+  const openAiEnv = openAiEnvCommand(config);
+  const openAiCurlTest = `curl ${shellQuote(`${openAiCompatBaseUrl(config.baseUrl)}/responses`)} \\
+  -H ${shellQuote(`Authorization: Bearer ${config.token}`)} \\
+  -H ${shellQuote("Content-Type: application/json")} \\
+  -d ${shellQuote(
+    JSON.stringify({
+      model: config.model,
+      max_output_tokens: 120,
+      input: "Responda apenas: API funcionando",
+    }),
+  )}`;
   const loginHint = config.hasAccount
     ? "Configuracao pronta para esta conta."
     : "Entre em uma conta ativa para gerar a configuracao personalizada.";
@@ -346,6 +378,9 @@ function renderApiInstallGuide() {
       <li>No terminal, depois da instalacao, ao rodar <code>claude</code> ele pergunta antes de usar a API.</li>
       <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
     </ol>
+    ${renderCodeBlock("ChatGPT/Codex: ~/.codex/config.toml", codexConfig)}
+    ${renderCodeBlock("ChatGPT/Codex: chave OpenAI-compatible", openAiEnv)}
+    ${renderCodeBlock("ChatGPT/Codex: testar Responses API", openAiCurlTest)}
     ${renderCodeBlock("Instalador Python com pergunta", installCommand)}
     ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand)}
     ${renderCodeBlock("Testar conexão", curlTest)}

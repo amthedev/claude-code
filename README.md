@@ -154,34 +154,25 @@ ACCOUNT_DATA_FILE=data/gateway.sqlite3
 QUOTA_DATA_FILE=data/gateway.sqlite3
 ```
 
-Admin UI login is checked by the backend. Prefer a password hash instead of a
-plain environment password:
+Admin UI login is checked by the backend. On the first `/admin` access, create
+the admin username/password in the web panel. The backend stores only an Argon2
+hash in `ACCOUNT_DATA_FILE`; no admin panel password is needed in Square Cloud
+environment variables.
 
-```bash
-python -c "from claude_gateway.security import hash_password; print(hash_password('your-password'))"
-```
-
-Then configure:
+Then configure the operational security settings:
 
 ```env
-ADMIN_USERNAME=reidelas
-ADMIN_PASSWORD_HASH=$argon2id$...
-GATEWAY_API_KEYS=replace-with-a-long-random-admin-token
+GATEWAY_API_KEYS=replace-with-a-long-random-emergency-token
 TRUSTED_HOSTS=your-domain.example
-ADMIN_TRUSTED_IPS=177.200.246.8
 TRUST_PROXY_HEADERS=true
-CORS_ALLOWED_ORIGINS=http://127.0.0.1:8787,http://localhost:8787
+CORS_ALLOWED_ORIGINS=https://your-domain.example
 AUTH_RATE_LIMIT=10
 API_RATE_LIMIT=120
 ```
 
-To manage the Square Cloud app from your Mac, run the app locally and open
-`http://127.0.0.1:8787/admin`. In the admin login screen set:
-
-```text
-URL da API: https://claude-code-api.squareweb.app
-Token da API admin: value from GATEWAY_API_KEYS on Square Cloud
-```
+To manage the Square Cloud app, open `https://your-domain.example/admin`.
+The admin panel uses the hosted same-origin API by default, so you do not need
+to type a localhost URL or paste the emergency API token.
 
 The app sets security headers, disables public OpenAPI docs, rate-limits login
 and API calls, stores customer passwords with Argon2, and keeps MCP write/command
@@ -192,7 +183,7 @@ tools disabled unless explicitly enabled.
 For selling API access, use customer-scoped tokens instead of sharing the admin token:
 
 ```env
-CUSTOMER_ACCOUNTS=cus_live_abc|Cliente|149.90|60000|claude-code-pro|true
+CUSTOMER_ACCOUNTS=sk-live-abc|Cliente|149.90|60000|claude-code-pro|true
 CUSTOMER_PROFIT_MARGIN=0.50
 USD_TO_BRL=5.50
 COST_RESERVE_MULTIPLIER=2.0
@@ -208,7 +199,43 @@ token|customer_name|monthly_price_brl|daily_token_limit|allowed_public_model|act
 
 When a customer token calls `/v1/messages`, the gateway forces the allowed model, clamps output tokens, reserves daily cost, and blocks requests that would exceed the plan.
 
-The Admin generates gift cards for sales through `/v1/admin/gift-cards`. Customers create their own account with name, e-mail, password, and a valid gift card through `/v1/auth/signup`. After redemption, the account receives its own API token and can use the chat/API with server-side limits.
+The Admin generates gift cards for sales through `/v1/admin/gift-cards`. Customers create their own account with name, e-mail, password, and a valid gift card through `/v1/auth/signup`. After redemption, the account receives its own `sk-...` API token and can use the chat/API with server-side limits.
+
+## OpenAI / Codex Compatibility
+
+The gateway also exposes OpenAI-compatible entry points for tools that accept a custom base URL:
+
+```http
+POST /v1/responses
+POST /v1/chat/completions
+```
+
+For Codex CLI, configure a user-level `~/.codex/config.toml` provider that uses the Responses API:
+
+```toml
+model = "claude-code-pro"
+model_provider = "claude_gateway"
+
+[model_providers.claude_gateway]
+name = "Claude Gateway"
+base_url = "https://your-subdomain.squareweb.app/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+```
+
+Then set the customer's token:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+For OpenAI-compatible clients that still use Chat Completions, use:
+
+```text
+Base URL: https://your-subdomain.squareweb.app/v1
+API Key: sk-...
+Model: claude-code-pro
+```
 
 ## Square Cloud
 
@@ -249,6 +276,8 @@ GET  /health
 GET  /v1/models
 GET  /v1/budget
 POST /v1/messages
+POST /v1/responses
+POST /v1/chat/completions
 GET  /v1/usage
 POST /v1/router/debug
 POST /v1/agent/run

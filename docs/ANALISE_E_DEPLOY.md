@@ -50,10 +50,10 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 
 ## Como vender uma conta API sem perder dinheiro
 
-Voce pode criar clientes fixos em `CUSTOMER_ACCOUNTS` ou deixar o Admin gerar gift cards. Quando o cliente resgata um gift card, o backend gera um token `cus_...` automaticamente.
+Voce pode criar clientes fixos em `CUSTOMER_ACCOUNTS` ou deixar o Admin gerar gift cards. Quando o cliente resgata um gift card, o backend gera um token `sk-...` automaticamente.
 
 ```env
-CUSTOMER_ACCOUNTS=cus_live_abc|Cliente|149.90|60000|claude-code-pro|true;cus_live_xyz|Maria|299.90|120000|claude-code-ultra|true
+CUSTOMER_ACCOUNTS=sk-live-abc|Cliente|149.90|60000|claude-code-pro|true;sk-live-xyz|Maria|299.90|120000|claude-code-ultra|true
 ```
 
 Formato:
@@ -82,6 +82,17 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
+Para clientes OpenAI-compatible/Codex:
+
+```text
+Base URL: https://SEU-SUBDOMINIO.squareweb.app/v1
+API Key: sk-...
+Model: claude-code-pro
+```
+
+O gateway expõe `POST /v1/responses` para Codex/Responses API e
+`POST /v1/chat/completions` para clientes que ainda usam Chat Completions.
+
 ## Square Cloud
 
 Arquivos adicionados:
@@ -94,15 +105,20 @@ Variaveis obrigatorias no painel da Square Cloud:
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
-GATEWAY_API_KEYS=um-token-admin-forte
+GATEWAY_API_KEYS=um-token-emergencial-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
 OPENROUTER_APP_NAME=Claude Code
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
-ACCOUNT_DATA_FILE=data/accounts.json
+ACCOUNT_DATA_FILE=data/gateway.sqlite3
+QUOTA_DATA_FILE=data/gateway.sqlite3
 CUSTOMER_ACCOUNTS=...
 ```
+
+O painel Admin nao precisa de `ADMIN_PASSWORD` nem `ADMIN_PASSWORD_HASH` na
+Square Cloud. No primeiro acesso a `/admin`, crie o usuario e a senha; o backend
+salva apenas o hash Argon2 no SQLite.
 
 `OPENAI_API_KEY` e opcional. Use quando quiser que o ChatGPT ajude na qualidade das respostas admin. Para liberar tambem em contas de clientes, adicione `OPENAI_HELPER_FOR_CUSTOMERS=true`, sabendo que isso aumenta custo.
 

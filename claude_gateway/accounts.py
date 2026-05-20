@@ -154,6 +154,74 @@ class AccountStore:
                 db.commit()
             return _public_account(account)
 
+    def admin_configured(self) -> bool:
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                "SELECT value FROM admin_settings WHERE key = 'password_hash'",
+            ).fetchone()
+        return bool(row and row["value"])
+
+    def setup_admin(self, values: dict[str, Any]) -> dict[str, Any]:
+        username = str(values.get("login") or values.get("username") or "admin").strip()
+        password = str(values.get("password") or "")
+        if not username or not password:
+            raise HTTPException(status_code=400, detail="Admin username and password are required.")
+
+        password_hash = hash_password(password)
+        with self._lock, self._connect() as db:
+            if self._admin_password_hash(db):
+                raise HTTPException(status_code=409, detail="Admin password is already configured.")
+            db.execute(
+                """
+                INSERT INTO admin_settings (key, value)
+                VALUES ('username', ?), ('password_hash', ?)
+                """,
+                (username, password_hash),
+            )
+            token = self._create_admin_session(db)
+            db.commit()
+        return {"token": token, "username": username}
+
+    def login_admin(self, values: dict[str, Any]) -> dict[str, Any]:
+        login = str(values.get("login") or values.get("username") or "").strip()
+        password = str(values.get("password") or "")
+        with self._lock, self._connect() as db:
+            username = self._admin_setting(db, "username") or "admin"
+            password_hash = self._admin_password_hash(db)
+            if not password_hash:
+                raise HTTPException(status_code=503, detail="Admin password is not configured.")
+            ok, needs_rehash = verify_password(password, password_hash)
+            if not ok or login != username:
+                raise HTTPException(status_code=403, detail="Invalid admin login.")
+            if needs_rehash:
+                password_hash = hash_password(password)
+                db.execute(
+                    """
+                    INSERT INTO admin_settings (key, value)
+                    VALUES ('password_hash', ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (password_hash,),
+                )
+            token = self._create_admin_session(db)
+            db.commit()
+        return {"token": token, "username": username}
+
+    def admin_session_for_token(self, token: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            now = _now()
+            db.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now,))
+            row = db.execute(
+                """
+                SELECT token, username, expires_at
+                  FROM admin_sessions
+                 WHERE token = ? AND expires_at > ?
+                """,
+                (token, now),
+            ).fetchone()
+            db.commit()
+        return dict(row) if row else None
+
     def update_account(self, account_id: str, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
             account = self._find_account(db, account_id)
@@ -239,6 +307,24 @@ class AccountStore:
                 )
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_sessions (
+                    token TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+                """
+            )
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -269,6 +355,27 @@ class AccountStore:
         if not row:
             raise HTTPException(status_code=404, detail="Account not found.")
         return _account_from_row(row)
+
+    def _admin_setting(self, db: sqlite3.Connection, key: str) -> str:
+        row = db.execute("SELECT value FROM admin_settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else ""
+
+    def _admin_password_hash(self, db: sqlite3.Connection) -> str:
+        return self._admin_setting(db, "password_hash")
+
+    def _create_admin_session(self, db: sqlite3.Connection) -> str:
+        token = f"sk-admin-{secrets.token_urlsafe(36)}"
+        username = self._admin_setting(db, "username") or "admin"
+        now = _now()
+        expires_at = datetime.fromtimestamp(datetime.now(UTC).timestamp() + 60 * 60 * 24 * 14, UTC).isoformat()
+        db.execute(
+            """
+            INSERT INTO admin_sessions (token, username, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (token, username, now, expires_at),
+        )
+        return token
 
 
 def _gift_card_from_values(values: dict[str, Any], code: str, settings: Settings) -> dict[str, Any]:
@@ -302,7 +409,7 @@ def _account_from_gift_card(
 ) -> dict[str, Any]:
     return {
         "id": f"acct_{secrets.token_hex(12)}",
-        "apiToken": f"cus_{secrets.token_urlsafe(24)}",
+        "apiToken": _generate_api_token(),
         "name": name,
         "displayName": name,
         "login": login,
@@ -453,6 +560,10 @@ def _normalize_gift_code(value: Any) -> str:
 
 def _generate_gift_code() -> str:
     return f"CLAUDE-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
+
+
+def _generate_api_token() -> str:
+    return f"sk-{secrets.token_urlsafe(36)}"
 
 
 def _now() -> str:
