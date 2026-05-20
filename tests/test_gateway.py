@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -57,6 +58,45 @@ class FakeOpenAIHelper:
             }
         )
         return "Use stricter validation and explain edge cases."
+
+
+class FakeHttpResponse:
+    def __init__(self, data: dict[str, Any], status_code: int = 200) -> None:
+        self._data = data
+        self.status_code = status_code
+        self.text = str(data)
+
+    def json(self) -> dict[str, Any]:
+        return self._data
+
+
+class FakeMercadoPagoClient:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "FakeMercadoPagoClient":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+    async def post(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+        return FakeHttpResponse(
+            {
+                "id": "pref_test",
+                "init_point": "https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=pref_test",
+                "sandbox_init_point": "https://sandbox.mercadopago.com.br/checkout/v1/redirect?pref_id=pref_test",
+            }
+        )
+
+    async def get(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+        return FakeHttpResponse(
+            {
+                "id": 12345,
+                "status": "approved",
+                "external_reference": "purchase_reference",
+            }
+        )
 
 
 def make_settings() -> Settings:
@@ -184,6 +224,7 @@ class GatewayTestCase(unittest.TestCase):
             settings = make_settings()
             settings.account_data_file = f"{directory}/gateway.sqlite3"
             settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            settings.mercado_pago_access_token = "mp-test-token"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
             client = TestClient(app)
 
@@ -257,6 +298,7 @@ class GatewayTestCase(unittest.TestCase):
             settings = make_settings()
             settings.account_data_file = f"{directory}/gateway.sqlite3"
             settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            settings.mercado_pago_access_token = "mp-test-token"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
             client = TestClient(app)
 
@@ -293,6 +335,7 @@ class GatewayTestCase(unittest.TestCase):
             settings = make_settings()
             settings.account_data_file = f"{directory}/gateway.sqlite3"
             settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            settings.mercado_pago_access_token = "mp-test-token"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
             client = TestClient(app)
 
@@ -306,18 +349,21 @@ class GatewayTestCase(unittest.TestCase):
             ).json()["account"]
             customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
 
-            purchase = client.post(
-                "/v1/billing/purchases",
-                headers=customer_headers,
-                json={"planId": "pro"},
-            )
+            with patch("claude_gateway.main.httpx.AsyncClient", FakeMercadoPagoClient):
+                purchase = client.post(
+                    "/v1/billing/purchases",
+                    headers=customer_headers,
+                    json={"planId": "pro"},
+                )
             self.assertEqual(purchase.status_code, 200)
             purchase_id = purchase.json()["purchase"]["id"]
             self.assertEqual(purchase.json()["purchase"]["status"], "pending")
+            self.assertEqual(purchase.json()["purchase"]["mercadoPagoPreferenceId"], "pref_test")
+            self.assertIn("mercadopago.com.br", purchase.json()["purchase"]["checkoutUrl"])
 
             admin_purchases = client.get("/v1/admin/purchases", headers=self.headers)
             self.assertEqual(admin_purchases.status_code, 200)
-            self.assertEqual(admin_purchases.json()["data"][0]["price"], 149.9)
+            self.assertEqual(admin_purchases.json()["data"][0]["price"], 125)
 
             approved = client.post(
                 f"/v1/admin/purchases/{purchase_id}/approve",
@@ -329,7 +375,7 @@ class GatewayTestCase(unittest.TestCase):
             accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
             upgraded = next(item for item in accounts if item["login"] == "upgrade@example.com")
             self.assertEqual(upgraded["modelKey"], "sonnet")
-            self.assertEqual(upgraded["price"], 149.9)
+            self.assertEqual(upgraded["price"], 125)
 
     def test_cors_allows_local_admin_origin_when_configured(self) -> None:
         settings = make_settings()

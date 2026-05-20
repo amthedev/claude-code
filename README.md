@@ -174,6 +174,25 @@ To manage the Square Cloud app, open `https://your-domain.example/admin`.
 The admin panel uses the hosted same-origin API by default, so you do not need
 to type a localhost URL or paste the emergency API token.
 
+To sell upgrades through Mercado Pago Checkout Pro, set the backend token and
+public hosted URL. Keep the token only on the server:
+
+```env
+MERCADO_PAGO_ACCESS_TOKEN=APP_USR-...
+MERCADO_PAGO_PUBLIC_URL=https://your-domain.example
+```
+
+The customer app creates a Mercado Pago checkout preference for the plan and
+redirects the user to pay. Mercado Pago calls
+`/v1/billing/mercadopago/webhook`; when the payment status is `approved`, the
+backend upgrades the account automatically. Current app plans are:
+
+```text
+Básico      R$ 65,00   claude-code-economy
+Pro 5X      R$ 125,00  claude-code-pro
+Max 30X     R$ 280,00  claude-code-ultra
+```
+
 The app sets security headers, disables public OpenAPI docs, rate-limits login
 and API calls, stores customer passwords with Argon2, and keeps MCP write/command
 tools disabled unless explicitly enabled.
@@ -199,7 +218,11 @@ token|customer_name|monthly_price_brl|daily_token_limit|allowed_public_model|act
 
 When a customer token calls `/v1/messages`, the gateway forces the allowed model, clamps output tokens, reserves daily cost, and blocks requests that would exceed the plan.
 
-The Admin generates gift cards for sales through `/v1/admin/gift-cards`. Customers create their own account with name, e-mail, password, and a valid gift card through `/v1/auth/signup`. After redemption, the account receives its own `sk-...` API token and can use the chat/API with server-side limits.
+The Admin still generates gift cards for direct sales through `/v1/admin/gift-cards`.
+Customers can also create a free account without a gift card through `/v1/auth/signup`;
+free accounts use the economy model with a small daily limit. After signup or
+redemption, the account receives its own `sk-...` API token and can use the
+chat/API with server-side limits.
 
 ## OpenAI / Codex Compatibility
 

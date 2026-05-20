@@ -1679,7 +1679,12 @@ document.querySelector("#planCards").addEventListener("click", async (event) => 
     purchases.unshift(data.purchase);
     ClaudeApp.savePurchases(purchases);
     renderBilling();
-    showChatNotice("Pedido criado. O plano entra quando o admin confirmar o pagamento.");
+    if (data.purchase.checkoutUrl) {
+      showChatNotice("Abrindo Mercado Pago...");
+      window.location.href = data.purchase.checkoutUrl;
+      return;
+    }
+    showChatNotice("Pedido criado. Configure Mercado Pago para liberar checkout automático.");
   } catch (error) {
     showChatNotice(error.message);
     button.disabled = false;

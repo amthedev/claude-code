@@ -461,18 +461,18 @@ function seedDemo() {
   cards.unshift(
     uniqueGiftCard({
       code: "CLAUDE-DEMO-PRO",
-      plan: "Plano Padrão",
-      price: 149.9,
+      plan: "Pro 5X",
+      price: 125,
       model: "sonnet",
       manualLimit: "",
       active: "true",
     }),
     uniqueGiftCard({
       code: "CLAUDE-DEMO-ULTRA",
-      plan: "Plano Avançado",
-      price: 299.9,
+      plan: "Max 30X",
+      price: 280,
       model: "opus",
-      manualLimit: "45000",
+      manualLimit: "150000",
       active: "true",
     }),
   );
@@ -580,8 +580,8 @@ giftCardForm.addEventListener("submit", async (event) => {
   }
 
   event.currentTarget.reset();
-  event.currentTarget.elements.plan.value = "Plano Padrão";
-  event.currentTarget.elements.price.value = "149.90";
+  event.currentTarget.elements.plan.value = "Básico";
+  event.currentTarget.elements.price.value = "65.00";
   event.currentTarget.elements.active.value = "true";
   renderPreview();
   renderAll();

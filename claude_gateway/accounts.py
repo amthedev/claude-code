@@ -39,30 +39,30 @@ PLAN_CATALOG = (
     },
     {
         "id": "starter",
-        "name": "Econômico",
-        "description": "Modelo barato para uso leve e estudos.",
-        "price": 49.90,
+        "name": "Básico",
+        "description": "Como o Claude comum, para conversas e tarefas leves.",
+        "price": 65.00,
         "modelKey": "haiku",
-        "manualLimit": 12000,
-        "checkoutMode": "manual",
+        "manualLimit": 16000,
+        "checkoutMode": "mercado_pago",
     },
     {
         "id": "pro",
-        "name": "Pro",
-        "description": "Libera Sonnet para trabalho diário.",
-        "price": 149.90,
+        "name": "Pro 5X",
+        "description": "Mais limite e Sonnet para trabalho diário.",
+        "price": 125.00,
         "modelKey": "sonnet",
-        "manualLimit": 45000,
-        "checkoutMode": "manual",
+        "manualLimit": 50000,
+        "checkoutMode": "mercado_pago",
     },
     {
         "id": "ultra",
-        "name": "Ultra",
-        "description": "Libera o roteamento mais forte do app.",
-        "price": 299.90,
+        "name": "Max 30X",
+        "description": "Mais força e limite para uso pesado.",
+        "price": 280.00,
         "modelKey": "opus",
-        "manualLimit": 90000,
-        "checkoutMode": "manual",
+        "manualLimit": 150000,
+        "checkoutMode": "mercado_pago",
     },
 )
 
@@ -320,12 +320,68 @@ class AccountStore:
                 INSERT INTO purchases (
                     id, account_id, login, name, plan_id, plan, price, model_key,
                     manual_limit, daily_limit, max_cost_usd, status, payment_method,
-                    created_at, paid_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, paid_at, mercado_pago_preference_id, mercado_pago_payment_id,
+                    checkout_url, sandbox_checkout_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _purchase_values(purchase),
             )
             db.commit()
+        return purchase
+
+    def update_purchase_checkout(
+        self,
+        purchase_id: str,
+        *,
+        preference_id: str,
+        checkout_url: str,
+        sandbox_checkout_url: str = "",
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            purchase = self._find_purchase(db, purchase_id)
+            db.execute(
+                """
+                UPDATE purchases
+                   SET mercado_pago_preference_id = ?,
+                       checkout_url = ?,
+                       sandbox_checkout_url = ?
+                 WHERE id = ?
+                """,
+                (preference_id, checkout_url, sandbox_checkout_url, purchase_id),
+            )
+            db.commit()
+            purchase["mercadoPagoPreferenceId"] = preference_id
+            purchase["checkoutUrl"] = checkout_url
+            purchase["sandboxCheckoutUrl"] = sandbox_checkout_url
+        return purchase
+
+    def approve_purchase_from_payment(
+        self,
+        purchase_id: str,
+        *,
+        payment_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        if status != "approved":
+            with self._lock, self._connect() as db:
+                purchase = self._find_purchase(db, purchase_id)
+                db.execute(
+                    "UPDATE purchases SET mercado_pago_payment_id = ?, status = ? WHERE id = ?",
+                    (payment_id, _purchase_status_from_payment(status), purchase_id),
+                )
+                db.commit()
+                purchase["mercadoPagoPaymentId"] = payment_id
+                purchase["status"] = _purchase_status_from_payment(status)
+            return purchase
+
+        purchase = self.approve_purchase(purchase_id)
+        with self._lock, self._connect() as db:
+            db.execute(
+                "UPDATE purchases SET mercado_pago_payment_id = ? WHERE id = ?",
+                (payment_id, purchase_id),
+            )
+            db.commit()
+        purchase["mercadoPagoPaymentId"] = payment_id
         return purchase
 
     def approve_purchase(self, purchase_id: str) -> dict[str, Any]:
@@ -478,10 +534,22 @@ class AccountStore:
                     status TEXT NOT NULL,
                     payment_method TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    paid_at TEXT NOT NULL
+                    paid_at TEXT NOT NULL,
+                    mercado_pago_preference_id TEXT NOT NULL DEFAULT '',
+                    mercado_pago_payment_id TEXT NOT NULL DEFAULT '',
+                    checkout_url TEXT NOT NULL DEFAULT '',
+                    sandbox_checkout_url TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            for column, definition in {
+                "mercado_pago_preference_id": "TEXT NOT NULL DEFAULT ''",
+                "mercado_pago_payment_id": "TEXT NOT NULL DEFAULT ''",
+                "checkout_url": "TEXT NOT NULL DEFAULT ''",
+                "sandbox_checkout_url": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                if not _column_exists(db, "purchases", column):
+                    db.execute(f"ALTER TABLE purchases ADD COLUMN {column} {definition}")
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -648,9 +716,13 @@ def _purchase_for_plan(account: dict[str, Any], plan: dict[str, Any], settings: 
         "dailyLimit": limit["dailyLimit"],
         "maxCostUsd": limit["maxCostUsd"],
         "status": "pending",
-        "paymentMethod": "manual",
+        "paymentMethod": "mercado_pago",
         "createdAt": _now(),
         "paidAt": "",
+        "mercadoPagoPreferenceId": "",
+        "mercadoPagoPaymentId": "",
+        "checkoutUrl": "",
+        "sandboxCheckoutUrl": "",
     }
 
 
@@ -763,6 +835,10 @@ def _purchase_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "paymentMethod": row["payment_method"],
         "createdAt": row["created_at"],
         "paidAt": row["paid_at"],
+        "mercadoPagoPreferenceId": row["mercado_pago_preference_id"],
+        "mercadoPagoPaymentId": row["mercado_pago_payment_id"],
+        "checkoutUrl": row["checkout_url"],
+        "sandboxCheckoutUrl": row["sandbox_checkout_url"],
     }
 
 
@@ -824,6 +900,10 @@ def _purchase_values(purchase: dict[str, Any]) -> tuple[Any, ...]:
         purchase["paymentMethod"],
         purchase["createdAt"],
         purchase["paidAt"],
+        purchase["mercadoPagoPreferenceId"],
+        purchase["mercadoPagoPaymentId"],
+        purchase["checkoutUrl"],
+        purchase["sandboxCheckoutUrl"],
     )
 
 
@@ -834,6 +914,19 @@ def _normalize_model_key(value: Any) -> str:
     if "opus" in raw or "ultra" in raw:
         return "opus"
     return "sonnet"
+
+
+def _purchase_status_from_payment(status: str) -> str:
+    if status in {"approved", "paid"}:
+        return "paid"
+    if status in {"rejected", "cancelled", "canceled", "refunded", "charged_back"}:
+        return "canceled"
+    return "pending"
+
+
+def _column_exists(db: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = db.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
 
 
 def _normalize_gift_code(value: Any) -> str:

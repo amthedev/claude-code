@@ -9,6 +9,7 @@ from unicodedata import normalize
 from zoneinfo import ZoneInfo
 
 import uvicorn
+import httpx
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -329,13 +330,46 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"purchase": app.state.account_store.create_purchase(auth.token, payload)})
+        purchase = app.state.account_store.create_purchase(auth.token, payload)
+        checkout = await _create_mercado_pago_preference(request, app, purchase)
+        purchase = app.state.account_store.update_purchase_checkout(
+            purchase["id"],
+            preference_id=checkout["id"],
+            checkout_url=checkout["init_point"],
+            sandbox_checkout_url=checkout.get("sandbox_init_point") or "",
+        )
+        return JSONResponse({"purchase": purchase})
 
     @app.get("/v1/billing/purchases")
     async def list_customer_purchases(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_customer(request, app.state.settings)
         return {"data": app.state.account_store.list_purchases_for_token(auth.token)}
+
+    @app.post("/v1/billing/mercadopago/webhook")
+    async def mercado_pago_webhook(request: Request) -> dict[str, str]:
+        if not app.state.settings.mercado_pago_access_token:
+            raise HTTPException(status_code=503, detail="Mercado Pago is not configured.")
+        payload = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        payment_id = _mercado_pago_payment_id(request, payload)
+        if not payment_id:
+            return {"status": "ignored"}
+
+        payment = await _fetch_mercado_pago_payment(app, payment_id)
+        purchase_id = str(payment.get("external_reference") or "")
+        if not purchase_id:
+            return {"status": "ignored"}
+        app.state.account_store.approve_purchase_from_payment(
+            purchase_id,
+            payment_id=str(payment.get("id") or payment_id),
+            status=str(payment.get("status") or ""),
+        )
+        return {"status": "ok"}
 
     @app.get("/v1/admin/setup-status")
     async def admin_setup_status() -> dict[str, bool]:
@@ -593,6 +627,93 @@ def _mount_frontend(app: FastAPI) -> None:
     @app.get("/admin", include_in_schema=False)
     async def admin_page() -> FileResponse:
         return FileResponse(FRONTEND_DIR / "admin.html")
+
+
+def _public_base_url(request: Request, settings: Settings) -> str:
+    configured = settings.mercado_pago_public_url.strip().rstrip("/")
+    if configured:
+        return configured
+    return str(request.base_url).rstrip("/")
+
+
+async def _create_mercado_pago_preference(
+    request: Request,
+    app: FastAPI,
+    purchase: dict[str, Any],
+) -> dict[str, Any]:
+    token = app.state.settings.mercado_pago_access_token
+    if not token:
+        raise HTTPException(status_code=503, detail="Configure MERCADO_PAGO_ACCESS_TOKEN to sell plans.")
+
+    base_url = _public_base_url(request, app.state.settings)
+    payload = {
+        "items": [
+            {
+                "id": purchase["planId"],
+                "title": f"Claude {purchase['plan']}",
+                "description": f"Plano {purchase['plan']} do Claude",
+                "quantity": 1,
+                "currency_id": "BRL",
+                "unit_price": float(purchase["price"]),
+            }
+        ],
+        "payer": {
+            "name": purchase["name"],
+            "email": purchase["login"],
+        },
+        "external_reference": purchase["id"],
+        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
+        "back_urls": {
+            "success": f"{base_url}/app?payment=success",
+            "failure": f"{base_url}/app?payment=failure",
+            "pending": f"{base_url}/app?payment=pending",
+        },
+        "auto_return": "approved",
+        "statement_descriptor": "CLAUDE",
+    }
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            "https://api.mercadopago.com/checkout/preferences",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+
+    if response.status_code >= 400:
+        detail = response.text
+        try:
+            detail = response.json().get("message") or detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"Mercado Pago preference failed: {detail}")
+
+    data = response.json()
+    if not data.get("id") or not data.get("init_point"):
+        raise HTTPException(status_code=502, detail="Mercado Pago did not return a checkout URL.")
+    return data
+
+
+def _mercado_pago_payment_id(request: Request, payload: dict[str, Any]) -> str:
+    query_id = request.query_params.get("data.id") or request.query_params.get("id")
+    if query_id:
+        return query_id
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if isinstance(data, dict) and data.get("id"):
+        return str(data["id"])
+    if isinstance(payload, dict) and payload.get("resource"):
+        return str(payload["resource"]).rstrip("/").rsplit("/", 1)[-1]
+    return ""
+
+
+async def _fetch_mercado_pago_payment(app: FastAPI, payment_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            f"https://api.mercadopago.com/v1/payments/{payment_id}",
+            headers={"Authorization": f"Bearer {app.state.settings.mercado_pago_access_token}"},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Could not verify Mercado Pago payment.")
+    return response.json()
 
 
 async def _complete_gateway_message(
