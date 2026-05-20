@@ -6,12 +6,12 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=claude-symbol-20260520c" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=claude-sidebar-20260520" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell">
       <aside class="icon-rail">
-        <button class="icon-button" title="Menu" data-panel="historyPanel" aria-label="Menu">
+        <button id="sidebarOpen" class="icon-button" title="Menu" type="button" aria-label="Abrir menu lateral" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M9 6v12" /></svg>
         </button>
         <button id="railNewChat" class="icon-button active" title="Novo chat" type="button" aria-label="Novo chat">
@@ -42,6 +42,60 @@
           Entrar
         </button>
         <button id="clientLogout" class="icon-button rail-bottom avatar-button hidden" title="Sair" aria-label="Sair"></button>
+      </aside>
+
+      <aside id="claudeSidebar" class="claude-sidebar" aria-label="Menu lateral do Claude">
+        <div class="sidebar-brand-row">
+          <strong>Claude</strong>
+          <button id="sidebarClose" class="sidebar-icon-button" type="button" aria-label="Fechar menu lateral">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M15 6v12" /></svg>
+          </button>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Navegação principal">
+          <button id="sidebarNewChat" class="sidebar-action active" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+            <span>Novo bate-papo</span>
+          </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="searchPanel">
+            <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+            <span>Procurar</span>
+          </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="historyPanel">
+            <svg viewBox="0 0 24 24"><path d="M5 17.5 3.5 21l4-1.2a8.7 8.7 0 0 0 4.5 1.2c4.7 0 8.5-3.4 8.5-7.6S16.7 5.8 12 5.8 3.5 9.2 3.5 13.4c0 1.5.5 2.9 1.5 4.1Z" /></svg>
+            <span>Conversas</span>
+          </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="projectsPanel">
+            <svg viewBox="0 0 24 24"><path d="M6 8h12l-1 11H7L6 8Z" /><path d="M9 8V5h6v3M5 8h14" /></svg>
+            <span>Projetos</span>
+          </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="artifactsPanel">
+            <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
+            <span>Artefatos</span>
+          </button>
+          <button class="sidebar-action disabled" type="button" data-sidebar-panel="chatPanel">
+            <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+            <span>Código</span>
+            <span class="sidebar-upgrade">Fazer Upgrade</span>
+          </button>
+          <button class="sidebar-action" type="button" data-sidebar-panel="settingsPanel">
+            <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
+            <span>Personalizar</span>
+          </button>
+        </nav>
+
+        <section class="sidebar-recents" aria-label="Conversas recentes">
+          <span>Recentes</span>
+          <div id="sidebarRecentList" class="sidebar-recent-list"></div>
+        </section>
+
+        <button id="sidebarAccountButton" class="sidebar-account" type="button">
+          <span id="sidebarAccountAvatar" class="sidebar-avatar">A</span>
+          <span class="sidebar-account-text">
+            <strong id="sidebarAccountName">Entrar</strong>
+            <span id="sidebarAccountPlan">Entre para usar</span>
+          </span>
+        </button>
       </aside>
 
       <section class="cloud-main">
@@ -286,6 +340,6 @@
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
     <script src="/frontier/shared.js?v=claude-light-20260520"></script>
-    <script src="/frontier/client.js?v=claude-light-20260520"></script>
+    <script src="/frontier/client.js?v=claude-sidebar-20260520"></script>
   </body>
 </html>

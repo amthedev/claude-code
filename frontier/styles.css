@@ -432,6 +432,14 @@ code {
   overflow: hidden;
 }
 
+.cloud-shell.sidebar-open {
+  grid-template-columns: 400px minmax(0, 1fr);
+}
+
+.cloud-shell.sidebar-open .icon-rail {
+  display: none;
+}
+
 .icon-rail {
   border-right: 1px solid var(--cloud-line);
   background: #fbfaf7;
@@ -505,6 +513,216 @@ code {
 .login-corner-button:hover {
   background: var(--cloud-panel-2);
   color: var(--cloud-text);
+}
+
+.claude-sidebar {
+  min-width: 0;
+  height: 100vh;
+  border-right: 1px solid var(--cloud-line);
+  background: #fbfaf7;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cloud-shell.sidebar-open .claude-sidebar {
+  display: flex;
+}
+
+.sidebar-brand-row {
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 16px;
+}
+
+.sidebar-brand-row strong {
+  color: #171512;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 31px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sidebar-icon-button {
+  width: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cloud-muted);
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-icon-button:hover {
+  background: var(--cloud-panel-2);
+  color: var(--cloud-text);
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 4px;
+  padding: 8px 18px 10px;
+}
+
+.sidebar-action {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cloud-text);
+  padding: 0 6px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  font-size: 22px;
+}
+
+.sidebar-action:hover,
+.sidebar-action.active {
+  background: #f0efeb;
+}
+
+.sidebar-action.disabled {
+  color: color-mix(in srgb, var(--cloud-muted) 58%, white);
+}
+
+.sidebar-action span:not(.sidebar-upgrade) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-upgrade {
+  min-width: max-content;
+  border: 1px solid var(--cloud-line);
+  border-radius: 999px;
+  background: #fff;
+  color: #1455a1;
+  padding: 4px 9px;
+  font-size: 15px;
+}
+
+.sidebar-action svg,
+.sidebar-icon-button svg,
+.sidebar-account svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar-recents {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 18px 24px;
+  overflow: auto;
+}
+
+.sidebar-recents > span {
+  color: var(--cloud-muted);
+  font-size: 18px;
+}
+
+.sidebar-recent-list {
+  display: grid;
+  gap: 4px;
+}
+
+.sidebar-recent-item,
+.sidebar-empty {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cloud-text);
+  padding: 5px 0;
+  text-align: left;
+  font-size: 19px;
+  line-height: 1.28;
+}
+
+.sidebar-recent-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-recent-item:hover {
+  color: #171512;
+  text-decoration: underline;
+}
+
+.sidebar-empty {
+  color: var(--cloud-muted);
+}
+
+.sidebar-account {
+  width: 100%;
+  min-height: 88px;
+  margin-top: auto;
+  border: 0;
+  border-top: 1px solid var(--cloud-line);
+  border-radius: 0;
+  background: #fbfaf7;
+  color: var(--cloud-text);
+  padding: 16px 22px;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  text-align: left;
+}
+
+.sidebar-account:hover {
+  background: #f5f3ee;
+}
+
+.sidebar-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #353330;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.sidebar-account-text {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sidebar-account-text strong,
+.sidebar-account-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-text strong {
+  font-size: 21px;
+}
+
+.sidebar-account-text span {
+  color: var(--cloud-muted);
+  font-size: 18px;
 }
 
 .cloud-main {
@@ -1269,6 +1487,18 @@ button.result-item {
     grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
+  }
+
+  .cloud-shell.sidebar-open {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-shell.sidebar-open .claude-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(400px, 100vw);
+    box-shadow: 24px 0 70px rgba(50, 45, 38, 0.18);
   }
 
   .icon-rail {

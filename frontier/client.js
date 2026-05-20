@@ -21,6 +21,19 @@ function closeAuthModal() {
   document.querySelector("#authModal").classList.add("hidden");
 }
 
+function setSidebarOpen(open) {
+  document.querySelector("#clientApp").classList.toggle("sidebar-open", open);
+  document.querySelector("#sidebarOpen").setAttribute("aria-expanded", String(open));
+}
+
+function openSidebar() {
+  setSidebarOpen(true);
+}
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
 function setAuthTab(tabId) {
   document.querySelectorAll("[data-auth-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.authTab === tabId);
@@ -474,10 +487,16 @@ function renderAccount() {
   const current = account();
   const authOpen = document.querySelector("#authOpen");
   const logout = document.querySelector("#clientLogout");
+  const sidebarName = document.querySelector("#sidebarAccountName");
+  const sidebarPlan = document.querySelector("#sidebarAccountPlan");
+  const sidebarAvatar = document.querySelector("#sidebarAccountAvatar");
 
   if (!current || !current.active) {
     document.querySelector("#planBadge").textContent = "Entrar para usar";
     document.querySelector("#welcomeTitle").textContent = "Como posso ajudar hoje?";
+    sidebarName.textContent = "Entrar";
+    sidebarPlan.textContent = "Entre para usar";
+    sidebarAvatar.textContent = "A";
     document.querySelector("#usageTitle").textContent = "Entre para usar o chat";
     document.querySelector("#usageText").textContent =
       "O envio exige uma conta ativa.";
@@ -500,6 +519,9 @@ function renderAccount() {
   syncCustomerApiToken(current);
   document.querySelector("#planBadge").textContent = ClaudeApp.planDisplayName(current.plan);
   document.querySelector("#welcomeTitle").textContent = `De volta ao trabalho, ${preferredName}?`;
+  sidebarName.textContent = preferredName;
+  sidebarPlan.textContent = ClaudeApp.planDisplayName(current.plan);
+  sidebarAvatar.textContent = preferredName.charAt(0).toUpperCase();
   document.querySelector("#usageTitle").textContent =
     `${ClaudeApp.integer.format(current.usedToday)} de ${ClaudeApp.integer.format(current.dailyLimit)} tokens`;
   document.querySelector("#usageText").textContent =
@@ -529,6 +551,10 @@ function setPanel(panelId) {
   document.querySelectorAll(".icon-rail [data-panel]").forEach((button) => {
     button.classList.toggle("active", button.dataset.panel === panelId);
   });
+  document.querySelectorAll("[data-sidebar-panel]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.sidebarPanel === panelId);
+  });
+  document.querySelector("#sidebarNewChat").classList.toggle("active", panelId === "chatPanel");
   renderSidePanels();
   if (panelId === "supportPanel") refreshSupportTicket();
 }
@@ -817,12 +843,26 @@ function historyItemMarkup(item) {
   `;
 }
 
+function sidebarRecentMarkup(item) {
+  return `
+    <button class="sidebar-recent-item" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
+      ${ClaudeApp.escapeHtml(item.title)}
+    </button>
+  `;
+}
+
 function renderSidePanels() {
   document.querySelector("#historyList").innerHTML = serverHistory.length
     ? serverHistory
         .map((item) => historyItemMarkup(item))
         .join("")
     : `<div class="result-item"><p>Nenhuma conversa salva no banco ainda.</p></div>`;
+  document.querySelector("#sidebarRecentList").innerHTML = serverHistory.length
+    ? serverHistory
+        .slice(0, 8)
+        .map((item) => sidebarRecentMarkup(item))
+        .join("")
+    : `<div class="sidebar-empty">Nenhuma conversa recente.</div>`;
 
   const projects = ClaudeApp.projects();
   document.querySelector("#projectList").innerHTML = projects.length
@@ -1191,9 +1231,21 @@ document.querySelectorAll("[data-panel]").forEach((button) => {
   button.addEventListener("click", () => setPanel(button.dataset.panel));
 });
 
+document.querySelector("#sidebarOpen").addEventListener("click", openSidebar);
+document.querySelector("#sidebarClose").addEventListener("click", closeSidebar);
+document.querySelector("#sidebarNewChat").addEventListener("click", resetChat);
+document.querySelectorAll("[data-sidebar-panel]").forEach((button) => {
+  button.addEventListener("click", () => setPanel(button.dataset.sidebarPanel));
+});
+
 document.querySelector("#railNewChat").addEventListener("click", resetChat);
 
 document.querySelector("#historyList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-conversation-id]");
+  if (item) openConversation(item.dataset.conversationId);
+});
+
+document.querySelector("#sidebarRecentList").addEventListener("click", (event) => {
   const item = event.target.closest("[data-conversation-id]");
   if (item) openConversation(item.dataset.conversationId);
 });
@@ -1380,6 +1432,14 @@ document.querySelector("#clientLogout").addEventListener("click", async () => {
   document.querySelector("#bottomComposer").classList.add("hidden");
   document.querySelector("#emptyState").classList.remove("hidden");
   renderAccount();
+});
+
+document.querySelector("#sidebarAccountButton").addEventListener("click", () => {
+  if (account()?.active) {
+    setPanel("settingsPanel");
+    return;
+  }
+  openAuthModal("clientLoginForm");
 });
 
 document.querySelector("#authOpen").addEventListener("click", () => openAuthModal("clientLoginForm"));
