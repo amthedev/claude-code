@@ -426,14 +426,14 @@ code {
 .cloud-shell {
   height: 100vh;
   display: grid;
-  grid-template-columns: 66px minmax(0, 1fr);
+  grid-template-columns: 52px minmax(0, 1fr);
   background: var(--cloud-bg);
   color: var(--cloud-text);
   overflow: hidden;
 }
 
 .cloud-shell.sidebar-open {
-  grid-template-columns: 400px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
 }
 
 .cloud-shell.sidebar-open .icon-rail {
@@ -443,15 +443,15 @@ code {
 .icon-rail {
   border-right: 1px solid var(--cloud-line);
   background: #fbfaf7;
-  padding: 18px 10px;
+  padding: 14px 8px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 9px;
 }
 
 .icon-button {
-  width: 36px;
-  min-height: 36px;
+  width: 30px;
+  min-height: 30px;
   border-color: transparent;
   background: transparent;
   color: #22211f;
@@ -465,8 +465,8 @@ code {
 .ghost-top svg,
 .composer-icon svg,
 .quick-actions svg {
-  width: 21px;
-  height: 21px;
+  width: 17px;
+  height: 17px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
@@ -492,8 +492,8 @@ code {
   border-radius: 999px;
   background: #353330;
   color: #fff;
-  font-weight: 700;
-  font-size: 17px;
+  font-weight: 600;
+  font-size: 14px;
 }
 
 .avatar-button:hover {
@@ -502,11 +502,11 @@ code {
 }
 
 .login-corner-button {
-  width: 46px;
+  width: 38px;
   border-color: transparent;
   background: transparent;
   color: var(--cloud-muted);
-  font-size: 12px;
+  font-size: 11px;
   border-radius: 8px;
 }
 
@@ -530,25 +530,25 @@ code {
 }
 
 .sidebar-brand-row {
-  min-height: 82px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 24px 24px 16px;
+  gap: 11px;
+  padding: 18px 18px 10px;
 }
 
 .sidebar-brand-row strong {
   color: #171512;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 31px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 600;
   line-height: 1;
 }
 
 .sidebar-icon-button {
-  width: 36px;
-  min-height: 36px;
+  width: 28px;
+  min-height: 28px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -565,24 +565,25 @@ code {
 
 .sidebar-nav {
   display: grid;
-  gap: 4px;
-  padding: 8px 18px 10px;
+  gap: 3px;
+  padding: 6px 13px 8px;
 }
 
 .sidebar-action {
   width: 100%;
-  min-height: 46px;
+  min-height: 34px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--cloud-text);
-  padding: 0 6px;
+  padding: 0 5px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
+  gap: 8px;
   text-align: left;
-  font-size: 22px;
+  font-size: 16px;
+  font-weight: 400;
 }
 
 .sidebar-action:hover,
@@ -606,15 +607,15 @@ code {
   border-radius: 999px;
   background: #fff;
   color: #1455a1;
-  padding: 4px 9px;
-  font-size: 15px;
+  padding: 3px 7px;
+  font-size: 12px;
 }
 
 .sidebar-action svg,
 .sidebar-icon-button svg,
 .sidebar-account svg {
-  width: 22px;
-  height: 22px;
+  width: 17px;
+  height: 17px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.75;
@@ -626,14 +627,14 @@ code {
   min-height: 0;
   display: grid;
   align-content: start;
-  gap: 12px;
-  padding: 18px 24px;
+  gap: 9px;
+  padding: 13px 18px;
   overflow: auto;
 }
 
 .sidebar-recents > span {
   color: var(--cloud-muted);
-  font-size: 18px;
+  font-size: 14px;
 }
 
 .sidebar-recent-list {
@@ -644,14 +645,14 @@ code {
 .sidebar-recent-item,
 .sidebar-empty {
   width: 100%;
-  min-height: 34px;
+  min-height: 26px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--cloud-text);
-  padding: 5px 0;
+  padding: 4px 0;
   text-align: left;
-  font-size: 19px;
+  font-size: 15px;
   line-height: 1.28;
 }
 
@@ -672,18 +673,18 @@ code {
 
 .sidebar-account {
   width: 100%;
-  min-height: 88px;
+  min-height: 64px;
   margin-top: auto;
   border: 0;
   border-top: 1px solid var(--cloud-line);
   border-radius: 0;
   background: #fbfaf7;
   color: var(--cloud-text);
-  padding: 16px 22px;
+  padding: 12px 16px;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   text-align: left;
 }
 
@@ -692,15 +693,15 @@ code {
 }
 
 .sidebar-avatar {
-  width: 50px;
-  height: 50px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   display: grid;
   place-items: center;
   background: #353330;
   color: #fff;
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 600;
 }
 
 .sidebar-avatar.empty {
@@ -722,12 +723,13 @@ code {
 }
 
 .sidebar-account-text strong {
-  font-size: 21px;
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .sidebar-account-text span {
   color: var(--cloud-muted);
-  font-size: 18px;
+  font-size: 14px;
 }
 
 .cloud-main {
@@ -741,23 +743,23 @@ code {
 }
 
 .cloud-top {
-  min-height: 70px;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-bottom: 0;
-  padding: 12px 22px;
+  padding: 8px 18px;
 }
 
 .plan-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   border-radius: 8px;
   background: #f0efeb;
   color: var(--cloud-muted);
-  padding: 7px 12px;
-  font-size: 15px;
+  padding: 5px 9px;
+  font-size: 13px;
 }
 
 .plan-pill button,
@@ -772,10 +774,10 @@ code {
 
 .top-actions {
   position: absolute;
-  right: 24px;
-  top: 17px;
+  right: 18px;
+  top: 11px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
 }
 
@@ -785,8 +787,8 @@ code {
 }
 
 .ghost-top {
-  width: 42px;
-  min-height: 42px;
+  width: 34px;
+  min-height: 34px;
   border-color: transparent;
   background: transparent;
   color: #22211f;
@@ -816,20 +818,20 @@ code {
   display: grid;
   place-content: center;
   justify-items: center;
-  padding: 22px 32px 118px;
+  padding: 15px 24px 82px;
 }
 
 .welcome-lockup {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
-  margin-bottom: 34px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 .claude-mark {
-  width: clamp(34px, 4vw, 47px);
-  height: clamp(34px, 4vw, 47px);
+  width: clamp(25px, 3vw, 34px);
+  height: clamp(25px, 3vw, 34px);
   display: block;
   object-fit: contain;
   flex: 0 0 auto;
@@ -838,31 +840,31 @@ code {
 .chat-empty h1 {
   margin: 0;
   color: #3f3a34;
-  font-size: clamp(38px, 4vw, 56px);
+  font-size: clamp(30px, 3.2vw, 42px);
   font-family: Georgia, "Times New Roman", serif;
-  font-weight: 400;
+  font-weight: 300;
   line-height: 1.08;
 }
 
 .hero-composer,
 .bottom-composer {
-  width: min(870px, calc(100vw - 176px));
+  width: min(720px, calc(100vw - 130px));
   border: 1px solid var(--cloud-line);
-  border-radius: 24px;
+  border-radius: 18px;
   background: #fff;
-  padding: 26px 28px 20px;
+  padding: 18px 20px 14px;
   box-shadow: 0 22px 54px rgba(50, 45, 38, 0.07);
 }
 
 .hero-composer textarea,
 .bottom-composer textarea {
-  min-height: 72px;
+  min-height: 56px;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--cloud-text);
   padding: 0;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.45;
 }
 
@@ -870,8 +872,8 @@ code {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 10px;
-  margin-top: 15px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .composer-row select,
@@ -891,7 +893,7 @@ code {
   display: flex;
   align-items: center;
   justify-self: end;
-  gap: 14px;
+  gap: 10px;
 }
 
 .composer-row > .composer-icon:first-child {
@@ -907,8 +909,8 @@ code {
 
 .composer-icon {
   position: relative;
-  width: 40px;
-  min-height: 40px;
+  width: 32px;
+  min-height: 32px;
   border: 0;
   background: transparent;
   color: var(--cloud-text);
@@ -918,8 +920,8 @@ code {
 }
 
 .voice-button svg {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
 }
 
 .voice-button.recording {
@@ -937,8 +939,8 @@ code {
 }
 
 .send-button {
-  width: 38px;
-  min-height: 38px;
+  width: 32px;
+  min-height: 32px;
   border-radius: 999px;
   background: var(--cloud-panel-2);
   padding: 0;
@@ -949,11 +951,11 @@ code {
 }
 
 .quick-actions {
-  width: min(870px, calc(100vw - 176px));
+  width: min(720px, calc(100vw - 130px));
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  margin-top: 20px;
+  margin-top: 14px;
   justify-content: center;
 }
 
@@ -963,42 +965,42 @@ code {
   color: var(--cloud-text);
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  min-height: 40px;
-  padding: 8px 12px;
-  font-size: 16px;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 14px;
   box-shadow: 0 3px 10px rgba(50, 45, 38, 0.035);
 }
 
 .quick-actions svg {
-  width: 21px;
-  height: 21px;
+  width: 17px;
+  height: 17px;
 }
 
 .preview-notice {
-  width: min(870px, calc(100vw - 176px));
-  margin-top: 14px;
+  width: min(720px, calc(100vw - 130px));
+  margin-top: 10px;
   color: var(--cloud-muted);
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .chat-thread {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 28px;
+  padding: 22px;
   display: grid;
   align-content: start;
-  gap: 16px;
+  gap: 12px;
 }
 
 .message {
-  max-width: 840px;
+  max-width: 720px;
   border: 0;
   border-radius: 8px;
-  padding: 14px 16px;
-  line-height: 1.58;
+  padding: 10px 13px;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1014,26 +1016,27 @@ code {
 }
 
 .bottom-composer {
-  margin: 0 auto 22px;
+  margin: 0 auto 16px;
 }
 
 .chat-error {
-  width: min(900px, calc(100vw - 176px));
-  margin: -14px auto 18px;
+  width: min(720px, calc(100vw - 130px));
+  margin: -10px auto 14px;
 }
 
 .side-panel {
-  width: min(760px, 100%);
+  width: min(620px, 100%);
   flex-direction: column;
-  gap: 16px;
-  padding: 34px;
+  gap: 12px;
+  padding: 24px;
   border-right: 1px solid var(--cloud-line);
   background: #fff;
 }
 
 .panel-header h2 {
   margin: 4px 0 0;
-  font-size: 34px;
+  font-size: 26px;
+  font-weight: 500;
 }
 
 .side-panel input,
@@ -1502,7 +1505,7 @@ button.result-item {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 30;
-    width: min(400px, 100vw);
+    width: min(300px, 100vw);
     box-shadow: 24px 0 70px rgba(50, 45, 38, 0.18);
   }
 
@@ -1528,12 +1531,12 @@ button.result-item {
   }
 
   .welcome-lockup {
-    gap: 12px;
+    gap: 10px;
     align-items: flex-start;
   }
 
   .chat-empty h1 {
-    font-size: clamp(32px, 10vw, 46px);
+    font-size: clamp(28px, 8vw, 38px);
   }
 
   .hero-composer,
