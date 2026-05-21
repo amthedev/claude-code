@@ -425,6 +425,7 @@ code {
 
 .cloud-shell {
   height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
   background: var(--cloud-bg);
@@ -522,6 +523,7 @@ code {
   z-index: 19;
   min-width: 0;
   height: 100vh;
+  height: 100dvh;
   border-right: 1px solid var(--cloud-line);
   background: #fbfaf7;
   display: none;
@@ -741,6 +743,7 @@ code {
   min-width: 0;
   min-height: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1419,8 +1422,11 @@ code {
   gap: 20px;
   width: 100%;
   min-height: 0;
-  padding: 34px clamp(22px, 5vw, 64px);
-  overflow: auto;
+  padding: 34px clamp(22px, 5vw, 64px) calc(72px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: var(--cloud-bg);
 }
 
