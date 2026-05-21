@@ -1152,6 +1152,7 @@ code {
 
 .message.assistant p,
 .message.assistant ul,
+.message.assistant ol,
 .message.assistant table,
 .message.assistant pre {
   margin: 0 0 12px;
@@ -1159,11 +1160,13 @@ code {
 
 .message.assistant p:last-child,
 .message.assistant ul:last-child,
+.message.assistant ol:last-child,
 .message.assistant table:last-child,
 .message.assistant pre:last-child {
   margin-bottom: 0;
 }
 
+.message.assistant h2,
 .message.assistant h3,
 .message.assistant h4 {
   margin: 16px 0 8px;
@@ -1173,6 +1176,7 @@ code {
   font-weight: 750;
 }
 
+.message.assistant h2:first-child,
 .message.assistant h3:first-child,
 .message.assistant h4:first-child {
   margin-top: 0;
@@ -1183,7 +1187,13 @@ code {
   font-weight: 760;
 }
 
-.message.assistant ul {
+.message.assistant h2 {
+  color: #245d72;
+  font-size: 18px;
+}
+
+.message.assistant ul,
+.message.assistant ol {
   padding-left: 20px;
 }
 
@@ -2170,6 +2180,22 @@ button.result-item {
 
 .form-error.neutral {
   color: var(--cloud-muted);
+}
+
+.settings-login-cta {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-login-cta strong {
+  color: var(--cloud-text);
+  font-size: 16px;
+}
+
+.settings-login-cta p {
+  margin: 0;
+  color: var(--cloud-muted);
+  line-height: 1.45;
 }
 
 .workspace-subtitle {

@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=glued-clean-20260521" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=loggedout-flow-20260521" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell sidebar-open">
@@ -433,8 +433,8 @@
           <button type="button" data-auth-tab="clientSignupForm">Cadastro</button>
         </div>
 
-        <form id="clientLoginForm" class="auth-pane active">
-          <p>Use o e-mail e a senha criados no cadastro.</p>
+        <form id="clientLoginForm" class="auth-pane active" novalidate>
+          <p id="clientLoginIntro">Use o e-mail e a senha criados no cadastro.</p>
           <label>
             E-mail
             <input name="login" type="email" autocomplete="username" required />
@@ -447,8 +447,8 @@
           <div id="clientLoginError" class="form-error"></div>
         </form>
 
-        <form id="clientSignupForm" class="auth-pane">
-          <p>Crie uma conta grátis agora. Se tiver gift card, ele libera o plano comprado.</p>
+        <form id="clientSignupForm" class="auth-pane" novalidate>
+          <p id="clientSignupIntro">Crie uma conta grátis agora. Se tiver gift card, ele libera o plano comprado.</p>
           <label>
             Nome
             <input name="name" autocomplete="name" placeholder="Como quer ser chamado" required />
@@ -472,7 +472,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=glued-clean-20260521"></script>
-    <script src="/frontier/client.js?v=glued-clean-20260521"></script>
+    <script src="/frontier/shared.js?v=loggedout-flow-20260521"></script>
+    <script src="/frontier/client.js?v=loggedout-flow-20260521"></script>
   </body>
 </html>

@@ -300,6 +300,7 @@ const ClaudeApp = (() => {
   }
 
   function allowedPublicModelsForAccount(account) {
+    if (!account?.active) return [models.haiku.publicModel];
     const key = normalizeModelKey(account?.modelKey);
     if (key === "haiku") return [models.haiku.publicModel];
     if (key === "sonnet") return [models.haiku.publicModel, models.sonnet.publicModel];

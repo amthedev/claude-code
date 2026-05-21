@@ -13,6 +13,8 @@ let incognitoMode = false;
 let apiSecretsVisible = false;
 let highlightedPlanId = "";
 let sessionStatusMessage = "";
+let pendingPlanId = "";
+let pendingAuthIntent = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 
@@ -219,6 +221,9 @@ function repairStoredDuplicateArtifacts() {
 function openAuthModal(tab = "clientLoginForm") {
   document.querySelector("#authModal").classList.remove("hidden");
   setAuthTab(tab);
+  document.querySelector("#clientLoginError").textContent = "";
+  document.querySelector("#clientSignupMessage").textContent = "";
+  updateAuthContext();
 }
 
 function closeAuthModal() {
@@ -277,6 +282,62 @@ function setAuthTab(tabId) {
   document.querySelectorAll(".auth-pane").forEach((pane) => {
     pane.classList.toggle("active", pane.id === tabId);
   });
+  updateAuthContext();
+}
+
+function planById(planId) {
+  return ClaudeApp.paidPlans().find((plan) => plan.id === planId) || null;
+}
+
+function defaultAuthCopy() {
+  return {
+    login: "Use o e-mail e a senha criados no cadastro.",
+    signup: "Crie uma conta grátis agora. Se tiver gift card, ele libera o plano comprado.",
+  };
+}
+
+function authIntentCopy() {
+  const plan = planById(pendingPlanId);
+  if (pendingAuthIntent === "plan" && plan) {
+    return {
+      login: `Entre para continuar a compra do plano ${plan.name}.`,
+      signup: `Crie sua conta para comprar o plano ${plan.name}. Depois do cadastro, continuamos o pedido.`,
+    };
+  }
+  if (pendingAuthIntent === "project") {
+    return {
+      login: "Entre para criar e salvar projetos.",
+      signup: "Crie sua conta para guardar projetos e contexto de trabalho.",
+    };
+  }
+  if (pendingAuthIntent === "artifact") {
+    return {
+      login: "Entre para criar e salvar artefatos.",
+      signup: "Crie sua conta para transformar ideias em artefatos salvos.",
+    };
+  }
+  if (pendingAuthIntent === "chat") {
+    return {
+      login: "Entre para enviar sua mensagem.",
+      signup: "Crie sua conta para conversar e manter seu histórico.",
+    };
+  }
+  return defaultAuthCopy();
+}
+
+function updateAuthContext() {
+  const copy = authIntentCopy();
+  const loginIntro = document.querySelector("#clientLoginIntro");
+  const signupIntro = document.querySelector("#clientSignupIntro");
+  if (loginIntro) loginIntro.textContent = copy.login;
+  if (signupIntro) signupIntro.textContent = copy.signup;
+}
+
+function openAuthForIntent(intent, tab = "clientSignupForm", planId = "") {
+  pendingAuthIntent = intent;
+  pendingPlanId = planId || "";
+  if (pendingPlanId) highlightedPlanId = pendingPlanId;
+  openAuthModal(tab);
 }
 
 function fillModelSelects() {
@@ -847,7 +908,7 @@ function renderPlanCards() {
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
-          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}" ${!current || currentPlan ? "disabled" : ""}>
+          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}" ${currentPlan ? "disabled" : ""}>
             ${!current ? "Entre para comprar" : currentPlan ? "Plano atual" : "Solicitar upgrade"}
           </button>
         </article>
@@ -910,6 +971,51 @@ async function loadPurchases() {
   }
 }
 
+async function requestPlanPurchase(planId, button = null) {
+  const plan = planById(planId);
+  if (!plan) {
+    showChatNotice("Plano não encontrado.");
+    return;
+  }
+  const original = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Registrando...";
+  } else {
+    showChatNotice(`Criando pedido do plano ${plan.name}...`);
+  }
+  try {
+    const data = await customerRequest("/v1/billing/purchases", {
+      method: "POST",
+      body: JSON.stringify({ planId }),
+    });
+    const purchases = ClaudeApp.purchases();
+    purchases.unshift(data.purchase);
+    ClaudeApp.savePurchases(purchases);
+    pendingPlanId = "";
+    pendingAuthIntent = "";
+    renderBilling();
+    if (data.purchase.checkoutUrl) {
+      showChatNotice("Abrindo Mercado Pago...");
+      window.location.href = data.purchase.checkoutUrl;
+      return;
+    }
+    showChatNotice("Pedido criado. Configure Mercado Pago para liberar checkout automático.");
+  } catch (error) {
+    showChatNotice(error.message);
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+}
+
+async function continuePendingAuthFlow() {
+  if (!pendingPlanId || !account()?.active) return;
+  const planId = pendingPlanId;
+  await requestPlanPurchase(planId);
+}
+
 function renderAccount() {
   const current = account();
   const authOpen = document.querySelector("#authOpen");
@@ -931,9 +1037,11 @@ function renderAccount() {
       "O envio exige uma conta ativa.";
     document.querySelector("#usageFill").style.width = "0%";
     document.querySelector("#accountDetails").innerHTML = `
-      <code>Status: ${ClaudeApp.escapeHtml(sessionStatusMessage || "aguardando login")}</code>
-      <code>Chat: entre com uma conta ativa</code>
-      <code>API: Claude Code API</code>
+      <div class="settings-login-cta">
+        <strong>Entre para ver sua conta</strong>
+        <p>${ClaudeApp.escapeHtml(sessionStatusMessage || "Depois do login, você vê plano, uso, API e configurações em um só lugar.")}</p>
+        <button class="primary" type="button" data-auth-settings>Entrar ou cadastrar</button>
+      </div>
     `;
     document.querySelector("#previewNotice").textContent =
       sessionStatusMessage || "Entre em uma conta ativa para usar o chat.";
@@ -942,6 +1050,8 @@ function renderAccount() {
     authOpen.classList.remove("hidden");
     logout.classList.add("hidden");
     logout.textContent = "";
+    document.querySelector("#openProjectModal").textContent = "Entrar para criar projeto";
+    document.querySelector("#newArtifact").textContent = "Entrar para criar artefato";
     renderBilling();
     fillModelSelects();
     renderSidePanels();
@@ -981,6 +1091,8 @@ function renderAccount() {
   authOpen.classList.add("hidden");
   logout.classList.remove("hidden");
   logout.textContent = accountInitial(current);
+  document.querySelector("#openProjectModal").textContent = "Novo projeto";
+  document.querySelector("#newArtifact").textContent = "Novo artefato";
   renderBilling();
   fillModelSelects();
   startSupportPolling();
@@ -1028,7 +1140,9 @@ function renderMarkdownTable(lines) {
         .trim()
         .replace(/^\||\|$/g, "")
         .split(line.includes("|") ? "|" : "\t")
-        .map((cell) => renderInlineMarkdown(cell.trim())),
+        .map((cell) => cell.trim())
+        .filter((cell) => !/^:?-{3,}:?$/.test(cell))
+        .map((cell) => renderInlineMarkdown(cell)),
     );
   if (!rows.length) return "";
   const [head, ...body] = rows;
@@ -1047,14 +1161,16 @@ function renderAssistantMarkdown(text) {
   const lines = cleaned.split(/\r?\n/);
   const html = [];
   let listItems = [];
+  let listType = "ul";
   let codeLines = [];
   let tableLines = [];
   let inCode = false;
 
   const flushList = () => {
     if (!listItems.length) return;
-    html.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
+    html.push(`<${listType}>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</${listType}>`);
     listItems = [];
+    listType = "ul";
   };
   const flushTable = () => {
     if (!tableLines.length) return;
@@ -1098,13 +1214,22 @@ function renderAssistantMarkdown(text) {
     const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       flushList();
-      const level = Math.min(4, Math.max(3, heading[1].length));
+      const level = Math.min(4, Math.max(2, heading[1].length));
       html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
       return;
     }
     const bullet = trimmed.match(/^[-*]\s+(.+)$/);
     if (bullet) {
+      if (listItems.length && listType !== "ul") flushList();
+      listType = "ul";
       listItems.push(bullet[1]);
+      return;
+    }
+    const numbered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (numbered) {
+      if (listItems.length && listType !== "ol") flushList();
+      listType = "ol";
+      listItems.push(numbered[1]);
       return;
     }
     flushList();
@@ -1440,7 +1565,7 @@ async function callGateway(selectedModel, messages, onText) {
 async function submitPrompt(prompt, selectedModel, attachments = []) {
   const current = account();
   if (!current || !current.active) {
-    openAuthModal("clientLoginForm");
+    openAuthForIntent("chat", "clientSignupForm");
     throw new Error("Entre com uma conta ativa para usar o chat.");
   }
 
@@ -1990,27 +2115,80 @@ function resetChat() {
   clearActiveChat();
 }
 
+function setFormMessage(target, message, field = null) {
+  target.textContent = message;
+  if (field) window.setTimeout(() => field.focus(), 0);
+}
+
+function validateLoginForm(form, target) {
+  const login = form.elements.login;
+  const password = form.elements.password;
+  if (!login.value.trim()) {
+    setFormMessage(target, "Informe seu e-mail.", login);
+    return false;
+  }
+  if (!login.validity.valid) {
+    setFormMessage(target, "Digite um e-mail válido.", login);
+    return false;
+  }
+  if (!password.value.trim()) {
+    setFormMessage(target, "Informe sua senha.", password);
+    return false;
+  }
+  return true;
+}
+
+function validateSignupForm(form, target) {
+  const name = form.elements.name;
+  const login = form.elements.login;
+  const password = form.elements.password;
+  if (!name.value.trim()) {
+    setFormMessage(target, "Informe seu nome.", name);
+    return false;
+  }
+  if (!login.value.trim()) {
+    setFormMessage(target, "Informe seu e-mail.", login);
+    return false;
+  }
+  if (!login.validity.valid) {
+    setFormMessage(target, "Digite um e-mail válido.", login);
+    return false;
+  }
+  if (!password.value.trim()) {
+    setFormMessage(target, "Crie uma senha.", password);
+    return false;
+  }
+  return true;
+}
+
 document.querySelector("#clientLoginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  document.querySelector("#clientLoginError").textContent = "";
+  const form = event.currentTarget;
+  const errorTarget = document.querySelector("#clientLoginError");
+  errorTarget.textContent = "";
+  if (!validateLoginForm(form, errorTarget)) return;
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   let found = null;
   try {
     const data = await authRequest("/v1/auth/login", values);
     found = saveServerAccount(data.account);
   } catch (error) {
-    document.querySelector("#clientLoginError").textContent =
-      error.fallback ? "API indisponível para validar login." : error.message;
+    errorTarget.textContent =
+      error.fallback
+        ? "API indisponível para validar login."
+        : /401|403|invalid|inválid|senha|login/i.test(error.message)
+          ? "E-mail ou senha inválidos."
+          : error.message;
     return;
   }
 
   if (!found) {
-    document.querySelector("#clientLoginError").textContent = "Login ou senha inválidos.";
+    errorTarget.textContent = "E-mail ou senha inválidos.";
     return;
   }
 
   if (!found.active) {
-    document.querySelector("#clientLoginError").textContent =
+    errorTarget.textContent =
       "Conta pausada. Fale com o suporte para reativar.";
     return;
   }
@@ -2022,6 +2200,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
   renderAccount();
   loadServerHistory();
   loadPurchases();
+  continuePendingAuthFlow();
 });
 
 document.querySelector("#clientSignupForm").addEventListener("submit", async (event) => {
@@ -2029,12 +2208,13 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
   const form = event.currentTarget;
   const message = document.querySelector("#clientSignupMessage");
   message.textContent = "";
+  if (!validateSignupForm(form, message)) return;
   const values = Object.fromEntries(new FormData(form).entries());
   const accounts = ClaudeApp.accounts();
   const login = values.login.trim();
   const exists = accounts.some((item) => item.login.toLowerCase() === login.toLowerCase());
   if (exists) {
-    message.textContent = "Esse login já existe.";
+    setFormMessage(message, "Esse e-mail já tem conta. Tente entrar.", form.elements.login);
     return;
   }
 
@@ -2049,6 +2229,7 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     renderAccount();
     loadServerHistory();
     loadPurchases();
+    continuePendingAuthFlow();
     return;
   } catch (error) {
     message.textContent = error.fallback ? "API indisponível para criar conta." : error.message;
@@ -2162,33 +2343,12 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
 document.querySelector("#planCards").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-buy-plan]");
   if (!button || button.disabled) return;
+  const planId = button.dataset.buyPlan;
   if (!account()?.active) {
-    openAuthModal("clientLoginForm");
+    openAuthForIntent("plan", "clientSignupForm", planId);
     return;
   }
-  button.disabled = true;
-  const original = button.textContent;
-  button.textContent = "Registrando...";
-  try {
-    const data = await customerRequest("/v1/billing/purchases", {
-      method: "POST",
-      body: JSON.stringify({ planId: button.dataset.buyPlan }),
-    });
-    const purchases = ClaudeApp.purchases();
-    purchases.unshift(data.purchase);
-    ClaudeApp.savePurchases(purchases);
-    renderBilling();
-    if (data.purchase.checkoutUrl) {
-      showChatNotice("Abrindo Mercado Pago...");
-      window.location.href = data.purchase.checkoutUrl;
-      return;
-    }
-    showChatNotice("Pedido criado. Configure Mercado Pago para liberar checkout automático.");
-  } catch (error) {
-    showChatNotice(error.message);
-    button.disabled = false;
-    button.textContent = original;
-  }
+  await requestPlanPurchase(planId, button);
 });
 
 document.querySelector("#attachmentInput").addEventListener("change", async (event) => {
@@ -2208,6 +2368,9 @@ document.querySelectorAll(".quick-actions button").forEach((button) => {
   button.addEventListener("click", () => {
     if (activeConversation.length || activeConversationId) {
       resetChat();
+    } else {
+      setPanel("chatPanel");
+      document.querySelector("#emptyState").classList.remove("hidden");
     }
     renderSuggestionPanel(button.dataset.suggestionCategory);
   });
@@ -2232,7 +2395,16 @@ document.querySelector("#heroComposer").addEventListener("submit", async (event)
   event.preventDefault();
   const form = event.currentTarget;
   const prompt = form.elements.prompt.value.trim() || (pendingAttachments.length ? "Analise os anexos." : "");
-  if (!prompt) return;
+  if (!prompt) {
+    showChatNotice("Digite uma mensagem para enviar.");
+    form.elements.prompt.focus();
+    return;
+  }
+  if (!account()?.active) {
+    openAuthForIntent("chat", "clientSignupForm");
+    showChatNotice("Entre ou crie uma conta para enviar sua mensagem.");
+    return;
+  }
   const attachments = pendingAttachments;
   pendingAttachments = [];
   stopDictation();
@@ -2249,7 +2421,16 @@ document.querySelector("#bottomComposer").addEventListener("submit", async (even
   event.preventDefault();
   const form = event.currentTarget;
   const prompt = form.elements.prompt.value.trim() || (pendingAttachments.length ? "Analise os anexos." : "");
-  if (!prompt) return;
+  if (!prompt) {
+    showChatNotice("Digite uma mensagem para enviar.");
+    form.elements.prompt.focus();
+    return;
+  }
+  if (!account()?.active) {
+    openAuthForIntent("chat", "clientSignupForm");
+    showChatNotice("Entre ou crie uma conta para enviar sua mensagem.");
+    return;
+  }
   const attachments = pendingAttachments;
   pendingAttachments = [];
   stopDictation();
@@ -2384,6 +2565,11 @@ document.querySelector("#searchClose").addEventListener("click", () => {
 document.querySelector("#newChat").addEventListener("click", resetChat);
 
 document.querySelector("#openProjectModal").addEventListener("click", () => {
+  if (!account()?.active) {
+    openAuthForIntent("project", "clientSignupForm");
+    showChatNotice("Entre ou crie uma conta para criar projetos.");
+    return;
+  }
   document.querySelector("#projectModal").classList.remove("hidden");
   window.setTimeout(() => document.querySelector("#projectForm input[name='name']")?.focus(), 0);
 });
@@ -2400,6 +2586,11 @@ document.querySelector("#projectModal").addEventListener("click", (event) => {
 });
 
 document.querySelector("#newArtifact").addEventListener("click", () => {
+  if (!account()?.active) {
+    openAuthForIntent("artifact", "clientSignupForm");
+    showChatNotice("Entre ou crie uma conta para criar artefatos.");
+    return;
+  }
   document.querySelector("#artifactStartModal").classList.remove("hidden");
 });
 
@@ -2449,7 +2640,7 @@ document.querySelector("#clientLogout").addEventListener("click", () => {
 
 document.querySelector("#sidebarAccountButton").addEventListener("click", (event) => {
   if (!account()?.active) {
-    openAuthModal("clientLoginForm");
+    openAuthForIntent("", "clientLoginForm");
     return;
   }
   toggleFloatingMenu("#accountMenu", event.currentTarget);
@@ -2468,11 +2659,17 @@ document.querySelector("#accountMenu").addEventListener("click", async (event) =
   }
 });
 
+document.querySelector("#accountDetails").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-auth-settings]");
+  if (!button) return;
+  openAuthForIntent("", "clientLoginForm");
+});
+
 document.querySelector("#incognitoToggle").addEventListener("click", () => {
   setIncognitoMode(!incognitoMode);
 });
 
-document.querySelector("#authOpen").addEventListener("click", () => openAuthModal("clientLoginForm"));
+document.querySelector("#authOpen").addEventListener("click", () => openAuthForIntent("", "clientLoginForm"));
 document.querySelector("#authClose").addEventListener("click", closeAuthModal);
 document.querySelector("#authModal").addEventListener("click", (event) => {
   if (event.target.id === "authModal") closeAuthModal();
