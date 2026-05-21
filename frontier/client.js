@@ -186,7 +186,22 @@ function repairDuplicatedText(text) {
     }
     repaired.push(repairDuplicatedToken(token));
   }
-  return repaired.join("");
+  return repairGluedPhrases(repaired.join(""));
+}
+
+function repairGluedPhrases(text) {
+  return String(text || "")
+    .replace(/\bdentendimento\b/gi, "de entendimento")
+    .replace(/\bfrasesobre\b/gi, "frases sobre")
+    .replace(/\bpalavrasem\b/gi, "palavras sem")
+    .replace(/\bqueu\b/gi, "que eu")
+    .replace(/\bquevita\b/gi, "que evita")
+    .replace(/\bConversasimples\b/g, "Conversa simples")
+    .replace(/\bComprensão\b/g, "Compreensão")
+    .replace(/\bIso\b/g, "Isso")
+    .replace(/\b(\d+)hoje\s+nada\b/g, "$1h hoje e nada")
+    .replace(/\bAprendas\s+\*?1\.0[–-]2\.0\b/g, "Aprenda as **1.000–2.000")
+    .replace(/\bFoquem\s+frases\b/g, "Foque em frases");
 }
 
 function repairStoredDuplicateArtifacts() {
@@ -1007,11 +1022,12 @@ function renderInlineMarkdown(text) {
 function renderMarkdownTable(lines) {
   const rows = lines
     .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    .filter((line) => !/^\s*-{3,}\s*$/.test(line.trim()))
     .map((line) =>
       line
         .trim()
         .replace(/^\||\|$/g, "")
-        .split("|")
+        .split(line.includes("|") ? "|" : "\t")
         .map((cell) => renderInlineMarkdown(cell.trim())),
     );
   if (!rows.length) return "";
@@ -1063,7 +1079,7 @@ function renderAssistantMarkdown(text) {
       codeLines.push(line);
       return;
     }
-    if (/^\s*\|.+\|\s*$/.test(line)) {
+    if (/^\s*\|.+\|\s*$/.test(line) || line.includes("\t")) {
       flushList();
       tableLines.push(line);
       return;

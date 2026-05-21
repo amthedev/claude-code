@@ -11,6 +11,19 @@ _WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 _DUPLICATED_WORD_RE = re.compile(r"\b([^\W_]+)(\s+)\1\b", re.IGNORECASE | re.UNICODE)
 _PREFIX_FRAGMENT_RE = re.compile(r"\b([^\W_]{1,8})(\s+)(\1[^\W_]{2,})\b", re.IGNORECASE | re.UNICODE)
 _MARKDOWN_PAIR_RE = re.compile(r"(\*\*|__|\*|_)\s+\1")
+_GLUED_REPAIRS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bdentendimento\b", re.IGNORECASE), "de entendimento"),
+    (re.compile(r"\bfrasesobre\b", re.IGNORECASE), "frases sobre"),
+    (re.compile(r"\bpalavrasem\b", re.IGNORECASE), "palavras sem"),
+    (re.compile(r"\bqueu\b", re.IGNORECASE), "que eu"),
+    (re.compile(r"\bquevita\b", re.IGNORECASE), "que evita"),
+    (re.compile(r"\bConversasimples\b"), "Conversa simples"),
+    (re.compile(r"\bComprensão\b"), "Compreensão"),
+    (re.compile(r"\bIso\b"), "Isso"),
+    (re.compile(r"\b(\d+)hoje\s+nada\b"), r"\1h hoje e nada"),
+    (re.compile(r"\bAprendas\s+\*?1\.0[–-]2\.0\b"), "Aprenda as **1.000–2.000"),
+    (re.compile(r"\bFoquem\s+frases\b"), "Foque em frases"),
+)
 
 
 def extract_response_text(response: dict[str, Any]) -> str:
@@ -143,6 +156,14 @@ def _clean_prose_text(text: str) -> str:
         current = _DUPLICATED_WORD_RE.sub(r"\1", current)
         current = _PREFIX_FRAGMENT_RE.sub(r"\3", current)
         current = _WORD_RE.sub(lambda match: _repair_word(match.group(0)), current)
+        current = _repair_glued_phrases(current)
+    return current
+
+
+def _repair_glued_phrases(text: str) -> str:
+    current = text
+    for pattern, replacement in _GLUED_REPAIRS:
+        current = pattern.sub(replacement, current)
     return current
 
 

@@ -1109,40 +1109,49 @@ async def _public_model_stream(chunks: Any, public_model: str):
 
 class _StreamTextNormalizer:
     def __init__(self) -> None:
-        self.text = ""
+        self.raw_text = ""
+        self.cleaned_text = ""
 
     def delta_for(self, incoming: str) -> str:
         text = str(incoming or "")
         if not text:
             return ""
-        if not self.text:
-            self.text = text
-            return text
-        if text == self.text or self.text.endswith(text):
+        self.raw_text = _merge_stream_text(self.raw_text, text)
+        next_cleaned = clean_model_text(self.raw_text, strip=False)
+        if next_cleaned == self.cleaned_text or self.cleaned_text.endswith(next_cleaned):
             return ""
-        if text.startswith(self.text):
-            delta = text[len(self.text):]
-            self.text = text
+        if next_cleaned.startswith(self.cleaned_text):
+            delta = next_cleaned[len(self.cleaned_text):]
+            self.cleaned_text = next_cleaned
             return delta
 
-        overlap = _stream_overlap_length(self.text, text)
-        if overlap:
-            delta = text[overlap:]
-            self.text += delta
-            return delta
+        overlap = _stream_overlap_length(self.cleaned_text, next_cleaned)
+        delta = next_cleaned[overlap:] if overlap else next_cleaned
+        self.cleaned_text = next_cleaned
+        return delta
 
-        stripped = text.lstrip()
-        if stripped and stripped != text:
-            if self.text.endswith(stripped):
-                return ""
-            overlap = _stream_overlap_length(self.text, stripped)
-            if overlap:
-                delta = stripped[overlap:]
-                self.text += delta
-                return delta
 
-        self.text += text
-        return text
+def _merge_stream_text(current: str, incoming: str) -> str:
+    if not current:
+        return incoming
+    if incoming == current or current.endswith(incoming):
+        return current
+    if incoming.startswith(current):
+        return incoming
+
+    overlap = _stream_overlap_length(current, incoming)
+    if overlap:
+        return current + incoming[overlap:]
+
+    stripped = incoming.lstrip()
+    if stripped and stripped != incoming:
+        if current.endswith(stripped):
+            return current
+        stripped_overlap = _stream_overlap_length(current, stripped)
+        if stripped_overlap:
+            return current + stripped[stripped_overlap:]
+
+    return current + incoming
 
 
 def _stream_overlap_length(left: str, right: str) -> int:
@@ -1156,9 +1165,9 @@ def _stream_overlap_length(left: str, right: str) -> int:
 def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamTextNormalizer) -> None:
     delta = payload.get("delta")
     if isinstance(delta, dict) and isinstance(delta.get("text"), str):
-        delta["text"] = normalizer.delta_for(clean_model_text(delta["text"], strip=False))
+        delta["text"] = normalizer.delta_for(delta["text"])
     elif isinstance(delta, str) and payload.get("type") == "response.output_text.delta":
-        payload["delta"] = normalizer.delta_for(clean_model_text(delta, strip=False))
+        payload["delta"] = normalizer.delta_for(delta)
 
     choices = payload.get("choices")
     if not isinstance(choices, list):
@@ -1172,11 +1181,11 @@ def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamT
             continue
         content = choice_delta.get("content")
         if isinstance(content, str):
-            choice_delta["content"] = normalizer.delta_for(clean_model_text(content, strip=False))
+            choice_delta["content"] = normalizer.delta_for(content)
         elif isinstance(content, list):
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-                    part["text"] = normalizer.delta_for(clean_model_text(part["text"], strip=False))
+                    part["text"] = normalizer.delta_for(part["text"])
 
 
 def _rewrite_stream_event_model(

@@ -208,6 +208,35 @@ class GatewayTestCase(unittest.TestCase):
             "Aqui está um **plano realista e pratico para ficar fluente em inglês em 33 meses",
         )
 
+    def test_clean_model_text_repairs_glued_words_without_dropping_spaces(self) -> None:
+        broken = (
+            "Treina ouvido com input comprensível (70–90% dentendimento)\n"
+            "Escreva 3–5 frasesobre seu dia\n"
+            "🔑 Priorize Iso (em ordem de impacto)\n"
+            "→ Aprendas *1.0–2.0 palavras mais usadas**\n"
+            "→ Foquem frases prontas, não listas de palavras\n"
+            "⚠️ O quevita resultado:\n"
+            "Decorar listas gigantes de palavrasem contexto\n"
+            "Estudar 3hoje nada nos próximos 3 dias\n"
+            "1 mês\tComprensão básica, frases curtas\n"
+            "3 meses\tConversasimples\n"
+            "Quer queu monte um plano?"
+        )
+
+        cleaned = clean_model_text(broken)
+
+        self.assertIn("70–90% de entendimento", cleaned)
+        self.assertIn("3–5 frases sobre seu dia", cleaned)
+        self.assertIn("Priorize Isso", cleaned)
+        self.assertIn("Aprenda as **1.000–2.000 palavras", cleaned)
+        self.assertIn("Foque em frases prontas", cleaned)
+        self.assertIn("O que evita resultado", cleaned)
+        self.assertIn("palavras sem contexto", cleaned)
+        self.assertIn("3h hoje e nada", cleaned)
+        self.assertIn("Compreensão básica", cleaned)
+        self.assertIn("Conversa simples", cleaned)
+        self.assertIn("Quer que eu monte", cleaned)
+
     def test_openapi_is_not_public_by_default(self) -> None:
         response = self.client.get("/openapi.json")
         self.assertEqual(response.status_code, 404)
