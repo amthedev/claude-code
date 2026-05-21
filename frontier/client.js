@@ -435,8 +435,12 @@ function activeApiToken() {
   return (account()?.apiToken || ClaudeApp.apiSettings().token || "").trim();
 }
 
+function customerApiToken() {
+  return (account()?.apiToken || "").trim();
+}
+
 function ensureCodeCustomerSession() {
-  if (account()?.active && activeApiToken()) return true;
+  if (account()?.active && customerApiToken()) return true;
   openAuthForIntent("project", "clientLoginForm");
   showChatNotice("Entre novamente para conectar projetos de código.");
   return false;
@@ -845,11 +849,13 @@ async function authRequest(path, payload) {
 async function supportRequest(path, options = {}) {
   const settings = ClaudeApp.apiSettings();
   const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const token = customerApiToken();
+  if (!token) throw new Error("Entre novamente para usar sua conta.");
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${activeApiToken()}`,
+      Authorization: `Bearer ${token}`,
       ...(options.headers || {}),
     },
   });
@@ -870,13 +876,14 @@ async function supportRequest(path, options = {}) {
 
 async function customerRequest(path, options = {}) {
   const settings = ClaudeApp.apiSettings();
-  const current = account();
   const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const token = customerApiToken();
+  if (!token) throw new Error("Entre novamente para usar sua conta.");
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${activeApiToken()}`,
+      Authorization: `Bearer ${token}`,
       ...(options.headers || {}),
     },
   });
@@ -1403,11 +1410,13 @@ function updateMessage(message, text) {
 async function conversationRequest(path, options = {}) {
   const settings = ClaudeApp.apiSettings();
   const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const token = customerApiToken();
+  if (!token) throw new Error("Entre novamente para carregar seu histórico.");
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${activeApiToken()}`,
+      Authorization: `Bearer ${token}`,
       ...(options.headers || {}),
     },
   });
@@ -2260,7 +2269,7 @@ function renderCodePanel() {
 }
 
 async function loadCodeWorkspaces() {
-  if (!account()?.active || !activeApiToken()) {
+  if (!account()?.active || !customerApiToken()) {
     codeWorkspaces = [];
     renderCodePanel();
     return;
@@ -2354,9 +2363,11 @@ async function downloadCodeWorkspace() {
   if (!ensureCodeCustomerSession()) return;
   try {
     const settings = ClaudeApp.apiSettings();
+    const token = customerApiToken();
+    if (!token) throw new Error("Entre novamente para baixar o projeto.");
     const response = await fetch(
       `${settings.baseUrl.replace(/\/$/, "")}/v1/code/workspaces/${encodeURIComponent(activeCodeWorkspaceId)}/download`,
-      { headers: { Authorization: `Bearer ${activeApiToken()}` } },
+      { headers: { Authorization: `Bearer ${token}` } },
     );
     if (!response.ok) throw new Error(`Download falhou: ${response.status}`);
     const blob = await response.blob();
@@ -3579,6 +3590,10 @@ renderSupport();
 if (currentAccountId && !account()) {
   currentAccountId = null;
   sessionStatusMessage = "Sua sessão expirou. Entre novamente para continuar.";
+  localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
+} else if (currentAccountId && account()?.active && !customerApiToken()) {
+  currentAccountId = null;
+  sessionStatusMessage = "Entre novamente para conectar projetos de código.";
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
 }
 
