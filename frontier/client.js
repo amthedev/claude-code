@@ -12,6 +12,10 @@ let activeProjectId = localStorage.getItem("claude_frontier_active_project") || 
 let codeWorkspaces = [];
 let activeCodeWorkspaceId = localStorage.getItem("claude_frontier_active_code_workspace") || "";
 let activeCodeFilePath = "";
+let activeCodeFiles = [];
+let activeChatMode = localStorage.getItem("claude_frontier_active_chat_mode") || "chat";
+let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "review";
+let codeOutputMode = localStorage.getItem("claude_frontier_code_output_mode") || "normal";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -1177,6 +1181,10 @@ function renderAccount() {
 
 function setPanel(panelId) {
   closeFloatingMenus();
+  if (panelId === "codePanel") {
+    startCodeChat();
+    return;
+  }
   if (panelId !== "searchPanel") {
     document.querySelector("#searchInput")?.blur();
   }
@@ -1194,9 +1202,6 @@ function setPanel(panelId) {
   if (panelId === "plansPanel") {
     renderBilling();
     focusHighlightedPlan();
-  }
-  if (panelId === "codePanel") {
-    loadCodeWorkspaces();
   }
   if (panelId === "searchPanel") {
     searchLocal(document.querySelector("#searchInput")?.value || "");
@@ -1890,15 +1895,42 @@ function activeCodeWorkspace() {
 
 function activeCodeWorkspaceContextBlock() {
   const workspace = activeCodeWorkspace();
-  if (!workspace) return "";
+  if (activeChatMode !== "code" && !workspace) return "";
+  if (!workspace) {
+    return [
+      "Chat de código ativo.",
+      "Nenhum workspace de código selecionado ainda.",
+      "Quando o usuário pedir para trabalhar em código, peça para escolher um projeto salvo, conectar um repo do Hub/GitHub ou subir um ZIP pelo ícone de projeto.",
+    ].join("\n");
+  }
   const filePath = activeCodeFilePath;
   const fileContent = filePath ? document.querySelector("#codeEditor")?.value || "" : "";
+  const visibleFiles = activeCodeFiles
+    .slice(0, 80)
+    .map((file) => `- ${file.path} (${ClaudeApp.integer.format(file.size)} bytes)`)
+    .join("\n");
+  const modeLabels = {
+    review: "revisão automática antes de orientar mudanças",
+    full: "acesso completo para propor alterações diretas",
+    ask: "pedir confirmação antes de mudanças destrutivas",
+  };
+  const outputLabels = {
+    normal: "resposta normal",
+    diagram: "gráficos, fluxos ou diagramas quando fizer sentido",
+    tests: "testes, comandos de verificação e critérios de aceite",
+    commit: "resumo pronto para GitHub/PR",
+  };
   return [
+    "Chat de código ativo.",
     `Workspace de código ativo: ${workspace.name}`,
     workspace.repoUrl ? `Origem GitHub: ${workspace.repoUrl}` : "",
+    activeProject() ? `Projeto de contexto selecionado: ${activeProject().name}` : "",
+    `Modo de edição: ${modeLabels[codeEditMode] || modeLabels.review}.`,
+    `Saída preferida: ${outputLabels[codeOutputMode] || outputLabels.normal}.`,
+    visibleFiles ? `Arquivos disponíveis:\n${visibleFiles}` : "",
     filePath ? `Arquivo aberto: ${filePath}` : "",
     fileContent ? `Conteúdo atual do arquivo aberto:\n\`\`\`\n${fileContent.slice(0, 12000)}\n\`\`\`` : "",
-    "Quando sugerir mudanças, seja específico sobre os arquivos. Se for editar o arquivo aberto, devolva o conteúdo ou trecho de substituição com clareza.",
+    "Trabalhe como um chat de código: mantenha contexto do projeto, seja específico sobre arquivos, proponha patches ou próximos passos verificáveis e não peça tokens de GitHub ao usuário.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1906,10 +1938,96 @@ function activeCodeWorkspaceContextBlock() {
 
 function renderCodeContextButtons() {
   const workspace = activeCodeWorkspace();
-  document.querySelectorAll("[data-code-context-open]").forEach((button) => {
-    button.textContent = workspace ? `Código: ${workspace.name}` : "Código";
-    button.classList.toggle("active", Boolean(workspace));
+  const isCodeChat = activeChatMode === "code" && Boolean(account()?.active);
+  document.querySelector("#clientApp")?.classList.toggle("code-chat-mode", isCodeChat);
+  document.querySelectorAll("[data-code-chat-open]").forEach((button) => {
+    button.classList.toggle("active", isCodeChat);
+    button.title = workspace ? `Chat de código: ${workspace.name}` : "Chat de código";
+    button.setAttribute("aria-label", workspace ? `Chat de código: ${workspace.name}` : "Abrir chat de código");
   });
+  document.querySelectorAll(".code-chat-control").forEach((button) => {
+    button.classList.toggle("hidden", !isCodeChat);
+  });
+  document.querySelectorAll("#heroComposer textarea, #bottomComposer textarea").forEach((textarea) => {
+    textarea.placeholder = isCodeChat ? "Peça uma mudança, revisão ou plano para o projeto..." : "Como posso ajudar você hoje?";
+  });
+  document.querySelectorAll("[data-code-edit-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.codeEditMode === codeEditMode);
+  });
+  document.querySelectorAll("[data-code-output-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.codeOutputMode === codeOutputMode);
+  });
+  const title = document.querySelector("#welcomeTitle");
+  if (title) {
+    title.textContent = isCodeChat ? "O que vamos mudar no projeto?" : incognitoMode ? "Olá, seja quem for você" : "Como posso ajudar hoje?";
+  }
+  renderCodeProjectChoices();
+}
+
+function renderCodeProjectChoices() {
+  const target = document.querySelector("#codeProjectChoices");
+  if (!target) return;
+  const workspaceButtons = codeWorkspaces
+    .map(
+      (workspace) => `
+        <button type="button" class="${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
+          <span>${workspace.source === "github" ? "Git" : "ZIP"}</span>
+          ${ClaudeApp.escapeHtml(workspace.name)}
+        </button>
+      `,
+    )
+    .join("");
+  const projectButtons = ClaudeApp.projects()
+    .map(
+      (project) => `
+        <button type="button" class="${project.id === activeProjectId ? "active" : ""}" data-code-saved-project-id="${ClaudeApp.escapeHtml(project.id)}">
+          <span>▤</span>
+          ${ClaudeApp.escapeHtml(project.name)}
+        </button>
+      `,
+    )
+    .join("");
+  target.innerHTML =
+    workspaceButtons || projectButtons
+      ? `${workspaceButtons}${projectButtons}`
+      : `<button type="button" disabled><span>＋</span>Nenhum projeto salvo</button>`;
+}
+
+function setActiveChatMode(mode) {
+  activeChatMode = mode === "code" ? "code" : "chat";
+  localStorage.setItem("claude_frontier_active_chat_mode", activeChatMode);
+  renderCodeContextButtons();
+}
+
+async function startCodeChat() {
+  if (!account()?.active) {
+    openAuthForIntent("chat", "clientSignupForm");
+    showChatNotice("Entre ou crie uma conta para usar o chat de código.");
+    return;
+  }
+  setActiveChatMode("code");
+  if (activeConversation.length || activeConversationId) {
+    clearActiveChat();
+  } else {
+    setPanel("chatPanel");
+  }
+  await loadCodeWorkspaces();
+  renderCodeContextButtons();
+  showChatNotice(activeCodeWorkspace() ? `Projeto ativo: ${activeCodeWorkspace().name}` : "Escolha um projeto pelo ícone de pasta.");
+}
+
+function selectSavedProjectForCode(projectId) {
+  const project = ClaudeApp.projects().find((item) => item.id === projectId);
+  if (!project) {
+    showChatNotice("Projeto não encontrado.");
+    return;
+  }
+  activeProjectId = project.id;
+  localStorage.setItem("claude_frontier_active_project", project.id);
+  setActiveChatMode("code");
+  setPanel("chatPanel");
+  renderSidePanels();
+  showChatNotice(`Contexto ativo: ${project.name}`);
 }
 
 function historyDate(item) {
@@ -2025,6 +2143,7 @@ function openProject(projectId) {
     showChatNotice("Projeto não encontrado.");
     return;
   }
+  setActiveChatMode("chat");
   activeProjectId = project.id;
   localStorage.setItem("claude_frontier_active_project", project.id);
   clearActiveChat();
@@ -2112,6 +2231,7 @@ function renderCodePanel() {
   document.querySelector("#downloadCodeWorkspace").disabled = !activeCodeWorkspaceId;
   document.querySelector("#saveCodeFile").disabled = !activeCodeWorkspaceId || !activeCodeFilePath;
   renderCodeContextButtons();
+  renderCodeProjectChoices();
 }
 
 async function loadCodeWorkspaces() {
@@ -2123,6 +2243,12 @@ async function loadCodeWorkspaces() {
   try {
     const data = await codeRequest("/workspaces");
     codeWorkspaces = data.data || [];
+    if (activeCodeWorkspaceId && !codeWorkspaces.some((workspace) => workspace.id === activeCodeWorkspaceId)) {
+      activeCodeWorkspaceId = "";
+      activeCodeFilePath = "";
+      activeCodeFiles = [];
+      localStorage.removeItem("claude_frontier_active_code_workspace");
+    }
     if (!activeCodeWorkspaceId && codeWorkspaces[0]) activeCodeWorkspaceId = codeWorkspaces[0].id;
     if (activeCodeWorkspaceId) localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
     renderCodePanel();
@@ -2137,11 +2263,13 @@ async function loadCodeFiles(workspaceId) {
   activeCodeWorkspaceId = workspaceId;
   localStorage.setItem("claude_frontier_active_code_workspace", workspaceId);
   activeCodeFilePath = "";
+  activeCodeFiles = [];
   document.querySelector("#codeEditor").value = "";
   document.querySelector("#codeFileTitle").textContent = "Selecione um arquivo";
   renderCodePanel();
   try {
     const data = await codeRequest(`/workspaces/${encodeURIComponent(workspaceId)}/files`);
+    activeCodeFiles = data.files || [];
     document.querySelector("#codeFileList").innerHTML = (data.files || []).length
       ? data.files
           .map(
@@ -2158,6 +2286,7 @@ async function loadCodeFiles(workspaceId) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
   renderCodeContextButtons();
+  renderCodeProjectChoices();
 }
 
 async function openCodeFile(filePath) {
@@ -2212,6 +2341,34 @@ async function downloadCodeWorkspace() {
     URL.revokeObjectURL(url);
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function uploadCodeWorkspaceFromFile(file, name = "") {
+  if (!file) {
+    showChatNotice("Escolha um ZIP.");
+    return null;
+  }
+  setActiveChatMode("code");
+  setPanel("chatPanel");
+  showChatNotice("Subindo projeto...");
+  try {
+    const data = await codeRequest("/workspaces/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name || file.name.replace(/\.zip$/i, ""),
+        zipBase64: await fileToBase64(file),
+      }),
+    });
+    activeCodeWorkspaceId = data.workspace.id;
+    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
+    activeCodeFilePath = "";
+    await loadCodeWorkspaces();
+    showChatNotice(`Projeto ativo: ${data.workspace.name}`);
+    return data.workspace;
+  } catch (error) {
+    showChatNotice(error.message);
+    return null;
   }
 }
 
@@ -2564,7 +2721,9 @@ function clearActiveChat({ savePrevious = true } = {}) {
 }
 
 function resetChat() {
+  setActiveChatMode("chat");
   clearActiveChat();
+  renderCodeContextButtons();
 }
 
 function setFormMessage(target, message, field = null) {
@@ -2773,24 +2932,126 @@ document.querySelector("#attachMenu").addEventListener("click", (event) => {
     setPanel("projectsPanel");
     return;
   }
-  if (action === "code-open") {
-    setPanel("codePanel");
-    return;
-  }
-  if (action === "code-github") {
-    setPanel("codePanel");
-    window.setTimeout(() => document.querySelector("#githubImportForm input[name='repoUrl']")?.focus(), 0);
-    return;
-  }
-  if (action === "code-zip") {
-    setPanel("codePanel");
-    window.setTimeout(() => document.querySelector("#codeZipInput")?.click(), 0);
+  if (action === "code-chat") {
+    startCodeChat();
     return;
   }
 });
 
-document.querySelectorAll("[data-code-context-open]").forEach((button) => {
-  button.addEventListener("click", () => setPanel("codePanel"));
+document.querySelectorAll("[data-code-chat-open]").forEach((button) => {
+  button.addEventListener("click", () => startCodeChat());
+});
+
+document.querySelectorAll("[data-code-project-open]").forEach((button) => {
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    if (activeChatMode !== "code") await startCodeChat();
+    renderCodeProjectChoices();
+    toggleFloatingMenu("#codeProjectMenu", button);
+  });
+});
+
+document.querySelectorAll("[data-code-tools-open]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    toggleFloatingMenu("#codeToolsMenu", button);
+  });
+});
+
+document.querySelectorAll("[data-code-output-open]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    toggleFloatingMenu("#codeOutputMenu", button);
+  });
+});
+
+document.querySelector("#codeProjectMenu").addEventListener("click", async (event) => {
+  event.stopPropagation();
+  const workspaceButton = event.target.closest("[data-code-workspace-id]");
+  if (workspaceButton) {
+    closeFloatingMenus();
+    setActiveChatMode("code");
+    setPanel("chatPanel");
+    await loadCodeFiles(workspaceButton.dataset.codeWorkspaceId);
+    showChatNotice(`Projeto ativo: ${activeCodeWorkspace()?.name || "código"}`);
+    return;
+  }
+  const savedProjectButton = event.target.closest("[data-code-saved-project-id]");
+  if (savedProjectButton) {
+    closeFloatingMenus();
+    selectSavedProjectForCode(savedProjectButton.dataset.codeSavedProjectId);
+    return;
+  }
+  const actionButton = event.target.closest("[data-code-project-action]");
+  if (!actionButton) return;
+  closeFloatingMenus();
+  if (actionButton.dataset.codeProjectAction === "upload") {
+    setActiveChatMode("code");
+    document.querySelector("#codeZipInput")?.click();
+    return;
+  }
+  if (actionButton.dataset.codeProjectAction === "new-project") {
+    setActiveChatMode("code");
+    if (!account()?.active) {
+      openAuthForIntent("project", "clientSignupForm");
+      showChatNotice("Entre ou crie uma conta para criar projetos.");
+      return;
+    }
+    document.querySelector("#projectModal").classList.remove("hidden");
+    window.setTimeout(() => document.querySelector("#projectForm input[name='name']")?.focus(), 0);
+  }
+});
+
+document.querySelector("#codeGithubQuickForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form).entries());
+  if (!String(values.repoUrl || "").trim()) {
+    form.elements.repoUrl.focus();
+    return;
+  }
+  closeFloatingMenus();
+  setActiveChatMode("code");
+  setPanel("chatPanel");
+  showChatNotice("Conectando projeto...");
+  try {
+    const data = await codeRequest("/workspaces/github", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    activeCodeWorkspaceId = data.workspace.id;
+    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
+    activeCodeFilePath = "";
+    form.reset();
+    await loadCodeWorkspaces();
+    showChatNotice(`Projeto ativo: ${data.workspace.name}`);
+  } catch (error) {
+    showChatNotice(error.message);
+  }
+});
+
+document.querySelector("#codeToolsMenu").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const item = event.target.closest("[data-code-edit-mode]");
+  if (!item) return;
+  codeEditMode = item.dataset.codeEditMode;
+  localStorage.setItem("claude_frontier_code_edit_mode", codeEditMode);
+  closeFloatingMenus();
+  renderCodeContextButtons();
+});
+
+document.querySelector("#codeOutputMenu").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const item = event.target.closest("[data-code-output-mode]");
+  if (!item) return;
+  codeOutputMode = item.dataset.codeOutputMode;
+  localStorage.setItem("claude_frontier_code_output_mode", codeOutputMode);
+  closeFloatingMenus();
+  renderCodeContextButtons();
 });
 
 document.querySelectorAll("[data-model-trigger]").forEach((button) => {
@@ -3012,6 +3273,7 @@ document.querySelector("#bottomModel").addEventListener("change", (event) => {
 
 document.querySelector("#projectForm").addEventListener("submit", (event) => {
   event.preventDefault();
+  const createForCodeChat = activeChatMode === "code";
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   const error = document.querySelector("#projectError");
   error.textContent = "";
@@ -3034,7 +3296,11 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
   activeProjectId = project.id;
   localStorage.setItem("claude_frontier_active_project", project.id);
   renderSidePanels();
-  openProject(project.id);
+  if (createForCodeChat) {
+    selectSavedProjectForCode(project.id);
+  } else {
+    openProject(project.id);
+  }
 });
 
 document.querySelector("#githubImportForm").addEventListener("submit", async (event) => {
@@ -3068,24 +3334,17 @@ document.querySelector("#zipUploadForm").addEventListener("submit", async (event
     return;
   }
   document.querySelector("#codeStatus").textContent = "Subindo ZIP...";
-  try {
-    const data = await codeRequest("/workspaces/upload", {
-      method: "POST",
-      body: JSON.stringify({
-        name: form.elements.name.value || file.name.replace(/\.zip$/i, ""),
-        zipBase64: await fileToBase64(file),
-      }),
-    });
-    activeCodeWorkspaceId = data.workspace.id;
-    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
-    activeCodeFilePath = "";
-    form.reset();
-    document.querySelector("#codeStatus").textContent = "ZIP importado.";
-    await loadCodeWorkspaces();
-    fillHeroPrompt(`Analise este projeto (${data.workspace.name}) e me diga por onde começar.`);
-  } catch (error) {
-    document.querySelector("#codeStatus").textContent = error.message;
-  }
+  const workspace = await uploadCodeWorkspaceFromFile(file, form.elements.name.value || "");
+  if (workspace) document.querySelector("#codeStatus").textContent = "ZIP importado.";
+  form.reset();
+});
+
+document.querySelector("#codeZipInput").addEventListener("change", async (event) => {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) return;
+  await uploadCodeWorkspaceFromFile(file);
+  input.value = "";
 });
 
 document.querySelector("#codeWorkspaceList").addEventListener("click", (event) => {

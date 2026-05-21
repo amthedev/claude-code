@@ -29,9 +29,6 @@
         <button class="icon-button" title="Artefatos" data-panel="artifactsPanel" aria-label="Artefatos">
           <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
         </button>
-        <button class="icon-button auth-only hidden" title="Código" data-panel="codePanel" aria-label="Código">
-          <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
-        </button>
         <button class="icon-button" title="Configurações" data-panel="settingsPanel" aria-label="Abrir configurações">
           <svg viewBox="0 0 24 24"><path d="M6 19v-7a6 6 0 0 1 12 0v7M6 15h12M8 20l2-2 2 2 2-2 2 2 2-2" /></svg>
         </button>
@@ -78,10 +75,6 @@
           <button class="sidebar-action" type="button" data-sidebar-panel="artifactsPanel">
             <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
             <span>Artefatos</span>
-          </button>
-          <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="codePanel">
-            <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
-            <span>Código</span>
           </button>
           <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="apiPanel" aria-label="Abrir Claude Code API">
             <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
@@ -151,7 +144,18 @@
                   <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
                     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   </button>
-                  <button class="code-context-button" type="button" data-code-context-open>Código</button>
+                  <button class="composer-icon code-mode-button" type="button" data-code-chat-open title="Chat de código" aria-label="Abrir chat de código">
+                    <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+                  </button>
+                  <button class="composer-icon code-chat-control hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
+                    <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
+                  </button>
+                  <button class="composer-icon code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
+                    <svg viewBox="0 0 24 24"><path d="M6 8h12M6 16h12" /><path d="M9 6v4M15 14v4" /></svg>
+                  </button>
+                  <button class="composer-icon code-chat-control hidden" type="button" data-code-output-open title="Saídas" aria-label="Escolher saída de código">
+                    <svg viewBox="0 0 24 24"><path d="M5 19V5M5 19h14" /><path d="M9 15v-4M13 15V8M17 15v-7" /></svg>
+                  </button>
                 </div>
                 <div class="composer-right">
                   <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
@@ -208,7 +212,18 @@
                 <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
-                <button class="code-context-button" type="button" data-code-context-open>Código</button>
+                <button class="composer-icon code-mode-button" type="button" data-code-chat-open title="Chat de código" aria-label="Abrir chat de código">
+                  <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+                </button>
+                <button class="composer-icon code-chat-control hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
+                  <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
+                </button>
+                <button class="composer-icon code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
+                  <svg viewBox="0 0 24 24"><path d="M6 8h12M6 16h12" /><path d="M9 6v4M15 14v4" /></svg>
+                </button>
+                <button class="composer-icon code-chat-control hidden" type="button" data-code-output-open title="Saídas" aria-label="Escolher saída de código">
+                  <svg viewBox="0 0 24 24"><path d="M5 19V5M5 19h14" /><path d="M9 15v-4M13 15V8M17 15v-7" /></svg>
+                </button>
               </div>
               <div class="composer-right">
                 <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
@@ -279,7 +294,7 @@
           <div id="artifactList" class="artifact-list"></div>
         </section>
 
-        <section id="codePanel" class="client-panel workspace-panel code-panel">
+        <section id="codePanel" class="client-panel workspace-panel code-panel legacy-code-panel">
           <div class="workspace-header">
             <div>
               <h1>Código</h1>
@@ -296,10 +311,6 @@
               <label>
                 Branch/tag opcional
                 <input name="ref" placeholder="main" />
-              </label>
-              <label>
-                Token opcional para repo privado
-                <input name="githubToken" type="password" autocomplete="off" placeholder="ghp_..." />
               </label>
               <button class="primary" type="submit">Importar GitHub</button>
             </form>
@@ -418,9 +429,35 @@
     <div id="attachMenu" class="floating-menu hidden" role="menu" aria-label="Adicionar arquivos e projetos">
       <button type="button" data-attach-action="files"><span>＋</span>Adicionar arquivos ou fotos <kbd>⌘U</kbd></button>
       <button type="button" data-attach-action="project"><span>▤</span>Abrir projetos</button>
-      <button type="button" data-attach-action="code-open"><span>&lt;/&gt;</span>Abrir código</button>
-      <button type="button" data-attach-action="code-github"><span>Git</span>Conectar GitHub</button>
-      <button type="button" data-attach-action="code-zip"><span>ZIP</span>Subir pasta compactada</button>
+      <button type="button" data-attach-action="code-chat"><span>&lt;/&gt;</span>Chat de código</button>
+    </div>
+
+    <div id="codeProjectMenu" class="floating-menu code-project-menu hidden" role="menu" aria-label="Projeto de código">
+      <div class="floating-section">
+        <strong>Projeto ativo</strong>
+        <div id="codeProjectChoices" class="compact-choice-list"></div>
+      </div>
+      <form id="codeGithubQuickForm" class="quick-menu-form" novalidate>
+        <strong>Hub ou GitHub</strong>
+        <input name="repoUrl" placeholder="https://github.com/usuario/repositorio" required />
+        <input name="ref" placeholder="branch opcional" />
+        <button class="primary" type="submit">Conectar</button>
+      </form>
+      <button type="button" data-code-project-action="upload"><span>ZIP</span>Subir projeto</button>
+      <button type="button" data-code-project-action="new-project"><span>＋</span>Criar projeto</button>
+    </div>
+
+    <div id="codeToolsMenu" class="floating-menu code-tools-menu hidden" role="menu" aria-label="Modo do chat de código">
+      <button type="button" data-code-edit-mode="review"><span>✓</span>Revisão automática</button>
+      <button type="button" data-code-edit-mode="full"><span>↯</span>Acesso completo</button>
+      <button type="button" data-code-edit-mode="ask"><span>?</span>Pedir antes de editar</button>
+    </div>
+
+    <div id="codeOutputMenu" class="floating-menu code-tools-menu hidden" role="menu" aria-label="Saída do chat de código">
+      <button type="button" data-code-output-mode="normal"><span>•</span>Resposta normal</button>
+      <button type="button" data-code-output-mode="diagram"><span>▥</span>Gráficos e diagramas</button>
+      <button type="button" data-code-output-mode="tests"><span>▣</span>Testes e verificação</button>
+      <button type="button" data-code-output-mode="commit"><span>Git</span>Resumo para GitHub</button>
     </div>
 
     <div id="modelMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Modelo">
