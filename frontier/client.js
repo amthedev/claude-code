@@ -9,6 +9,9 @@ let activeConversationId = null;
 let activeChatSessionKey = `chat_${Date.now()}`;
 let serverHistory = [];
 let activeProjectId = localStorage.getItem("claude_frontier_active_project") || "";
+let codeWorkspaces = [];
+let activeCodeWorkspaceId = "";
+let activeCodeFilePath = "";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -881,6 +884,10 @@ async function customerRequest(path, options = {}) {
   return response.json();
 }
 
+async function codeRequest(path, options = {}) {
+  return customerRequest(`/v1/code${path}`, options);
+}
+
 function saveServerAccount(accountData) {
   rememberSessionApiToken(accountData.id, accountData.apiToken);
   const safeAccount = withoutApiToken(accountData);
@@ -1186,6 +1193,9 @@ function setPanel(panelId) {
   if (panelId === "plansPanel") {
     renderBilling();
     focusHighlightedPlan();
+  }
+  if (panelId === "codePanel") {
+    loadCodeWorkspaces();
   }
   if (panelId === "searchPanel") {
     searchLocal(document.querySelector("#searchInput")?.value || "");
@@ -2048,6 +2058,131 @@ function searchLocal(query) {
       : `<div class="command-option"><p>Nenhum resultado.</p></div>`;
 }
 
+function renderCodePanel() {
+  const workspaceList = document.querySelector("#codeWorkspaceList");
+  const fileList = document.querySelector("#codeFileList");
+  if (!workspaceList || !fileList) return;
+  workspaceList.innerHTML = codeWorkspaces.length
+    ? codeWorkspaces
+        .map(
+          (workspace) => `
+            <button type="button" class="code-list-item ${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
+              <strong>${ClaudeApp.escapeHtml(workspace.name)}</strong>
+              <span>${ClaudeApp.escapeHtml(workspace.source === "github" ? workspace.repoUrl : "ZIP local")}</span>
+            </button>
+          `,
+        )
+        .join("")
+    : `<div class="empty-workspace"><p>Importe um repo ou suba um ZIP para começar.</p></div>`;
+  if (!activeCodeWorkspaceId) {
+    fileList.innerHTML = `<div class="empty-workspace"><p>Escolha um projeto.</p></div>`;
+  }
+  document.querySelector("#downloadCodeWorkspace").disabled = !activeCodeWorkspaceId;
+  document.querySelector("#saveCodeFile").disabled = !activeCodeWorkspaceId || !activeCodeFilePath;
+}
+
+async function loadCodeWorkspaces() {
+  if (!account()?.active) {
+    codeWorkspaces = [];
+    renderCodePanel();
+    return;
+  }
+  try {
+    const data = await codeRequest("/workspaces");
+    codeWorkspaces = data.data || [];
+    if (!activeCodeWorkspaceId && codeWorkspaces[0]) activeCodeWorkspaceId = codeWorkspaces[0].id;
+    renderCodePanel();
+    if (activeCodeWorkspaceId) await loadCodeFiles(activeCodeWorkspaceId);
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+    renderCodePanel();
+  }
+}
+
+async function loadCodeFiles(workspaceId) {
+  activeCodeWorkspaceId = workspaceId;
+  activeCodeFilePath = "";
+  document.querySelector("#codeEditor").value = "";
+  document.querySelector("#codeFileTitle").textContent = "Selecione um arquivo";
+  renderCodePanel();
+  try {
+    const data = await codeRequest(`/workspaces/${encodeURIComponent(workspaceId)}/files`);
+    document.querySelector("#codeFileList").innerHTML = (data.files || []).length
+      ? data.files
+          .map(
+            (file) => `
+              <button type="button" class="code-file-item" data-code-file-path="${ClaudeApp.escapeHtml(file.path)}" ${file.editable ? "" : "disabled"}>
+                <span>${ClaudeApp.escapeHtml(file.path)}</span>
+                <small>${ClaudeApp.integer.format(file.size)} bytes</small>
+              </button>
+            `,
+          )
+          .join("")
+      : `<div class="empty-workspace"><p>Nenhum arquivo editável encontrado.</p></div>`;
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function openCodeFile(filePath) {
+  if (!activeCodeWorkspaceId || !filePath) return;
+  try {
+    const data = await codeRequest(
+      `/workspaces/${encodeURIComponent(activeCodeWorkspaceId)}/files/content?path=${encodeURIComponent(filePath)}`,
+    );
+    activeCodeFilePath = data.path;
+    document.querySelector("#codeFileTitle").textContent = data.path;
+    document.querySelector("#codeEditor").value = data.content;
+    document.querySelector("#codeStatus").textContent = "";
+    renderCodePanel();
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function saveCodeFile() {
+  if (!activeCodeWorkspaceId || !activeCodeFilePath) return;
+  try {
+    await codeRequest(`/workspaces/${encodeURIComponent(activeCodeWorkspaceId)}/files/content`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        path: activeCodeFilePath,
+        content: document.querySelector("#codeEditor").value,
+      }),
+    });
+    document.querySelector("#codeStatus").textContent = "Arquivo salvo.";
+    await loadCodeFiles(activeCodeWorkspaceId);
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function downloadCodeWorkspace() {
+  if (!activeCodeWorkspaceId) return;
+  try {
+    const settings = ClaudeApp.apiSettings();
+    const response = await fetch(
+      `${settings.baseUrl.replace(/\/$/, "")}/v1/code/workspaces/${encodeURIComponent(activeCodeWorkspaceId)}/download`,
+      { headers: { Authorization: `Bearer ${activeApiToken()}` } },
+    );
+    if (!response.ok) throw new Error(`Download falhou: ${response.status}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "projeto-atualizado.zip";
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function fileToBase64(file) {
+  const dataUrl = await fileToDataUrl(file);
+  return dataUrl.split(",", 2)[1] || "";
+}
+
 function supportStatusText(ticket) {
   if (!ticket) return "Nenhum atendimento aberto.";
   if (ticket.status === "waiting") return "Na fila. O suporte vai assumir assim que finalizar o atendimento atual.";
@@ -2844,6 +2979,66 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
   renderSidePanels();
   openProject(project.id);
 });
+
+document.querySelector("#githubImportForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form).entries());
+  document.querySelector("#codeStatus").textContent = "Importando repositório...";
+  try {
+    const data = await codeRequest("/workspaces/github", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    activeCodeWorkspaceId = data.workspace.id;
+    activeCodeFilePath = "";
+    form.reset();
+    document.querySelector("#codeStatus").textContent = "Repositório importado.";
+    await loadCodeWorkspaces();
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+});
+
+document.querySelector("#zipUploadForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const file = form.elements.zip.files?.[0];
+  if (!file) {
+    document.querySelector("#codeStatus").textContent = "Escolha um ZIP.";
+    return;
+  }
+  document.querySelector("#codeStatus").textContent = "Subindo ZIP...";
+  try {
+    const data = await codeRequest("/workspaces/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        name: form.elements.name.value || file.name.replace(/\.zip$/i, ""),
+        zipBase64: await fileToBase64(file),
+      }),
+    });
+    activeCodeWorkspaceId = data.workspace.id;
+    activeCodeFilePath = "";
+    form.reset();
+    document.querySelector("#codeStatus").textContent = "ZIP importado.";
+    await loadCodeWorkspaces();
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
+  }
+});
+
+document.querySelector("#codeWorkspaceList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-code-workspace-id]");
+  if (item) loadCodeFiles(item.dataset.codeWorkspaceId);
+});
+
+document.querySelector("#codeFileList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-code-file-path]");
+  if (item) openCodeFile(item.dataset.codeFilePath);
+});
+
+document.querySelector("#saveCodeFile").addEventListener("click", saveCodeFile);
+document.querySelector("#downloadCodeWorkspace").addEventListener("click", downloadCodeWorkspace);
 
 document.querySelector("#supportForm").addEventListener("submit", async (event) => {
   event.preventDefault();

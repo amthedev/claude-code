@@ -1589,6 +1589,98 @@ code {
   cursor: pointer;
 }
 
+.code-import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.code-import-card {
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.code-workspace-shell {
+  min-height: 560px;
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) minmax(220px, 320px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.code-workspace-list,
+.code-file-list,
+.code-editor {
+  min-height: 0;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.code-workspace-list,
+.code-file-list {
+  overflow: auto;
+  padding: 8px;
+}
+
+.code-list-item,
+.code-file-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--cloud-text);
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px;
+}
+
+.code-list-item:hover,
+.code-list-item.active,
+.code-file-item:hover {
+  background: var(--cloud-panel-2);
+}
+
+.code-list-item span,
+.code-file-item small {
+  color: var(--cloud-muted);
+  overflow-wrap: anywhere;
+}
+
+.code-editor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.code-editor-head {
+  border-bottom: 1px solid var(--cloud-line);
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.code-editor-head > div {
+  display: flex;
+  gap: 8px;
+}
+
+#codeEditor {
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #fbfaf7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .empty-workspace {
   padding: 32px;
   text-align: center;
@@ -2473,5 +2565,14 @@ button.result-item {
     width: 100%;
     border-right: 0;
     padding: 20px;
+  }
+
+  .code-import-grid,
+  .code-workspace-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .code-workspace-shell {
+    min-height: 0;
   }
 }

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import unittest
+import zipfile
 from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
@@ -1193,6 +1196,69 @@ class GatewayTestCase(unittest.TestCase):
             loaded = client.get(f"/v1/conversations/{conversation['id']}", headers=customer_headers)
             self.assertEqual(loaded.status_code, 200)
             self.assertEqual(loaded.json()["conversation"]["messages"][1]["content"], "Claro, vamos montar.")
+
+    def test_customer_can_upload_edit_and_download_code_workspace(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Codigo",
+                    "login": "codigo@example.com",
+                    "password": "secret-code",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            archive_bytes = io.BytesIO()
+            with zipfile.ZipFile(archive_bytes, "w") as archive:
+                archive.writestr("repo/README.md", "# Olá\n")
+                archive.writestr("repo/src/app.py", "print('oi')\n")
+
+            uploaded = client.post(
+                "/v1/code/workspaces/upload",
+                headers=customer_headers,
+                json={
+                    "name": "Repo teste",
+                    "zipBase64": base64.b64encode(archive_bytes.getvalue()).decode(),
+                },
+            )
+            self.assertEqual(uploaded.status_code, 200)
+            workspace_id = uploaded.json()["workspace"]["id"]
+
+            files = client.get(f"/v1/code/workspaces/{workspace_id}/files", headers=customer_headers)
+            self.assertEqual(files.status_code, 200)
+            paths = {item["path"] for item in files.json()["files"]}
+            self.assertIn("README.md", paths)
+            self.assertIn("src/app.py", paths)
+
+            readme = client.get(
+                f"/v1/code/workspaces/{workspace_id}/files/content",
+                headers=customer_headers,
+                params={"path": "README.md"},
+            )
+            self.assertEqual(readme.status_code, 200)
+            self.assertEqual(readme.json()["content"], "# Olá\n")
+
+            saved = client.patch(
+                f"/v1/code/workspaces/{workspace_id}/files/content",
+                headers=customer_headers,
+                json={"path": "README.md", "content": "# Atualizado\n"},
+            )
+            self.assertEqual(saved.status_code, 200)
+
+            downloaded = client.get(
+                f"/v1/code/workspaces/{workspace_id}/download",
+                headers=customer_headers,
+            )
+            self.assertEqual(downloaded.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+                self.assertEqual(archive.read("README.md").decode(), "# Atualizado\n")
 
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(

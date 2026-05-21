@@ -29,6 +29,9 @@
         <button class="icon-button" title="Artefatos" data-panel="artifactsPanel" aria-label="Artefatos">
           <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
         </button>
+        <button class="icon-button auth-only hidden" title="Código" data-panel="codePanel" aria-label="Código">
+          <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+        </button>
         <button class="icon-button" title="Configurações" data-panel="settingsPanel" aria-label="Abrir configurações">
           <svg viewBox="0 0 24 24"><path d="M6 19v-7a6 6 0 0 1 12 0v7M6 15h12M8 20l2-2 2 2 2-2 2 2 2-2" /></svg>
         </button>
@@ -75,6 +78,10 @@
           <button class="sidebar-action" type="button" data-sidebar-panel="artifactsPanel">
             <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
             <span>Artefatos</span>
+          </button>
+          <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="codePanel">
+            <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
+            <span>Código</span>
           </button>
           <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="apiPanel" aria-label="Abrir Claude Code API">
             <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
@@ -268,6 +275,60 @@
             <input id="artifactSearch" placeholder="Pesquisar seus artefatos" />
           </label>
           <div id="artifactList" class="artifact-list"></div>
+        </section>
+
+        <section id="codePanel" class="client-panel workspace-panel code-panel">
+          <div class="workspace-header">
+            <div>
+              <h1>Código</h1>
+              <p class="workspace-subtitle">Conecte um repo do GitHub ou suba um ZIP para editar e baixar o projeto atualizado.</p>
+            </div>
+          </div>
+          <div class="code-import-grid">
+            <form id="githubImportForm" class="code-import-card">
+              <span class="overline">GitHub</span>
+              <label>
+                URL do repositório
+                <input name="repoUrl" placeholder="https://github.com/usuario/repositorio" required />
+              </label>
+              <label>
+                Branch/tag opcional
+                <input name="ref" placeholder="main" />
+              </label>
+              <label>
+                Token opcional para repo privado
+                <input name="githubToken" type="password" autocomplete="off" placeholder="ghp_..." />
+              </label>
+              <button class="primary" type="submit">Importar GitHub</button>
+            </form>
+            <form id="zipUploadForm" class="code-import-card">
+              <span class="overline">Pasta local</span>
+              <label>
+                Nome do projeto
+                <input name="name" placeholder="Meu projeto" />
+              </label>
+              <label>
+                ZIP do projeto
+                <input id="codeZipInput" name="zip" type="file" accept=".zip,application/zip" required />
+              </label>
+              <button class="primary" type="submit">Subir ZIP</button>
+            </form>
+          </div>
+          <div id="codeStatus" class="form-error neutral"></div>
+          <div class="code-workspace-shell">
+            <aside class="code-workspace-list" id="codeWorkspaceList"></aside>
+            <aside class="code-file-list" id="codeFileList"></aside>
+            <section class="code-editor">
+              <div class="code-editor-head">
+                <strong id="codeFileTitle">Selecione um arquivo</strong>
+                <div>
+                  <button id="downloadCodeWorkspace" type="button">Baixar ZIP</button>
+                  <button id="saveCodeFile" class="primary" type="button">Salvar arquivo</button>
+                </div>
+              </div>
+              <textarea id="codeEditor" spellcheck="false" placeholder="Escolha um arquivo de texto para editar."></textarea>
+            </section>
+          </div>
         </section>
 
         <section id="apiPanel" class="client-panel side-panel">

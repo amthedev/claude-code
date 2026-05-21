@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 from datetime import datetime
@@ -20,6 +21,7 @@ from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
 from .anthropic import build_text_message, clean_model_text
+from .code_workspaces import CodeWorkspaceStore, github_repo_parts
 from .config import Settings, get_settings
 from .conversations import ConversationStore
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
@@ -80,6 +82,7 @@ def create_app(
     app.state.customer_usage = CustomerUsageStore(resolved_settings)
     app.state.account_store = AccountStore(resolved_settings)
     app.state.conversation_store = ConversationStore(resolved_settings)
+    app.state.code_workspaces = CodeWorkspaceStore(resolved_settings)
     app.state.support_store = SupportStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     factory = client_factory or OpenRouterClient
@@ -575,6 +578,86 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"conversation": app.state.conversation_store.save_for_customer(auth.token, payload)})
 
+    @app.get("/v1/code/workspaces")
+    async def list_code_workspaces(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return {"data": app.state.code_workspaces.list_for_customer(auth.token)}
+
+    @app.post("/v1/code/workspaces/upload")
+    async def upload_code_workspace(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        workspace = app.state.code_workspaces.create_from_base64_zip(auth.token, payload)
+        return JSONResponse({"workspace": workspace})
+
+    @app.post("/v1/code/workspaces/github")
+    async def import_github_workspace(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        repo_url = str(payload.get("repoUrl") or payload.get("repo_url") or "").strip()
+        ref = str(payload.get("ref") or "").strip()
+        github_token = str(payload.get("githubToken") or payload.get("github_token") or "").strip()
+        zip_bytes, resolved_ref = await _download_github_zip(repo_url, ref, github_token)
+        workspace = app.state.code_workspaces.create_from_zip(
+            auth.token,
+            name=str(payload.get("name") or ""),
+            zip_bytes=zip_bytes,
+            source="github",
+            repo_url=repo_url,
+            ref=resolved_ref,
+        )
+        return JSONResponse({"workspace": workspace})
+
+    @app.get("/v1/code/workspaces/{workspace_id}/files")
+    async def list_code_workspace_files(workspace_id: str, request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return app.state.code_workspaces.list_files(auth.token, workspace_id)
+
+    @app.get("/v1/code/workspaces/{workspace_id}/files/content")
+    async def read_code_workspace_file(
+        workspace_id: str,
+        request: Request,
+        path: str,
+    ) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return app.state.code_workspaces.read_file(auth.token, workspace_id, path)
+
+    @app.patch("/v1/code/workspaces/{workspace_id}/files/content")
+    async def write_code_workspace_file(
+        workspace_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"file": app.state.code_workspaces.write_file(auth.token, workspace_id, payload)})
+
+    @app.get("/v1/code/workspaces/{workspace_id}/download")
+    async def download_code_workspace(workspace_id: str, request: Request) -> StreamingResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        filename, data = app.state.code_workspaces.zip_bytes_for(auth.token, workspace_id)
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @app.get("/v1/usage")
     async def usage(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
@@ -652,6 +735,32 @@ def _public_base_url(request: Request, settings: Settings) -> str:
     if configured:
         return configured
     return str(request.base_url).rstrip("/")
+
+
+async def _download_github_zip(repo_url: str, ref: str, github_token: str) -> tuple[bytes, str]:
+    owner, repo = github_repo_parts(repo_url)
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "claude-code-workspace",
+    }
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+
+    async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
+        resolved_ref = ref
+        if not resolved_ref:
+            metadata = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+            if metadata.status_code >= 400:
+                raise HTTPException(status_code=502, detail="Não consegui acessar este repositório no GitHub.")
+            resolved_ref = metadata.json().get("default_branch") or "main"
+
+        archive = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/zipball/{resolved_ref}",
+            headers=headers,
+        )
+        if archive.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Não consegui baixar o ZIP do GitHub.")
+        return archive.content, resolved_ref
 
 
 async def _create_mercado_pago_preference(
