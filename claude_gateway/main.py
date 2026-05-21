@@ -1093,17 +1093,94 @@ async def _iter_bytes(chunks: list[bytes]):
 
 async def _public_model_stream(chunks: Any, public_model: str):
     buffer = ""
+    text_normalizer = _StreamTextNormalizer()
     async for chunk in chunks:
         buffer += chunk.decode("utf-8", "replace")
         while "\n\n" in buffer:
             event, buffer = buffer.split("\n\n", 1)
-            yield (_rewrite_stream_event_model(event, public_model) + "\n\n").encode("utf-8")
+            yield (_rewrite_stream_event_model(event, public_model, text_normalizer) + "\n\n").encode("utf-8")
 
     if buffer:
-        yield _rewrite_stream_event_model(buffer, public_model).encode("utf-8")
+        yield _rewrite_stream_event_model(buffer, public_model, text_normalizer).encode("utf-8")
 
 
-def _rewrite_stream_event_model(event: str, public_model: str) -> str:
+class _StreamTextNormalizer:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def delta_for(self, incoming: str) -> str:
+        text = str(incoming or "")
+        if not text:
+            return ""
+        if not self.text:
+            self.text = text
+            return text
+        if text == self.text or self.text.endswith(text):
+            return ""
+        if text.startswith(self.text):
+            delta = text[len(self.text):]
+            self.text = text
+            return delta
+
+        overlap = _stream_overlap_length(self.text, text)
+        if overlap:
+            delta = text[overlap:]
+            self.text += delta
+            return delta
+
+        stripped = text.lstrip()
+        if stripped and stripped != text:
+            if self.text.endswith(stripped):
+                return ""
+            overlap = _stream_overlap_length(self.text, stripped)
+            if overlap:
+                delta = stripped[overlap:]
+                self.text += delta
+                return delta
+
+        self.text += text
+        return text
+
+
+def _stream_overlap_length(left: str, right: str) -> int:
+    max_size = min(len(left), len(right))
+    for size in range(max_size, 0, -1):
+        if left[-size:] == right[:size]:
+            return size
+    return 0
+
+
+def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamTextNormalizer) -> None:
+    delta = payload.get("delta")
+    if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+        delta["text"] = normalizer.delta_for(delta["text"])
+    elif isinstance(delta, str) and payload.get("type") == "response.output_text.delta":
+        payload["delta"] = normalizer.delta_for(delta)
+
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return
+
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        choice_delta = choice.get("delta")
+        if not isinstance(choice_delta, dict):
+            continue
+        content = choice_delta.get("content")
+        if isinstance(content, str):
+            choice_delta["content"] = normalizer.delta_for(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+                    part["text"] = normalizer.delta_for(part["text"])
+
+
+def _rewrite_stream_event_model(
+    event: str,
+    public_model: str,
+    text_normalizer: _StreamTextNormalizer | None = None,
+) -> str:
     lines = event.splitlines()
     rewritten: list[str] = []
     for line in lines:
@@ -1130,6 +1207,8 @@ def _rewrite_stream_event_model(event: str, public_model: str) -> str:
             if "model" in payload:
                 payload["model"] = public_model
             payload.pop("provider", None)
+            if text_normalizer:
+                _normalize_stream_payload_text(payload, text_normalizer)
 
         rewritten.append(f"data: {json.dumps(payload)}")
     return "\n".join(rewritten)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from claude_gateway.config import Settings
 from claude_gateway.customers import _today, parse_customer_accounts
-from claude_gateway.main import create_app
+from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.openrouter import OpenRouterClient
 
 
@@ -99,6 +100,37 @@ class FakeMercadoPagoClient:
         )
 
 
+async def collect_stream_text(chunks: Any) -> str:
+    text = ""
+    async for chunk in _public_model_stream(chunks, "claude-code-pro"):
+        event = chunk.decode("utf-8")
+        data_lines = [
+            line.removeprefix("data:").strip()
+            for line in event.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        data = "\n".join(data_lines)
+        if not data or data == "[DONE]":
+            continue
+        payload = json.loads(data)
+        delta = payload.get("delta")
+        if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+            text += delta["text"]
+        for choice in payload.get("choices") or []:
+            choice_delta = choice.get("delta") or {}
+            content = choice_delta.get("content")
+            if isinstance(content, str):
+                text += content
+    return text
+
+
+async def stream_events(payloads: list[dict[str, Any]]):
+    for payload in payloads:
+        yield f"event: content_block_delta\ndata: {json.dumps(payload)}\n\n".encode()
+
+
 def make_settings() -> Settings:
     return Settings(
         gateway_api_keys=("test-token",),
@@ -135,6 +167,34 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(admin_response.status_code, 200)
         self.assertTrue(admin_response.json()["openrouter_configured"])
         self.assertIn("cost_target", admin_response.json())
+
+    def test_public_stream_normalizes_overlapping_anthropic_text_deltas(self) -> None:
+        payloads = [
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Se"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Seu"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "u texto"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " texto"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " já cont"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " contém"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ém um plano"}},
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(text, "Seu texto já contém um plano")
+
+    def test_public_stream_normalizes_cumulative_openai_text_deltas(self) -> None:
+        payloads = [
+            {"choices": [{"delta": {"content": "How"}}]},
+            {"choices": [{"delta": {"content": "How to"}}]},
+            {"choices": [{"delta": {"content": "How to become"}}]},
+            {"choices": [{"delta": {"content": " fluent"}}]},
+            {"choices": [{"delta": {"content": " in English"}}]},
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(text, "How to become fluent in English")
 
     def test_openapi_is_not_public_by_default(self) -> None:
         response = self.client.get("/openapi.json")

@@ -1227,6 +1227,19 @@ code {
   border-radius: 8px;
   background: transparent;
   padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+
+.command-type {
+  width: fit-content;
+  border-radius: 999px;
+  background: #ebe8df;
+  color: var(--cloud-muted);
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .command-results .result-item:hover,
@@ -2090,6 +2103,11 @@ button.result-item {
 .plan-card.highlighted {
   border-color: var(--accent);
   box-shadow: 0 18px 48px rgba(184, 93, 56, 0.16);
+}
+
+.plan-card:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  outline-offset: 3px;
 }
 
 .upgrade-notice {

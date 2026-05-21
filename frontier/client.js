@@ -12,6 +12,7 @@ let activeModelSelectId = "heroModel";
 let incognitoMode = false;
 let apiSecretsVisible = false;
 let highlightedPlanId = "";
+let sessionStatusMessage = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 
@@ -777,8 +778,14 @@ function renderPlanCards() {
         plan.id === "ultra" ? `<span class="plan-badge featured">Recomendado</span>` : "",
         highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
       ].join("");
+      const buyLabel = !current
+        ? `Entrar para comprar ${plan.name}`
+        : currentPlan
+          ? `Plano atual: ${plan.name}`
+          : `Solicitar upgrade para ${plan.name}`;
+      const focusAttribute = highlightedPlanId === plan.id ? `tabindex="-1"` : "";
       return `
-        <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}">
+        <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}" data-plan-card="${ClaudeApp.escapeHtml(plan.id)}" ${focusAttribute}>
           <div>
             <div class="plan-badges">${badges}</div>
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
@@ -788,7 +795,7 @@ function renderPlanCards() {
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
-          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" ${!current || currentPlan ? "disabled" : ""}>
+          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}" ${!current || currentPlan ? "disabled" : ""}>
             ${!current ? "Entre para comprar" : currentPlan ? "Plano atual" : "Solicitar upgrade"}
           </button>
         </article>
@@ -828,6 +835,18 @@ function renderBilling() {
   renderPurchases();
 }
 
+function focusHighlightedPlan() {
+  if (!highlightedPlanId) return;
+  window.requestAnimationFrame(() => {
+    const card = Array.from(document.querySelectorAll("[data-plan-card]")).find(
+      (item) => item.dataset.planCard === highlightedPlanId,
+    );
+    if (!card) return;
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+    card.focus({ preventScroll: true });
+  });
+}
+
 async function loadPurchases() {
   if (!account()?.apiToken) return;
   try {
@@ -860,10 +879,12 @@ function renderAccount() {
       "O envio exige uma conta ativa.";
     document.querySelector("#usageFill").style.width = "0%";
     document.querySelector("#accountDetails").innerHTML = `
-      <code>Status: aguardando login</code>
+      <code>Status: ${ClaudeApp.escapeHtml(sessionStatusMessage || "aguardando login")}</code>
       <code>Chat: entre com uma conta ativa</code>
       <code>API: Claude Code API</code>
     `;
+    document.querySelector("#previewNotice").textContent =
+      sessionStatusMessage || "Entre em uma conta ativa para usar o chat.";
     document.querySelector("#previewNotice").classList.remove("hidden");
     document.querySelectorAll(".auth-only").forEach((item) => item.classList.add("hidden"));
     authOpen.classList.remove("hidden");
@@ -871,6 +892,7 @@ function renderAccount() {
     logout.textContent = "";
     renderBilling();
     fillModelSelects();
+    renderSidePanels();
     stopSupportPolling();
     return;
   }
@@ -902,6 +924,7 @@ function renderAccount() {
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
   `;
   document.querySelector("#previewNotice").classList.add("hidden");
+  document.querySelector("#previewNotice").textContent = "Entre em uma conta ativa para usar o chat.";
   document.querySelectorAll(".auth-only").forEach((item) => item.classList.remove("hidden"));
   authOpen.classList.add("hidden");
   logout.classList.remove("hidden");
@@ -927,7 +950,10 @@ function setPanel(panelId) {
   document.querySelector("#sidebarNewChat").classList.toggle("active", panelId === "chatPanel");
   renderSidePanels();
   if (panelId === "supportPanel") refreshSupportTicket();
-  if (panelId === "plansPanel") renderBilling();
+  if (panelId === "plansPanel") {
+    renderBilling();
+    focusHighlightedPlan();
+  }
   if (panelId === "searchPanel") {
     searchLocal(document.querySelector("#searchInput")?.value || "");
     window.setTimeout(() => document.querySelector("#searchInput")?.focus(), 0);
@@ -1131,6 +1157,10 @@ function parseGatewayStreamChunk(buffer, onText) {
     try {
       const event = JSON.parse(raw);
       const delta = event.delta || {};
+      if (typeof event.delta === "string" && event.delta) {
+        onText(event.delta);
+        return;
+      }
       if (delta.type === "text_delta" && typeof delta.text === "string" && delta.text) {
         onText(delta.text);
         return;
@@ -1177,6 +1207,13 @@ function mergeStreamText(current, incoming) {
 
   const overlap = overlapLength(current, text);
   if (overlap > 0) return current + text.slice(overlap);
+
+  const stripped = text.trimStart();
+  if (stripped && stripped !== text) {
+    if (current.endsWith(stripped)) return current;
+    const strippedOverlap = overlapLength(current, stripped);
+    if (strippedOverlap > 0) return current + stripped.slice(strippedOverlap);
+  }
 
   return repairDuplicatedText(current + text);
 }
@@ -1317,6 +1354,7 @@ function historyItemMarkup(item) {
 function commandItemMarkup(item) {
   return `
     <button class="command-option" type="button" data-conversation-id="${ClaudeApp.escapeHtml(item.id)}">
+      <span class="command-type">Conversa</span>
       <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
       <span>${historyDate(item)}</span>
     </button>
@@ -1332,6 +1370,18 @@ function sidebarRecentMarkup(item) {
 }
 
 function renderSidePanels() {
+  if (!account()?.active) {
+    document.querySelector("#historyList").innerHTML =
+      `<div class="empty-workspace"><p>Entre para ver suas conversas.</p></div>`;
+    document.querySelector("#sidebarRecentList").innerHTML =
+      `<div class="sidebar-empty">Entre para ver suas conversas.</div>`;
+    document.querySelector("#projectList").innerHTML =
+      `<div class="empty-workspace"><p>Entre para ver seus projetos.</p></div>`;
+    document.querySelector("#artifactList").innerHTML =
+      `<div class="empty-workspace"><p>Entre para ver seus artefatos.</p></div>`;
+    return;
+  }
+
   const historyQuery = (document.querySelector("#historySearch")?.value || "").trim().toLowerCase();
   const visibleHistory = historyQuery
     ? serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(historyQuery))
@@ -1389,6 +1439,11 @@ function renderSidePanels() {
 }
 
 function searchLocal(query) {
+  if (!account()?.active) {
+    document.querySelector("#searchResults").innerHTML =
+      `<div class="command-option"><p>Entre para pesquisar suas conversas, projetos e artefatos.</p></div>`;
+    return;
+  }
   const q = query.trim().toLowerCase();
   const conversationResults = q
     ? serverHistory.filter((item) => JSON.stringify(item).toLowerCase().includes(q))
@@ -1406,6 +1461,7 @@ function searchLocal(query) {
           ...projects.map(
             (item) => `
               <button class="command-option" type="button" data-open-panel="projectsPanel">
+                <span class="command-type">Projeto</span>
                 <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
                 <span>Projeto local</span>
               </button>
@@ -1414,6 +1470,7 @@ function searchLocal(query) {
           ...artifacts.map(
             (item) => `
               <button class="command-option" type="button" data-open-panel="artifactsPanel">
+                <span class="command-type">Artefato</span>
                 <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
                 <span>Artefato local</span>
               </button>
@@ -1794,6 +1851,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
   }
 
   currentAccountId = found.id;
+  sessionStatusMessage = "";
   localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, found.id);
   closeAuthModal();
   renderAccount();
@@ -1819,6 +1877,7 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     const data = await authRequest("/v1/auth/signup", values);
     const account = saveServerAccount(data.account);
     currentAccountId = account.id;
+    sessionStatusMessage = "";
     localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, account.id);
     form.reset();
     closeAuthModal();
@@ -1873,12 +1932,14 @@ document.querySelectorAll(".voice-button").forEach((button) => {
 
 document.querySelectorAll(".attach-button").forEach((button) => {
   button.addEventListener("click", (event) => {
+    event.stopPropagation();
     event.preventDefault();
     toggleFloatingMenu("#attachMenu", button);
   });
 });
 
 document.querySelector("#attachMenu").addEventListener("click", (event) => {
+  event.stopPropagation();
   const button = event.target.closest("[data-attach-action]");
   if (!button) return;
   const action = button.dataset.attachAction;
@@ -1896,20 +1957,26 @@ document.querySelector("#attachMenu").addEventListener("click", (event) => {
 
 document.querySelectorAll("[data-model-trigger]").forEach((button) => {
   button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
     activeModelSelectId = button.dataset.modelTrigger;
     toggleFloatingMenu("#modelMenu", button, "right");
-    event.preventDefault();
   });
 });
 
 document.querySelector("#modelMenu").addEventListener("click", (event) => {
+  event.stopPropagation();
   const item = event.target.closest("[data-model-value]");
   if (!item) return;
   const current = account();
-  if (!ClaudeApp.allowedPublicModelsForAccount(current).includes(item.dataset.modelValue)) {
+  const selectedRequiresPlan = item.dataset.modelValue !== "claude-code-economy";
+  const selectedAllowed =
+    current?.active && ClaudeApp.allowedPublicModelsForAccount(current).includes(item.dataset.modelValue);
+  if ((!current?.active && selectedRequiresPlan) || (current?.active && !selectedAllowed)) {
     closeFloatingMenus();
     highlightedPlanId = item.dataset.modelValue === "claude-code-ultra" ? "ultra" : "";
     setPanel("plansPanel");
+    focusHighlightedPlan();
     showChatNotice(
       item.dataset.modelValue === "claude-code-ultra"
         ? "Opus 4.7 está no plano Max 30X."
@@ -2187,11 +2254,19 @@ document.querySelector("#artifactStartModal").addEventListener("click", (event) 
   if (button.dataset.artifactPrompt) fillHeroPrompt(button.dataset.artifactPrompt);
 });
 
-document.querySelector("#clientLogout").addEventListener("click", async () => {
+async function logoutClient({ confirmOpenConversation = true } = {}) {
+  if (
+    confirmOpenConversation &&
+    (activeConversation.length || activeConversationId) &&
+    !window.confirm("Sair da conta e fechar a conversa atual?")
+  ) {
+    return;
+  }
   await saveConversation();
   stopSupportPolling();
   forgetSessionApiToken(currentAccountId);
   currentAccountId = null;
+  sessionStatusMessage = "";
   activeConversationId = null;
   serverHistory = [];
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
@@ -2201,6 +2276,10 @@ document.querySelector("#clientLogout").addEventListener("click", async () => {
   document.querySelector("#bottomComposer").classList.add("hidden");
   document.querySelector("#emptyState").classList.remove("hidden");
   renderAccount();
+}
+
+document.querySelector("#clientLogout").addEventListener("click", () => {
+  logoutClient();
 });
 
 document.querySelector("#sidebarAccountButton").addEventListener("click", (event) => {
@@ -2220,7 +2299,7 @@ document.querySelector("#accountMenu").addEventListener("click", async (event) =
   if (action === "support") setPanel("supportPanel");
   if (action === "apps") setPanel("apiPanel");
   if (action === "logout") {
-    document.querySelector("#clientLogout").click();
+    logoutClient();
   }
 });
 
@@ -2266,8 +2345,10 @@ renderSupport();
 
 if (currentAccountId && !account()) {
   currentAccountId = null;
+  sessionStatusMessage = "Sua sessão expirou. Entre novamente para continuar.";
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
 }
 
 renderAccount();
+if (sessionStatusMessage) showChatNotice(sessionStatusMessage);
 loadServerHistory();
