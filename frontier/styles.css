@@ -1150,6 +1150,31 @@ code {
   border-left: 3px solid color-mix(in srgb, var(--accent) 58%, #fff);
 }
 
+.message-body {
+  min-width: 0;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.message-copy-button {
+  border: 1px solid var(--cloud-line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--cloud-muted);
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.message-copy-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--cloud-line));
+  color: var(--cloud-text);
+}
+
 .message.assistant p,
 .message.assistant ul,
 .message.assistant ol,
@@ -1238,12 +1263,16 @@ code {
 .message-table-wrap {
   max-width: 100%;
   overflow: auto;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
 }
 
 .message.assistant table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
-  border: 1px solid var(--cloud-line);
+  table-layout: auto;
+  border: 0;
   background: #fff;
 }
 
@@ -1253,6 +1282,9 @@ code {
   padding: 9px 10px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: auto;
 }
 
 .message.assistant th {

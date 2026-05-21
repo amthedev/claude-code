@@ -6,6 +6,7 @@ let activeSupportTicket = null;
 let supportPollTimer = null;
 let pendingAttachments = [];
 let activeConversationId = null;
+let activeChatSessionKey = `chat_${Date.now()}`;
 let serverHistory = [];
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
@@ -17,6 +18,10 @@ let pendingPlanId = "";
 let pendingAuthIntent = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
+
+function newChatSessionKey() {
+  return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 const promptSuggestions = {
   code: {
@@ -1167,15 +1172,15 @@ function renderInlineMarkdown(text) {
 
 function renderMarkdownTable(lines) {
   const rawRows = lines
-    .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
-    .filter((line) => !/^\s*-{3,}\s*$/.test(line.trim()))
+    .filter((line) => !/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line))
+    .filter((line) => !/^\s*-{2,}\s*$/.test(line.trim()))
     .map((line) =>
       line
         .trim()
         .replace(/^\||\|$/g, "")
         .split(line.includes("|") ? "|" : "\t")
         .map((cell) => cell.trim())
-        .filter((cell) => !/^:?-{3,}:?$/.test(cell))
+        .filter((cell) => !/^:?-{2,}:?$/.test(cell))
         .map((cell) => renderInlineMarkdown(cell)),
     );
   const rows = [];
@@ -1289,7 +1294,16 @@ function renderAssistantMarkdown(text) {
 
 function renderMessageNode(node, role, text) {
   if (role === "assistant") {
-    node.innerHTML = renderAssistantMarkdown(text);
+    const messageIndex = node.dataset.messageIndex || "";
+    const isPending = !text || text === "Pensando...";
+    node.innerHTML = `
+      <div class="message-body">${renderAssistantMarkdown(text)}</div>
+      <div class="message-actions ${isPending ? "hidden" : ""}">
+        <button type="button" class="message-copy-button" data-copy-message-index="${ClaudeApp.escapeHtml(messageIndex)}" aria-label="Copiar resposta">
+          Copiar
+        </button>
+      </div>
+    `;
     return;
   }
   node.textContent = text;
@@ -1300,16 +1314,20 @@ function addMessage(role, text) {
   const thread = document.querySelector("#chatThread");
   const node = document.createElement("div");
   node.className = `message ${role}`;
+  node.dataset.messageIndex = String(index);
+  node.dataset.chatSession = activeChatSessionKey;
   renderMessageNode(node, role, text);
   thread.appendChild(node);
   document.querySelector("#emptyState").classList.add("hidden");
   document.querySelector("#chatThread").classList.remove("hidden");
   document.querySelector("#bottomComposer").classList.remove("hidden");
   node.scrollIntoView({ block: "end" });
-  return { index, node };
+  return { index, node, sessionKey: activeChatSessionKey };
 }
 
 function updateMessage(message, text) {
+  if (message.sessionKey !== activeChatSessionKey) return;
+  if (!activeConversation[message.index]) return;
   const nextText = text || "Pensando...";
   activeConversation[message.index].content = nextText;
   renderMessageNode(message.node, activeConversation[message.index].role, nextText);
@@ -1364,9 +1382,46 @@ async function loadServerHistory() {
 
 function conversationTitle(messages) {
   const firstUser = messages.find((message) => message.role === "user")?.content || "";
-  const cleaned = repairDuplicatedText(firstUser).replace(/\n+/g, " ").split("Anexos:", 1)[0].trim();
+  const cleaned = titleFromPrompt(firstUser);
   if (!cleaned) return "Nova conversa";
   return cleaned.length <= 54 ? cleaned : `${cleaned.slice(0, 54).trim()}...`;
+}
+
+function titleFromPrompt(prompt) {
+  const cleaned = repairDuplicatedText(prompt)
+    .replace(/\n+/g, " ")
+    .split("Anexos:", 1)[0]
+    .replace(/[?!.,;:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+
+  const lower = cleaned.toLocaleLowerCase("pt-BR");
+  const patterns = [
+    [/^(como|quero|queria|preciso)\s+(aprender|estudar|entender)\s+(.+)$/i, "Guia para $2 $3"],
+    [/^(me\s+ensine|ensine)\s+(.+)$/i, "Guia de $2"],
+    [/^(crie|criar|faça|faca|monte|desenvolva)\s+(.+)$/i, "Pedido: $2"],
+    [/^(corrija|corrigir|arrume|conserte)\s+(.+)$/i, "Correção: $2"],
+    [/^(planeje|planejar)\s+(.+)$/i, "Plano: $2"],
+  ];
+  for (const [pattern, replacement] of patterns) {
+    if (pattern.test(cleaned)) return toTitleCase(cleaned.replace(pattern, replacement));
+  }
+  if (lower === cleaned || cleaned === cleaned.toUpperCase()) return toTitleCase(cleaned);
+  return cleaned;
+}
+
+function toTitleCase(value) {
+  const small = new Set(["a", "o", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "e", "em", "para", "por", "com"]);
+  return String(value || "")
+    .toLocaleLowerCase("pt-BR")
+    .split(" ")
+    .map((word, index) => {
+      if (!word) return word;
+      if (index > 0 && small.has(word)) return word;
+      return word.charAt(0).toLocaleUpperCase("pt-BR") + word.slice(1);
+    })
+    .join(" ");
 }
 
 function upsertHistoryConversation(conversation) {
@@ -1403,6 +1458,7 @@ async function saveConversationSnapshot(
   snapshot = activeConversation,
   conversationId = activeConversationId,
   updateActiveId = true,
+  sessionKey = activeChatSessionKey,
 ) {
   if (incognitoMode || !snapshot.length || !account()?.active) return;
 
@@ -1420,10 +1476,15 @@ async function saveConversationSnapshot(
       method: "POST",
       body: JSON.stringify({
         id: optimistic.id.startsWith("local_") ? "" : optimistic.id,
+        title: optimistic.title,
         messages: optimistic.messages,
       }),
     });
-    if (updateActiveId && (conversationId === activeConversationId || !activeConversationId)) {
+    if (
+      updateActiveId &&
+      sessionKey === activeChatSessionKey &&
+      (conversationId === activeConversationId || !activeConversationId)
+    ) {
       activeConversationId = data.conversation.id;
     }
     upsertHistoryConversation(data.conversation);
@@ -1460,6 +1521,7 @@ async function openConversation(conversationId) {
   const cached = serverHistory.find((item) => item.id === conversationId);
   if (cached?.messages?.length) {
     activeConversationId = cached.id;
+    activeChatSessionKey = newChatSessionKey();
     renderConversationMessages(cached.messages);
     setPanel("chatPanel");
     return;
@@ -1468,6 +1530,7 @@ async function openConversation(conversationId) {
   try {
     const data = await conversationRequest(`/v1/conversations/${conversationId}`);
     activeConversationId = data.conversation.id;
+    activeChatSessionKey = newChatSessionKey();
     renderConversationMessages(data.conversation.messages || []);
     setPanel("chatPanel");
   } catch (error) {
@@ -1608,6 +1671,7 @@ async function callGateway(selectedModel, messages, onText) {
 }
 
 async function submitPrompt(prompt, selectedModel, attachments = []) {
+  const sessionKey = activeChatSessionKey;
   const current = account();
   if (!current || !current.active) {
     openAuthForIntent("chat", "clientSignupForm");
@@ -1645,8 +1709,10 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   }
 
   if (!incognitoMode) {
-    await saveConversation();
-    createArtifactIfUseful(prompt, answer);
+    if (sessionKey !== activeChatSessionKey) return;
+    const completedSnapshot = activeConversation.map((message) => ({ ...message }));
+    await saveConversationSnapshot(completedSnapshot, activeConversationId, true, sessionKey);
+    if (sessionKey === activeChatSessionKey) createArtifactIfUseful(prompt, answer);
   }
   renderAccount();
   renderSidePanels();
@@ -2137,7 +2203,9 @@ function startDictation(button) {
 function clearActiveChat({ savePrevious = true } = {}) {
   const previousConversation = activeConversation.map((message) => ({ ...message }));
   const previousConversationId = activeConversationId;
+  const previousSessionKey = activeChatSessionKey;
   activeConversationId = null;
+  activeChatSessionKey = newChatSessionKey();
   activeConversation = [];
   pendingAttachments = [];
   closeSuggestionPanel();
@@ -2152,7 +2220,7 @@ function clearActiveChat({ savePrevious = true } = {}) {
   setPanel("chatPanel");
   renderSidePanels();
   if (savePrevious && previousConversation.length) {
-    saveConversationSnapshot(previousConversation, previousConversationId, false);
+    saveConversationSnapshot(previousConversation, previousConversationId, false, previousSessionKey);
   }
 }
 
@@ -2429,6 +2497,24 @@ document.querySelector("#suggestionPanel").addEventListener("click", (event) => 
   const suggestion = event.target.closest("[data-suggestion-prompt]");
   if (!suggestion) return;
   fillHeroPrompt(suggestion.dataset.suggestionPrompt);
+});
+
+document.querySelector("#chatThread").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-message-index]");
+  if (!button) return;
+  const index = Number(button.dataset.copyMessageIndex);
+  const message = Number.isInteger(index) ? activeConversation[index] : null;
+  if (!message?.content) return;
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(repairDuplicatedText(message.content));
+    button.textContent = "Copiado";
+  } catch {
+    button.textContent = "Erro ao copiar";
+  }
+  window.setTimeout(() => {
+    button.textContent = original;
+  }, 1600);
 });
 
 document.querySelectorAll("#heroComposer textarea, #bottomComposer textarea").forEach((textarea) => {
