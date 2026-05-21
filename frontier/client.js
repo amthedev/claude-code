@@ -114,6 +114,55 @@ function stripStoredAccountTokens() {
   ClaudeApp.saveAccounts(accounts.map(withoutApiToken));
 }
 
+function repairDuplicatedToken(token) {
+  if (token.length >= 4 && token[0] === token[1]) {
+    const rest = token.slice(2);
+    const half = rest.length / 2;
+    if (Number.isInteger(half) && rest.slice(0, half) === rest.slice(half)) {
+      return `${token[0]}${rest.slice(0, half)}`;
+    }
+  }
+  if (token.length % 2 === 0) {
+    const half = token.length / 2;
+    if (token.slice(0, half) === token.slice(half)) return token.slice(0, half);
+  }
+  return token;
+}
+
+function repairDuplicatedText(text) {
+  const value = String(text || "");
+  if (!value) return value;
+  const tokens = value.split(/(\s+)/);
+  const repaired = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token || /^\s+$/.test(token)) {
+      repaired.push(token);
+      continue;
+    }
+    const nextToken = tokens[index + 2];
+    if (nextToken && token.toLowerCase() === nextToken.toLowerCase()) {
+      repaired.push(repairDuplicatedToken(token));
+      index += 2;
+      continue;
+    }
+    repaired.push(repairDuplicatedToken(token));
+  }
+  return repaired.join("");
+}
+
+function repairStoredDuplicateArtifacts() {
+  const artifacts = ClaudeApp.artifacts();
+  let changed = false;
+  const repaired = artifacts.map((artifact) => {
+    const title = repairDuplicatedText(artifact.title);
+    const body = repairDuplicatedText(artifact.body);
+    changed ||= title !== artifact.title || body !== artifact.body;
+    return { ...artifact, title, body };
+  });
+  if (changed) ClaudeApp.saveArtifacts(repaired);
+}
+
 function openAuthModal(tab = "clientLoginForm") {
   document.querySelector("#authModal").classList.remove("hidden");
   setAuthTab(tab);
@@ -718,13 +767,15 @@ function renderPlanCards() {
     .map((plan) => {
       const currentPlan =
         current &&
-        ClaudeApp.planDisplayName(current.plan).toLowerCase() ===
-          ClaudeApp.planDisplayName(plan.name).toLowerCase();
-      const highlighted = highlightedPlanId === plan.id;
+        (String(current.plan || "").toLowerCase() === String(plan.id || "").toLowerCase() ||
+          ClaudeApp.normalizeModelKey(current.modelKey) === ClaudeApp.normalizeModelKey(plan.modelKey) ||
+          ClaudeApp.planDisplayName(current.plan).toLowerCase() ===
+            ClaudeApp.planDisplayName(plan.name).toLowerCase());
+      const highlighted = highlightedPlanId === plan.id || (!highlightedPlanId && plan.id === "ultra");
       const badges = [
         currentPlan ? `<span class="plan-badge current">Seu plano atual</span>` : "",
-        plan.id === "ultra" ? `<span class="plan-badge featured">Mais vendido</span>` : "",
-        highlighted ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
+        plan.id === "ultra" ? `<span class="plan-badge featured">Recomendado</span>` : "",
+        highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
       ].join("");
       return `
         <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}">
@@ -733,6 +784,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
+            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Opus 4.7 para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Sonnet 4.6 para trabalho diário." : "Inclui Haiku 4.5 para tarefas leves."}</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -938,7 +990,10 @@ async function loadServerHistory() {
 
   try {
     const data = await conversationRequest("/v1/conversations");
-    serverHistory = data.data || [];
+    serverHistory = (data.data || []).map((item) => ({
+      ...item,
+      title: repairDuplicatedText(item.title),
+    }));
     renderSidePanels();
   } catch {
     serverHistory = [];
@@ -948,7 +1003,7 @@ async function loadServerHistory() {
 
 function conversationTitle(messages) {
   const firstUser = messages.find((message) => message.role === "user")?.content || "";
-  const cleaned = String(firstUser).replace(/\n+/g, " ").split("Anexos:", 1)[0].trim();
+  const cleaned = repairDuplicatedText(firstUser).replace(/\n+/g, " ").split("Anexos:", 1)[0].trim();
   if (!cleaned) return "Nova conversa";
   return cleaned.length <= 54 ? cleaned : `${cleaned.slice(0, 54).trim()}...`;
 }
@@ -976,32 +1031,50 @@ function optimisticActiveConversation() {
     title: conversationTitle(activeConversation),
     createdAt: now,
     updatedAt: now,
-    messages: activeConversation,
+    messages: activeConversation.map((message) => ({
+      ...message,
+      content: repairDuplicatedText(message.content),
+    })),
   };
 }
 
-async function saveConversation() {
-  if (incognitoMode || !activeConversation.length || !account()?.active) return;
+async function saveConversationSnapshot(
+  snapshot = activeConversation,
+  conversationId = activeConversationId,
+  updateActiveId = true,
+) {
+  if (incognitoMode || !snapshot.length || !account()?.active) return;
 
+  const previousConversation = activeConversation;
+  const previousConversationId = activeConversationId;
+  activeConversation = snapshot;
+  activeConversationId = conversationId;
   const optimistic = optimisticActiveConversation();
-  activeConversationId = optimistic.id;
+  activeConversation = previousConversation;
+  activeConversationId = previousConversationId;
   upsertHistoryConversation(optimistic);
   showChatNotice("Salvando conversa...");
   try {
     const data = await conversationRequest("/v1/conversations", {
       method: "POST",
       body: JSON.stringify({
-        id: activeConversationId,
-        messages: activeConversation,
+        id: optimistic.id.startsWith("local_") ? "" : optimistic.id,
+        messages: optimistic.messages,
       }),
     });
-    activeConversationId = data.conversation.id;
+    if (updateActiveId && (conversationId === activeConversationId || !activeConversationId)) {
+      activeConversationId = data.conversation.id;
+    }
     upsertHistoryConversation(data.conversation);
     showChatNotice("Conversa salva.");
     await loadServerHistory();
   } catch {
     showChatNotice("Não consegui salvar no banco agora. Mantive a conversa nesta tela.");
   }
+}
+
+async function saveConversation() {
+  await saveConversationSnapshot();
 }
 
 function renderConversationMessages(messages) {
@@ -1011,7 +1084,7 @@ function renderConversationMessages(messages) {
 
   messages.forEach((message) => {
     if (message.role === "user" || message.role === "assistant") {
-      addMessage(message.role, message.content || "");
+      addMessage(message.role, repairDuplicatedText(message.content || ""));
     }
   });
 
@@ -1639,15 +1712,25 @@ function startDictation(button) {
 }
 
 async function resetChat() {
-  await saveConversation();
+  const previousConversation = activeConversation.map((message) => ({ ...message }));
+  const previousConversationId = activeConversationId;
   activeConversationId = null;
   activeConversation = [];
+  pendingAttachments = [];
+  closeSuggestionPanel();
   document.querySelector("#chatThread").innerHTML = "";
   document.querySelector("#chatThread").classList.add("hidden");
   document.querySelector("#bottomComposer").classList.add("hidden");
   document.querySelector("#emptyState").classList.remove("hidden");
+  document.querySelector("#heroComposer").reset();
+  document.querySelector("#bottomComposer").reset();
+  document.querySelector("#heroComposer").classList.remove("has-draft");
+  document.querySelector("#bottomComposer").classList.remove("has-draft");
   setPanel("chatPanel");
   renderSidePanels();
+  if (previousConversation.length) {
+    saveConversationSnapshot(previousConversation, previousConversationId, false);
+  }
 }
 
 document.querySelector("#clientLoginForm").addEventListener("submit", async (event) => {
@@ -1855,6 +1938,9 @@ document.querySelector("#attachmentInput").addEventListener("change", async (eve
 
 document.querySelectorAll(".quick-actions button").forEach((button) => {
   button.addEventListener("click", () => {
+    if (activeConversation.length || activeConversationId) {
+      resetChat();
+    }
     renderSuggestionPanel(button.dataset.suggestionCategory);
   });
 });
@@ -2126,6 +2212,7 @@ document.addEventListener("keydown", (event) => {
 
 fillModelSelects();
 stripStoredAccountTokens();
+repairStoredDuplicateArtifacts();
 loadApiForm();
 renderSidePanels();
 renderSupport();
