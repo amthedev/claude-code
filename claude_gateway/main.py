@@ -256,6 +256,9 @@ def create_app(
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
+        reservation = None
+        if not identity_answer:
+            reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         payload["__gateway_route_decision"] = decision
@@ -275,8 +278,6 @@ def create_app(
 
         payload = await _with_openai_execution_guidance(app, auth, payload, decision)
         payload["__gateway_route_decision"] = decision
-
-        reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = await _with_gemini_code_guidance(app, payload, decision)
         payload["__gateway_route_decision"] = decision
         if payload.get("stream"):
@@ -606,9 +607,9 @@ def create_app(
             payload = {**payload, "stream": False}
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
+        reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         payload = await _with_openai_execution_guidance(app, auth, payload, decision)
-        reservation = _reserve_customer_budget(app, auth, payload, decision)
         try:
             response, decision = await app.state.orchestrator.complete(
                 payload,
@@ -743,6 +744,9 @@ async def _complete_gateway_message(
     payload = _with_customer_power_tier(payload, app, auth)
     decision = app.state.planner.plan(payload)
     identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
+    reservation = None
+    if not identity_answer:
+        reservation = _reserve_customer_budget(app, auth, payload, decision)
     payload = _with_gateway_reasoning(payload, decision)
     payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
     payload["__gateway_route_decision"] = decision
@@ -759,7 +763,6 @@ async def _complete_gateway_message(
 
     payload = await _with_openai_execution_guidance(app, auth, payload, decision)
     payload["__gateway_route_decision"] = decision
-    reservation = _reserve_customer_budget(app, auth, payload, decision)
     payload = await _with_gemini_code_guidance(app, payload, decision)
     payload["__gateway_route_decision"] = decision
     try:

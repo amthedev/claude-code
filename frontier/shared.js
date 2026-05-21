@@ -38,7 +38,7 @@ const ClaudeApp = (() => {
       description: "Para testar com respostas básicas.",
       price: 0,
       modelKey: "haiku",
-      manualLimit: 2500,
+      manualLimit: 50,
       checkoutMode: "instant",
     },
     {
@@ -205,10 +205,25 @@ const ClaudeApp = (() => {
   }
 
   function recalculateAccount(account) {
-    const limit = calculateLimit(account.price, account.modelKey, account.manualLimit);
+    const price = Number(account.price) || 0;
+    const isSignupFreeAccount = price <= 0 && !account.giftCardCode;
+    const normalizedAccount = isSignupFreeAccount
+      ? {
+          ...account,
+          plan: "Grátis",
+          price: 0,
+          modelKey: "haiku",
+          manualLimit: 50,
+        }
+      : account;
+    const limit = calculateLimit(
+      normalizedAccount.price,
+      normalizedAccount.modelKey,
+      normalizedAccount.manualLimit,
+    );
     return {
-      ...account,
-      modelKey: normalizeModelKey(account.modelKey),
+      ...normalizedAccount,
+      modelKey: normalizeModelKey(normalizedAccount.modelKey),
       dailyLimit: limit.dailyLimit,
       computedDailyTokens: limit.computedDailyTokens,
       maxCostUsd: limit.maxCostUsd,

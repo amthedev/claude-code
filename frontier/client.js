@@ -904,6 +904,17 @@ function modelKeyLabel(modelKey) {
   return "Opus 4.7";
 }
 
+function isCurrentPaidPlan(current, plan) {
+  if (!current || !plan) return false;
+  const currentPrice = Number(current.price) || 0;
+  const planPrice = Number(plan.price) || 0;
+  if (currentPrice <= 0 || planPrice <= 0) return false;
+  const currentPlan = ClaudeApp.planDisplayName(current.plan).toLowerCase();
+  const planName = ClaudeApp.planDisplayName(plan.name).toLowerCase();
+  const planId = String(plan.id || "").toLowerCase();
+  return currentPlan === planName || currentPlan === planId || currentPrice === planPrice;
+}
+
 function renderPlanCards() {
   const current = account();
   const target = document.querySelector("#planCards");
@@ -918,12 +929,7 @@ function renderPlanCards() {
   }
   target.innerHTML = ClaudeApp.paidPlans()
     .map((plan) => {
-      const currentPlan =
-        current &&
-        (String(current.plan || "").toLowerCase() === String(plan.id || "").toLowerCase() ||
-          ClaudeApp.normalizeModelKey(current.modelKey) === ClaudeApp.normalizeModelKey(plan.modelKey) ||
-          ClaudeApp.planDisplayName(current.plan).toLowerCase() ===
-            ClaudeApp.planDisplayName(plan.name).toLowerCase());
+      const currentPlan = isCurrentPaidPlan(current, plan);
       const highlighted = highlightedPlanId === plan.id || (!highlightedPlanId && plan.id === "ultra");
       const badges = [
         currentPlan ? `<span class="plan-badge current">Seu plano atual</span>` : "",
@@ -1616,7 +1622,14 @@ function mergeStreamText(current, incoming) {
   return repairDuplicatedText(current + text);
 }
 
-async function callGateway(selectedModel, messages, onText) {
+function outputTokenLimitForAccount(current, estimatedInput) {
+  const remaining = Math.max(0, Number(current?.dailyLimit || 0) - Number(current?.usedToday || 0));
+  const availableOutput = remaining - estimatedInput;
+  if (availableOutput <= 0) return 0;
+  return Math.max(1, Math.min(1200, availableOutput));
+}
+
+async function callGateway(selectedModel, messages, onText, maxTokens = 1200) {
   const settings = ClaudeApp.apiSettings();
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
@@ -1626,7 +1639,7 @@ async function callGateway(selectedModel, messages, onText) {
     },
     body: JSON.stringify({
       model: selectedModel,
-      max_tokens: 1200,
+      max_tokens: Math.max(1, Math.min(1200, Math.floor(Number(maxTokens) || 1))),
       stream: true,
       messages,
     }),
@@ -1679,11 +1692,11 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   }
 
   const estimatedInput = ClaudeApp.estimateTokens(prompt);
-  const reservedOutput = 700;
+  const reservedOutput = outputTokenLimitForAccount(current, estimatedInput);
   const reservedTotal = estimatedInput + reservedOutput;
   const remaining = current.dailyLimit - current.usedToday;
 
-  if (reservedTotal > remaining) {
+  if (reservedOutput <= 0 || reservedTotal > remaining) {
     throw new Error(`Limite diário insuficiente. Restam ${ClaudeApp.integer.format(Math.max(0, remaining))} tokens.`);
   }
 
@@ -1698,7 +1711,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
     updateMessage(assistantMessage, partialAnswer);
-  });
+  }, reservedOutput);
   updateMessage(assistantMessage, answer);
 
   const accounts = ClaudeApp.accounts();

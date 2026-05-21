@@ -468,19 +468,65 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(account["plan"], "Grátis")
             self.assertEqual(account["modelKey"], "haiku")
             self.assertEqual(account["price"], 0)
-            self.assertGreater(account["dailyLimit"], 0)
+            self.assertEqual(account["dailyLimit"], 50)
 
             message = client.post(
                 "/v1/messages",
                 headers={"Authorization": f"Bearer {account['apiToken']}"},
                 json={
                     "model": "claude-code-ultra",
-                    "max_tokens": 64,
-                    "messages": [{"role": "user", "content": "Explique soma"}],
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "Oi"}],
                 },
             )
             self.assertEqual(message.status_code, 200)
             self.assertEqual(message.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+
+    def test_existing_unpaid_signup_account_is_migrated_to_free_limit(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Antigo",
+                    "login": "antigo@example.com",
+                    "password": "secret-old",
+                },
+            ).json()["account"]
+
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    """
+                    UPDATE accounts
+                       SET plan = 'Básico',
+                           model_key = 'haiku',
+                           manual_limit = 2500,
+                           daily_limit = 2500,
+                           computed_daily_tokens = 2500
+                     WHERE id = ?
+                    """,
+                    (account["id"],),
+                )
+                db.commit()
+
+            migrated_app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            migrated_client = TestClient(migrated_app)
+            login = migrated_client.post(
+                "/v1/auth/login",
+                json={"login": "antigo@example.com", "password": "secret-old"},
+            )
+
+            self.assertEqual(login.status_code, 200)
+            migrated = login.json()["account"]
+            self.assertEqual(migrated["plan"], "Grátis")
+            self.assertEqual(migrated["modelKey"], "haiku")
+            self.assertEqual(migrated["price"], 0)
+            self.assertEqual(migrated["dailyLimit"], 50)
 
     def test_purchase_approval_upgrades_account_and_tracks_revenue(self) -> None:
         with TemporaryDirectory() as directory:

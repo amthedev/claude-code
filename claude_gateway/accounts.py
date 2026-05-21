@@ -34,7 +34,7 @@ PLAN_CATALOG = (
         "description": "Para testar o chat com respostas básicas.",
         "price": 0.0,
         "modelKey": "haiku",
-        "manualLimit": 2500,
+        "manualLimit": 50,
         "checkoutMode": "instant",
     },
     {
@@ -550,6 +550,34 @@ class AccountStore:
             }.items():
                 if not _column_exists(db, "purchases", column):
                     db.execute(f"ALTER TABLE purchases ADD COLUMN {column} {definition}")
+            free_plan = _plan_by_id("free") or PLAN_CATALOG[0]
+            free_limit = _calculate_limit(
+                free_plan["price"],
+                free_plan["modelKey"],
+                free_plan["manualLimit"],
+                self.settings,
+            )
+            db.execute(
+                """
+                UPDATE accounts
+                   SET plan = ?,
+                       model_key = ?,
+                       manual_limit = ?,
+                       daily_limit = ?,
+                       computed_daily_tokens = ?,
+                       max_cost_usd = ?
+                 WHERE price <= 0
+                   AND gift_card_code = ''
+                """,
+                (
+                    free_plan["name"],
+                    free_plan["modelKey"],
+                    free_plan["manualLimit"],
+                    free_limit["dailyLimit"],
+                    free_limit["computedDailyTokens"],
+                    free_limit["maxCostUsd"],
+                ),
+            )
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
