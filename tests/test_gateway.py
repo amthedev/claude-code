@@ -237,6 +237,41 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Conversa simples", cleaned)
         self.assertIn("Quer que eu monte", cleaned)
 
+    def test_clean_model_text_recovers_restarted_answer_and_new_typos(self) -> None:
+        broken = (
+            "Paraprender inglês rápido, o segredo é consistência diária.\n"
+            "Tempo\tAtividade\tExemplo prático\t----\n"
+            "15 min\tVocabulário útil\tI’d like a coffe\t15 min\tEscutativa\tBBC Learning English\t"
+            "*10–20 min**\tFala\tUse Speak or conversa com IA\t*5–10 min**\tRevisão\tpalavrasoltas\n"
+            "Conteúdo seu interesse e Broklyn Nine-Nine\n"
+            "Use inglês na rotina, pensem frasesimples antes de dormir\n"
+            "⚠️ O quevParaprender inglês rápido, o segredo é consistência diária.\n"
+            "Tempo\tAtividade\tExemplo prático\t----\n"
+            "15 min\tVocabulário útil\tI’d like a coffe\t15 min\tEscutativa\tBBC Learning English\t"
+            "*10–20 min**\tFala\tUse Speak or conversa com IA\t*5–10 min**\tRevisão\tpalavrasoltas\n"
+            "Conteúdo seu interesse e Broklyn Nine-Nine\n"
+            "Use inglês na rotina, pensem frasesimples antes de dormir\n"
+            "⚠️ O que evita progresso real\n"
+            "Estudar gramática teórica por semanasem usar\n"
+            "Evitar falar por medo derrar\n"
+            "Poso montar um plano com metasemanais."
+        )
+
+        cleaned = clean_model_text(broken)
+
+        self.assertEqual(cleaned.count("Para aprender inglês rápido"), 1)
+        self.assertIn("coffee", cleaned)
+        self.assertIn("Escuta ativa", cleaned)
+        self.assertIn("10–20 min", cleaned)
+        self.assertIn("Speak ou converse com IA", cleaned)
+        self.assertIn("palavras soltas", cleaned)
+        self.assertIn("Conteúdo do seu interesse", cleaned)
+        self.assertIn("Brooklyn Nine-Nine", cleaned)
+        self.assertIn("pense em frases simples", cleaned)
+        self.assertIn("semanas sem usar", cleaned)
+        self.assertIn("medo de errar", cleaned)
+        self.assertIn("Posso montar um plano com metas semanais", cleaned)
+
     def test_openapi_is_not_public_by_default(self) -> None:
         response = self.client.get("/openapi.json")
         self.assertEqual(response.status_code, 404)

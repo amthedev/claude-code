@@ -11,15 +11,30 @@ _WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 _DUPLICATED_WORD_RE = re.compile(r"\b([^\W_]+)(\s+)\1\b", re.IGNORECASE | re.UNICODE)
 _PREFIX_FRAGMENT_RE = re.compile(r"\b([^\W_]{1,8})(\s+)(\1[^\W_]{2,})\b", re.IGNORECASE | re.UNICODE)
 _MARKDOWN_PAIR_RE = re.compile(r"(\*\*|__|\*|_)\s+\1")
+_BROKEN_TIME_EMPHASIS_RE = re.compile(r"\*(\d+[–-]\d+\s*min)\*\*")
 _GLUED_REPAIRS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bParaprender\b", re.IGNORECASE), "Para aprender"),
     (re.compile(r"\bdentendimento\b", re.IGNORECASE), "de entendimento"),
     (re.compile(r"\bfrasesobre\b", re.IGNORECASE), "frases sobre"),
+    (re.compile(r"\bfrasesimples\b", re.IGNORECASE), "frases simples"),
     (re.compile(r"\bpalavrasem\b", re.IGNORECASE), "palavras sem"),
+    (re.compile(r"\bpalavrasoltas\b", re.IGNORECASE), "palavras soltas"),
+    (re.compile(r"\bsemanasem\b", re.IGNORECASE), "semanas sem"),
+    (re.compile(r"\bmetasemanais\b", re.IGNORECASE), "metas semanais"),
     (re.compile(r"\bqueu\b", re.IGNORECASE), "que eu"),
     (re.compile(r"\bquevita\b", re.IGNORECASE), "que evita"),
+    (re.compile(r"\bO\s+quev\b", re.IGNORECASE), "O que evita"),
     (re.compile(r"\bConversasimples\b"), "Conversa simples"),
     (re.compile(r"\bComprensão\b"), "Compreensão"),
     (re.compile(r"\bIso\b"), "Isso"),
+    (re.compile(r"\bEscutativa\b", re.IGNORECASE), "Escuta ativa"),
+    (re.compile(r"\bcoffe\b", re.IGNORECASE), "coffee"),
+    (re.compile(r"\bBroklyn\b", re.IGNORECASE), "Brooklyn"),
+    (re.compile(r"\bSpeak\s+or\s+conversa\b", re.IGNORECASE), "Speak ou converse"),
+    (re.compile(r"\bConteúdo\s+seu\s+interesse\b", re.IGNORECASE), "Conteúdo do seu interesse"),
+    (re.compile(r"\bpensem\s+frases\b", re.IGNORECASE), "pense em frases"),
+    (re.compile(r"\bmedo\s+derrar\b", re.IGNORECASE), "medo de errar"),
+    (re.compile(r"\bPoso\b", re.IGNORECASE), "Posso"),
     (re.compile(r"\b(\d+)hoje\s+nada\b"), r"\1h hoje e nada"),
     (re.compile(r"\bAprendas\s+\*?1\.0[–-]2\.0\b"), "Aprenda as **1.000–2.000"),
     (re.compile(r"\bFoquem\s+frases\b"), "Foque em frases"),
@@ -149,15 +164,37 @@ def _clean_response_content(response: dict[str, Any]) -> None:
 def _clean_prose_text(text: str) -> str:
     previous = None
     current = _MARKDOWN_PAIR_RE.sub(r"\1", text)
+    current = _BROKEN_TIME_EMPHASIS_RE.sub(r"\1", current)
     for _ in range(4):
         if current == previous:
             break
         previous = current
+        current = _remove_restarted_answer(current)
         current = _DUPLICATED_WORD_RE.sub(r"\1", current)
         current = _PREFIX_FRAGMENT_RE.sub(r"\3", current)
         current = _WORD_RE.sub(lambda match: _repair_word(match.group(0)), current)
         current = _repair_glued_phrases(current)
     return current
+
+
+def _remove_restarted_answer(text: str) -> str:
+    markers = ("Para aprender", "Paraprender", "Aprender inglês rápido")
+    for marker in markers:
+        first = text.find(marker)
+        if first < 0:
+            continue
+        second = text.find(marker, first + len(marker))
+        if second < 0:
+            continue
+        prefix = text[:second]
+        suffix = text[second:]
+        if len(suffix) < len(prefix) * 0.5:
+            return prefix.rstrip()
+        tail = prefix[-48:]
+        if len(prefix) > 180 and not tail.rstrip().endswith((".", "!", "?", ":", "\n")):
+            return suffix
+        return prefix.rstrip()
+    return text
 
 
 def _repair_glued_phrases(text: str) -> str:

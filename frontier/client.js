@@ -159,10 +159,12 @@ function repairDuplicatedTokenOnce(token) {
 function repairDuplicatedText(text) {
   const value = String(text || "");
   if (!value) return value;
-  let current = value.replace(/(\*\*|__|\*|_)\s+\1/g, "$1");
+  let current = value
+    .replace(/(\*\*|__|\*|_)\s+\1/g, "$1")
+    .replace(/\*(\d+[–-]\d+\s*min)\*\*/g, "$1");
   for (let pass = 0; pass < 4; pass += 1) {
     const previous = current;
-    current = current
+    current = removeRestartedAnswer(current)
       .replace(/\b([\p{L}\p{N}]+)(\s+)\1\b/giu, "$1")
       .replace(/\b([\p{L}\p{N}]{1,8})(\s+)(\1[\p{L}\p{N}]{2,})\b/giu, "$3");
     if (current === previous) break;
@@ -191,16 +193,48 @@ function repairDuplicatedText(text) {
   return repairGluedPhrases(repaired.join(""));
 }
 
+function removeRestartedAnswer(text) {
+  const value = String(text || "");
+  const markers = ["Para aprender", "Paraprender", "Aprender inglês rápido"];
+  for (const marker of markers) {
+    const first = value.indexOf(marker);
+    if (first < 0) continue;
+    const second = value.indexOf(marker, first + marker.length);
+    if (second < 0) continue;
+    const prefix = value.slice(0, second);
+    const suffix = value.slice(second);
+    if (suffix.length < prefix.length * 0.5) return prefix.trimEnd();
+    const tail = prefix.slice(-48).trimEnd();
+    if (prefix.length > 180 && !/[.!?:\n]$/.test(tail)) return suffix;
+    return prefix.trimEnd();
+  }
+  return value;
+}
+
 function repairGluedPhrases(text) {
   return String(text || "")
+    .replace(/\bParaprender\b/gi, "Para aprender")
     .replace(/\bdentendimento\b/gi, "de entendimento")
     .replace(/\bfrasesobre\b/gi, "frases sobre")
+    .replace(/\bfrasesimples\b/gi, "frases simples")
     .replace(/\bpalavrasem\b/gi, "palavras sem")
+    .replace(/\bpalavrasoltas\b/gi, "palavras soltas")
+    .replace(/\bsemanasem\b/gi, "semanas sem")
+    .replace(/\bmetasemanais\b/gi, "metas semanais")
     .replace(/\bqueu\b/gi, "que eu")
     .replace(/\bquevita\b/gi, "que evita")
+    .replace(/\bO\s+quev\b/gi, "O que evita")
     .replace(/\bConversasimples\b/g, "Conversa simples")
     .replace(/\bComprensão\b/g, "Compreensão")
     .replace(/\bIso\b/g, "Isso")
+    .replace(/\bEscutativa\b/gi, "Escuta ativa")
+    .replace(/\bcoffe\b/gi, "coffee")
+    .replace(/\bBroklyn\b/gi, "Brooklyn")
+    .replace(/\bSpeak\s+or\s+conversa\b/gi, "Speak ou converse")
+    .replace(/\bConteúdo\s+seu\s+interesse\b/gi, "Conteúdo do seu interesse")
+    .replace(/\bpensem\s+frases\b/gi, "pense em frases")
+    .replace(/\bmedo\s+derrar\b/gi, "medo de errar")
+    .replace(/\bPoso\b/gi, "Posso")
     .replace(/\b(\d+)hoje\s+nada\b/g, "$1h hoje e nada")
     .replace(/\bAprendas\s+\*?1\.0[–-]2\.0\b/g, "Aprenda as **1.000–2.000")
     .replace(/\bFoquem\s+frases\b/g, "Foque em frases");
@@ -1132,7 +1166,7 @@ function renderInlineMarkdown(text) {
 }
 
 function renderMarkdownTable(lines) {
-  const rows = lines
+  const rawRows = lines
     .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
     .filter((line) => !/^\s*-{3,}\s*$/.test(line.trim()))
     .map((line) =>
@@ -1144,6 +1178,17 @@ function renderMarkdownTable(lines) {
         .filter((cell) => !/^:?-{3,}:?$/.test(cell))
         .map((cell) => renderInlineMarkdown(cell)),
     );
+  const rows = [];
+  const expectedColumns = rawRows[0]?.length || 0;
+  rawRows.forEach((row, index) => {
+    if (index > 0 && expectedColumns > 1 && row.length > expectedColumns) {
+      for (let cellIndex = 0; cellIndex < row.length; cellIndex += expectedColumns) {
+        rows.push(row.slice(cellIndex, cellIndex + expectedColumns));
+      }
+      return;
+    }
+    rows.push(row);
+  });
   if (!rows.length) return "";
   const [head, ...body] = rows;
   return `
