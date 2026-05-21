@@ -1881,7 +1881,7 @@ function activeProjectContextBlock() {
 }
 
 function promptWithActiveProjectContext(prompt) {
-  const context = activeProjectContextBlock();
+  const context = activeChatMode === "code" ? "" : activeProjectContextBlock();
   const codeContext = activeCodeWorkspaceContextBlock();
   const blocks = [context, codeContext].filter(Boolean);
   if (!blocks.length) return prompt;
@@ -1938,8 +1938,7 @@ function activeCodeWorkspaceContextBlock() {
 
 function renderCodeContextButtons() {
   const workspace = activeCodeWorkspace();
-  const isCodeChat = activeChatMode === "code" && Boolean(account()?.active);
-  const project = activeProject();
+  const isCodeChat = activeChatMode === "code";
   const editLabels = {
     review: "Revisão automática",
     full: "Acesso completo",
@@ -1958,7 +1957,7 @@ function renderCodeContextButtons() {
     strip.classList.toggle("hidden", !isCodeChat);
   });
   document.querySelectorAll("[data-code-project-label]").forEach((label) => {
-    label.textContent = workspace?.name || project?.name || "Trabalhar em um projeto";
+    label.textContent = workspace?.name || "Trabalhar em projeto de código";
   });
   document.querySelectorAll("[data-code-edit-label]").forEach((label) => {
     label.textContent = editLabels[codeEditMode] || editLabels.full;
@@ -1986,32 +1985,24 @@ function renderCodeProjectChoices() {
   if (!target) return;
   const query = (document.querySelector("#codeProjectSearch")?.value || "").trim().toLowerCase();
   const matches = (text) => !query || String(text || "").toLowerCase().includes(query);
-  const workspaceButtons = codeWorkspaces
-    .filter((workspace) => matches(`${workspace.name} ${workspace.repoUrl || ""}`))
+  const visibleWorkspaces = codeWorkspaces.filter((workspace) => matches(`${workspace.name} ${workspace.repoUrl || ""}`));
+  const workspaceButtons = visibleWorkspaces
     .map(
       (workspace) => `
         <button type="button" class="${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
           <span>${workspace.source === "github" ? "Git" : "ZIP"}</span>
-          ${ClaudeApp.escapeHtml(workspace.name)}
-        </button>
-      `,
-    )
-    .join("");
-  const projectButtons = ClaudeApp.projects()
-    .filter((project) => matches(`${project.name} ${project.context || ""}`))
-    .map(
-      (project) => `
-        <button type="button" class="${project.id === activeProjectId ? "active" : ""}" data-code-saved-project-id="${ClaudeApp.escapeHtml(project.id)}">
-          <span>▤</span>
-          ${ClaudeApp.escapeHtml(project.name)}
+          <strong>${ClaudeApp.escapeHtml(workspace.name)}</strong>
+          <small>${ClaudeApp.escapeHtml(workspace.source === "github" ? workspace.repoUrl || "GitHub" : "Pasta compactada")}</small>
         </button>
       `,
     )
     .join("");
   target.innerHTML =
-    workspaceButtons || projectButtons
-      ? `${workspaceButtons}${projectButtons}`
-      : `<button type="button" disabled><span>＋</span>Nenhum projeto salvo</button>`;
+    workspaceButtons ||
+    `<div class="code-project-empty">
+      <strong>${query ? "Nenhum projeto de código encontrado" : "Nenhum projeto de código ainda"}</strong>
+      <span>Conecte um repo, suba um ZIP/pasta ou crie um projeto novo pelo chat.</span>
+    </div>`;
 }
 
 function setActiveChatMode(mode) {
@@ -2021,34 +2012,27 @@ function setActiveChatMode(mode) {
 }
 
 async function startCodeChat() {
-  if (!account()?.active) {
-    openAuthForIntent("chat", "clientSignupForm");
-    showChatNotice("Entre ou crie uma conta para usar o chat de código.");
-    return;
-  }
   setActiveChatMode("code");
   if (activeConversation.length || activeConversationId) {
     clearActiveChat();
   } else {
     setPanel("chatPanel");
   }
-  await loadCodeWorkspaces();
+  if (account()?.active) await loadCodeWorkspaces();
   renderCodeContextButtons();
-  showChatNotice(activeCodeWorkspace() ? `Projeto ativo: ${activeCodeWorkspace().name}` : "Escolha um projeto pelo ícone de pasta.");
+  showChatNotice(activeCodeWorkspace() ? `Projeto de código ativo: ${activeCodeWorkspace().name}` : "Escolha ou crie um projeto de código.");
 }
 
-function selectSavedProjectForCode(projectId) {
-  const project = ClaudeApp.projects().find((item) => item.id === projectId);
-  if (!project) {
-    showChatNotice("Projeto não encontrado.");
-    return;
-  }
-  activeProjectId = project.id;
-  localStorage.setItem("claude_frontier_active_project", project.id);
+function startNewCodeProjectDraft() {
+  activeCodeWorkspaceId = "";
+  activeCodeFilePath = "";
+  activeCodeFiles = [];
+  localStorage.removeItem("claude_frontier_active_code_workspace");
   setActiveChatMode("code");
   setPanel("chatPanel");
-  renderSidePanels();
-  showChatNotice(`Contexto ativo: ${project.name}`);
+  fillHeroPrompt("Crie um novo projeto de software. Quero começar do zero com estes requisitos: ");
+  renderCodeContextButtons();
+  showChatNotice("Novo projeto de código iniciado no chat.");
 }
 
 function historyDate(item) {
@@ -3000,12 +2984,6 @@ document.querySelector("#codeProjectMenu").addEventListener("click", async (even
     showChatNotice(`Projeto ativo: ${activeCodeWorkspace()?.name || "código"}`);
     return;
   }
-  const savedProjectButton = event.target.closest("[data-code-saved-project-id]");
-  if (savedProjectButton) {
-    closeFloatingMenus();
-    selectSavedProjectForCode(savedProjectButton.dataset.codeSavedProjectId);
-    return;
-  }
   const actionButton = event.target.closest("[data-code-project-action]");
   if (!actionButton) return;
   closeFloatingMenus();
@@ -3015,14 +2993,7 @@ document.querySelector("#codeProjectMenu").addEventListener("click", async (even
     return;
   }
   if (actionButton.dataset.codeProjectAction === "new-project") {
-    setActiveChatMode("code");
-    if (!account()?.active) {
-      openAuthForIntent("project", "clientSignupForm");
-      showChatNotice("Entre ou crie uma conta para criar projetos.");
-      return;
-    }
-    document.querySelector("#projectModal").classList.remove("hidden");
-    window.setTimeout(() => document.querySelector("#projectForm input[name='name']")?.focus(), 0);
+    startNewCodeProjectDraft();
   }
 });
 
@@ -3296,7 +3267,6 @@ document.querySelector("#bottomModel").addEventListener("change", (event) => {
 
 document.querySelector("#projectForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  const createForCodeChat = activeChatMode === "code";
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   const error = document.querySelector("#projectError");
   error.textContent = "";
@@ -3319,11 +3289,7 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
   activeProjectId = project.id;
   localStorage.setItem("claude_frontier_active_project", project.id);
   renderSidePanels();
-  if (createForCodeChat) {
-    selectSavedProjectForCode(project.id);
-  } else {
-    openProject(project.id);
-  }
+  openProject(project.id);
 });
 
 document.querySelector("#githubImportForm").addEventListener("submit", async (event) => {

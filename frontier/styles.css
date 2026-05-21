@@ -2032,8 +2032,10 @@ code {
 }
 
 .quick-menu-form {
-  border-top: 1px solid var(--cloud-line);
-  border-bottom: 1px solid var(--cloud-line);
+  margin: 4px 2px;
+  border: 1px solid #ebe9e4;
+  border-radius: 10px;
+  background: #fbfbfa;
 }
 
 .quick-menu-form input {
@@ -2056,8 +2058,57 @@ code {
 }
 
 .compact-choice-list button {
-  min-height: 40px;
-  justify-content: flex-start;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  justify-content: stretch;
+  column-gap: 8px;
+  row-gap: 1px;
+}
+
+.compact-choice-list button > span:first-child {
+  grid-row: 1 / span 2;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  background: #f7f6f2;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.compact-choice-list button strong,
+.compact-choice-list button small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-choice-list button strong {
+  color: var(--cloud-text);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.compact-choice-list button small {
+  color: var(--cloud-muted);
+  font-size: 12px;
+}
+
+.code-project-empty {
+  display: grid;
+  gap: 4px;
+  padding: 14px 12px;
+  color: var(--cloud-muted);
+  line-height: 1.35;
+}
+
+.code-project-empty strong {
+  color: var(--cloud-text);
+  font-size: 14px;
 }
 
 .compact-choice-list .active {
