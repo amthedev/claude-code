@@ -14,10 +14,10 @@
         <button id="sidebarOpen" class="icon-button" title="Menu" type="button" aria-label="Abrir menu lateral" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M9 6v12" /></svg>
         </button>
-        <button id="railNewChat" class="icon-button active" title="Novo chat" type="button" aria-label="Novo chat">
+        <button id="railNewChat" class="icon-button active" title="Novo bate-papo" type="button" aria-label="Novo bate-papo">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
         </button>
-        <button class="icon-button" title="Buscar" data-panel="searchPanel" aria-label="Buscar">
+        <button class="icon-button" title="Procurar" data-panel="searchPanel" aria-label="Procurar">
           <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
         </button>
         <button class="icon-button" title="Conversas" data-panel="historyPanel" aria-label="Conversas">
@@ -111,7 +111,7 @@
             <button data-panel="plansPanel" type="button" aria-label="Planos da conta">Planos</button>
           </div>
           <div class="top-actions">
-            <button class="ghost-top" data-panel="settingsPanel" type="button" aria-label="Ajuda">
+            <button class="ghost-top" data-panel="settingsPanel" type="button" aria-label="Configurações da conta">
               <svg viewBox="0 0 24 24"><path d="M6 19v-7a6 6 0 0 1 12 0v7M6 15h12M8 20l2-2 2 2 2-2 2 2 2-2" /></svg>
             </button>
           </div>
@@ -268,7 +268,7 @@
             </label>
             <label>
               Token
-              <input name="token" type="password" autocomplete="off" placeholder="local-dev-token" />
+          <input name="token" type="password" autocomplete="off" placeholder="Token mascarado por segurança" />
             </label>
             <label>
               Modelo padrão
@@ -291,8 +291,8 @@
           </div>
           <div id="supportStatus" class="support-status">Nenhum atendimento aberto.</div>
           <div id="supportMessages" class="support-messages"></div>
-          <form id="supportForm" class="support-form">
-            <textarea name="message" placeholder="Digite sua mensagem para o suporte..." required></textarea>
+          <form id="supportForm" class="support-form" novalidate>
+            <textarea name="message" placeholder="Digite sua mensagem para o suporte..."></textarea>
             <button class="primary" type="submit">Enviar ao suporte</button>
           </form>
           <div id="supportError" class="form-error"></div>
@@ -359,19 +359,20 @@
     </div>
 
     <section id="projectModal" class="auth-modal hidden" aria-modal="true" role="dialog" aria-label="Criar um projeto">
-      <form id="projectForm" class="project-dialog dark-card">
+      <form id="projectForm" class="project-dialog dark-card" novalidate>
         <div class="modal-header">
           <h2>Criar um projeto</h2>
           <button id="projectModalClose" type="button">Fechar</button>
         </div>
         <label>
           No que você está trabalhando?
-          <input name="name" placeholder="Dê um nome ao projeto" required />
+          <input name="name" placeholder="Dê um nome ao projeto" />
         </label>
         <label>
           O que você quer realizar?
           <textarea name="context" placeholder="Descreva seu projeto, objetivos, assunto, etc..."></textarea>
         </label>
+        <div id="projectError" class="form-error"></div>
         <div class="modal-actions">
           <button id="projectModalCancel" type="button">Cancelar</button>
           <button class="primary" type="submit">Criar projeto</button>

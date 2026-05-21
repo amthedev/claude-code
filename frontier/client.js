@@ -1604,10 +1604,20 @@ function closeSuggestionPanel() {
 }
 
 function setIncognitoMode(enabled) {
+  if (enabled && (activeConversation.length || activeConversationId)) {
+    const previousConversation = activeConversation.map((message) => ({ ...message }));
+    const previousConversationId = activeConversationId;
+    clearActiveChat({ savePrevious: false });
+    saveConversationSnapshot(previousConversation, previousConversationId, false);
+  }
   incognitoMode = enabled;
-  if (enabled) setPanel("chatPanel");
+  if (enabled) {
+    closeSidebar();
+    setPanel("chatPanel");
+  }
   document.querySelector("#clientApp").classList.toggle("incognito-mode", enabled);
   document.querySelector("#incognitoNotice").classList.toggle("hidden", !enabled);
+  document.querySelector("#incognitoToggle").classList.toggle("active", enabled);
   document.querySelector("#incognitoToggle").setAttribute(
     "aria-label",
     enabled ? "Sair do modo anônimo" : "Usar incógnito",
@@ -1711,7 +1721,7 @@ function startDictation(button) {
   }
 }
 
-async function resetChat() {
+function clearActiveChat({ savePrevious = true } = {}) {
   const previousConversation = activeConversation.map((message) => ({ ...message }));
   const previousConversationId = activeConversationId;
   activeConversationId = null;
@@ -1728,9 +1738,13 @@ async function resetChat() {
   document.querySelector("#bottomComposer").classList.remove("has-draft");
   setPanel("chatPanel");
   renderSidePanels();
-  if (previousConversation.length) {
+  if (savePrevious && previousConversation.length) {
     saveConversationSnapshot(previousConversation, previousConversationId, false);
   }
+}
+
+function resetChat() {
+  clearActiveChat();
 }
 
 document.querySelector("#clientLoginForm").addEventListener("submit", async (event) => {
@@ -1850,6 +1864,7 @@ document.querySelector("#attachMenu").addEventListener("click", (event) => {
   closeFloatingMenus();
   if (action === "files") {
     triggerAttachmentPicker();
+    showChatNotice("Escolha arquivos ou fotos para anexar.");
     return;
   }
   if (action === "project") {
@@ -2054,6 +2069,13 @@ document.querySelector("#bottomModel").addEventListener("change", (event) => {
 document.querySelector("#projectForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const error = document.querySelector("#projectError");
+  error.textContent = "";
+  if (!String(values.name || "").trim()) {
+    error.textContent = "Informe um nome para criar o projeto.";
+    event.currentTarget.elements.name.focus();
+    return;
+  }
   const projects = ClaudeApp.projects();
   projects.unshift({
     id: `project_${Date.now()}`,
@@ -2071,8 +2093,12 @@ document.querySelector("#supportForm").addEventListener("submit", async (event) 
   event.preventDefault();
   const form = event.currentTarget;
   const message = form.elements.message.value.trim();
-  if (!message) return;
   document.querySelector("#supportError").textContent = "";
+  if (!message) {
+    document.querySelector("#supportError").textContent = "Digite uma mensagem para enviar ao suporte.";
+    form.elements.message.focus();
+    return;
+  }
   try {
     const path = activeSupportTicket
       ? `/v1/support/tickets/${activeSupportTicket.id}/messages`
@@ -2111,6 +2137,7 @@ document.querySelector("#openProjectModal").addEventListener("click", () => {
 
 function closeProjectModal() {
   document.querySelector("#projectModal").classList.add("hidden");
+  document.querySelector("#projectError").textContent = "";
 }
 
 document.querySelector("#projectModalClose").addEventListener("click", closeProjectModal);
@@ -2135,9 +2162,8 @@ document.querySelector("#artifactStartModal").addEventListener("click", (event) 
   const button = event.target.closest("[data-artifact-prompt]");
   if (!button) return;
   document.querySelector("#artifactStartModal").classList.add("hidden");
-  resetChat().then(() => {
-    if (button.dataset.artifactPrompt) fillHeroPrompt(button.dataset.artifactPrompt);
-  });
+  resetChat();
+  if (button.dataset.artifactPrompt) fillHeroPrompt(button.dataset.artifactPrompt);
 });
 
 document.querySelector("#clientLogout").addEventListener("click", async () => {

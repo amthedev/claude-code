@@ -1782,6 +1782,8 @@ button.result-item {
   position: fixed;
   z-index: 40;
   width: min(280px, calc(100vw - 24px));
+  max-height: min(360px, calc(100vh - 24px));
+  overflow: auto;
   border: 1px solid var(--cloud-line);
   border-radius: 10px;
   background: #fff;
