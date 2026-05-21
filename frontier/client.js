@@ -1160,6 +1160,27 @@ function parseGatewayStreamChunk(buffer, onText) {
   return remainder;
 }
 
+function overlapLength(left, right) {
+  const max = Math.min(left.length, right.length);
+  for (let size = max; size > 0; size -= 1) {
+    if (left.slice(-size) === right.slice(0, size)) return size;
+  }
+  return 0;
+}
+
+function mergeStreamText(current, incoming) {
+  const text = String(incoming || "");
+  if (!text) return current;
+  if (!current) return text;
+  if (text === current || current.endsWith(text)) return current;
+  if (text.startsWith(current)) return text;
+
+  const overlap = overlapLength(current, text);
+  if (overlap > 0) return current + text.slice(overlap);
+
+  return repairDuplicatedText(current + text);
+}
+
 async function callGateway(selectedModel, messages, onText) {
   const settings = ClaudeApp.apiSettings();
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
@@ -1206,12 +1227,12 @@ async function callGateway(selectedModel, messages, onText) {
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     buffer = parseGatewayStreamChunk(buffer, (text) => {
-      answer += text;
+      answer = mergeStreamText(answer, text);
       onText(answer.trimStart());
     });
   }
 
-  return answer.trim() || "Sem resposta.";
+  return repairDuplicatedText(answer).trim() || "Sem resposta.";
 }
 
 async function submitPrompt(prompt, selectedModel, attachments = []) {
