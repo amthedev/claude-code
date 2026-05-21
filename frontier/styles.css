@@ -1404,10 +1404,15 @@ code {
 }
 
 #apiPanel {
+  height: calc(100dvh - 54px);
+  max-height: calc(100dvh - 54px);
   min-height: 0;
-  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
   overscroll-behavior: contain;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .panel-header h2 {
