@@ -14,7 +14,7 @@ let activeCodeWorkspaceId = localStorage.getItem("claude_frontier_active_code_wo
 let activeCodeFilePath = "";
 let activeCodeFiles = [];
 let activeChatMode = localStorage.getItem("claude_frontier_active_chat_mode") || "chat";
-let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "review";
+let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "full";
 let codeOutputMode = localStorage.getItem("claude_frontier_code_output_mode") || "normal";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
@@ -1939,6 +1939,12 @@ function activeCodeWorkspaceContextBlock() {
 function renderCodeContextButtons() {
   const workspace = activeCodeWorkspace();
   const isCodeChat = activeChatMode === "code" && Boolean(account()?.active);
+  const project = activeProject();
+  const editLabels = {
+    review: "Revisão automática",
+    full: "Acesso completo",
+    ask: "Pedir antes",
+  };
   document.querySelector("#clientApp")?.classList.toggle("code-chat-mode", isCodeChat);
   document.querySelectorAll("[data-code-chat-open]").forEach((button) => {
     button.classList.toggle("active", isCodeChat);
@@ -1948,8 +1954,19 @@ function renderCodeContextButtons() {
   document.querySelectorAll(".code-chat-control").forEach((button) => {
     button.classList.toggle("hidden", !isCodeChat);
   });
+  document.querySelectorAll("[data-code-project-strip]").forEach((strip) => {
+    strip.classList.toggle("hidden", !isCodeChat);
+  });
+  document.querySelectorAll("[data-code-project-label]").forEach((label) => {
+    label.textContent = workspace?.name || project?.name || "Trabalhar em um projeto";
+  });
+  document.querySelectorAll("[data-code-edit-label]").forEach((label) => {
+    label.textContent = editLabels[codeEditMode] || editLabels.full;
+  });
   document.querySelectorAll("#heroComposer textarea, #bottomComposer textarea").forEach((textarea) => {
-    textarea.placeholder = isCodeChat ? "Peça uma mudança, revisão ou plano para o projeto..." : "Como posso ajudar você hoje?";
+    textarea.placeholder = isCodeChat
+      ? "Pergunte qualquer coisa ao Codex. @ para usar plugins ou mencionar arquivos"
+      : "Como posso ajudar você hoje?";
   });
   document.querySelectorAll("[data-code-edit-mode]").forEach((button) => {
     button.classList.toggle("active", button.dataset.codeEditMode === codeEditMode);
@@ -1959,7 +1976,7 @@ function renderCodeContextButtons() {
   });
   const title = document.querySelector("#welcomeTitle");
   if (title) {
-    title.textContent = isCodeChat ? "O que vamos mudar no projeto?" : incognitoMode ? "Olá, seja quem for você" : "Como posso ajudar hoje?";
+    title.textContent = isCodeChat ? "No que devemos trabalhar?" : incognitoMode ? "Olá, seja quem for você" : "Como posso ajudar hoje?";
   }
   renderCodeProjectChoices();
 }
@@ -1967,7 +1984,10 @@ function renderCodeContextButtons() {
 function renderCodeProjectChoices() {
   const target = document.querySelector("#codeProjectChoices");
   if (!target) return;
+  const query = (document.querySelector("#codeProjectSearch")?.value || "").trim().toLowerCase();
+  const matches = (text) => !query || String(text || "").toLowerCase().includes(query);
   const workspaceButtons = codeWorkspaces
+    .filter((workspace) => matches(`${workspace.name} ${workspace.repoUrl || ""}`))
     .map(
       (workspace) => `
         <button type="button" class="${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
@@ -1978,6 +1998,7 @@ function renderCodeProjectChoices() {
     )
     .join("");
   const projectButtons = ClaudeApp.projects()
+    .filter((project) => matches(`${project.name} ${project.context || ""}`))
     .map(
       (project) => `
         <button type="button" class="${project.id === activeProjectId ? "active" : ""}" data-code-saved-project-id="${ClaudeApp.escapeHtml(project.id)}">
@@ -3004,6 +3025,8 @@ document.querySelector("#codeProjectMenu").addEventListener("click", async (even
     window.setTimeout(() => document.querySelector("#projectForm input[name='name']")?.focus(), 0);
   }
 });
+
+document.querySelector("#codeProjectSearch").addEventListener("input", renderCodeProjectChoices);
 
 document.querySelector("#codeGithubQuickForm").addEventListener("submit", async (event) => {
   event.preventDefault();

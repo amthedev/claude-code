@@ -147,11 +147,13 @@
                   <button class="composer-icon code-mode-button" type="button" data-code-chat-open title="Chat de código" aria-label="Abrir chat de código">
                     <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
                   </button>
-                  <button class="composer-icon code-chat-control hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
+                  <button class="composer-icon code-chat-control code-project-icon hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
                     <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
                   </button>
-                  <button class="composer-icon code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
-                    <svg viewBox="0 0 24 24"><path d="M6 8h12M6 16h12" /><path d="M9 6v4M15 14v4" /></svg>
+                  <button class="access-mode-button code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
+                    <svg viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.2c0 4.4-2.8 7.7-7 9.3-4.2-1.6-7-4.9-7-9.3V6l7-2.5Z" /><path d="M9.5 12.2 11.3 14l3.4-4" /></svg>
+                    <span data-code-edit-label>Acesso completo</span>
+                    <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                   </button>
                   <button class="composer-icon code-chat-control hidden" type="button" data-code-output-open title="Saídas" aria-label="Escolher saída de código">
                     <svg viewBox="0 0 24 24"><path d="M5 19V5M5 19h14" /><path d="M9 15v-4M13 15V8M17 15v-7" /></svg>
@@ -172,6 +174,13 @@
                 </div>
               </div>
             </form>
+            <div class="code-project-strip hidden" data-code-project-strip>
+              <button class="code-project-pill" type="button" data-code-project-open aria-label="Escolher projeto de código">
+                <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
+                <span data-code-project-label>Trabalhar em um projeto</span>
+                <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+              </button>
+            </div>
             <div class="quick-actions">
               <button data-suggestion-category="code" data-prompt="Crie uma API FastAPI com autenticação simples">
                 <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
@@ -215,11 +224,13 @@
                 <button class="composer-icon code-mode-button" type="button" data-code-chat-open title="Chat de código" aria-label="Abrir chat de código">
                   <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 5l-4 14" /></svg>
                 </button>
-                <button class="composer-icon code-chat-control hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
+                <button class="composer-icon code-chat-control code-project-icon hidden" type="button" data-code-project-open title="Projeto" aria-label="Escolher projeto de código">
                   <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
                 </button>
-                <button class="composer-icon code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
-                  <svg viewBox="0 0 24 24"><path d="M6 8h12M6 16h12" /><path d="M9 6v4M15 14v4" /></svg>
+                <button class="access-mode-button code-chat-control hidden" type="button" data-code-tools-open title="Permissões" aria-label="Escolher permissões de código">
+                  <svg viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.2c0 4.4-2.8 7.7-7 9.3-4.2-1.6-7-4.9-7-9.3V6l7-2.5Z" /><path d="M9.5 12.2 11.3 14l3.4-4" /></svg>
+                  <span data-code-edit-label>Acesso completo</span>
+                  <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                 </button>
                 <button class="composer-icon code-chat-control hidden" type="button" data-code-output-open title="Saídas" aria-label="Escolher saída de código">
                   <svg viewBox="0 0 24 24"><path d="M5 19V5M5 19h14" /><path d="M9 15v-4M13 15V8M17 15v-7" /></svg>
@@ -240,6 +251,13 @@
               </div>
             </div>
           </form>
+          <div class="code-project-strip bottom-project-strip hidden" data-code-project-strip>
+            <button class="code-project-pill" type="button" data-code-project-open aria-label="Escolher projeto de código">
+              <svg viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v9H4V7Z" /></svg>
+              <span data-code-project-label>Trabalhar em um projeto</span>
+              <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+            </button>
+          </div>
           <div id="chatError" class="form-error chat-error"></div>
         </section>
 
@@ -433,10 +451,14 @@
     </div>
 
     <div id="codeProjectMenu" class="floating-menu code-project-menu hidden" role="menu" aria-label="Projeto de código">
+      <label class="project-menu-search">
+        <svg viewBox="0 0 24 24"><path d="m20 20-4.2-4.2M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+        <input id="codeProjectSearch" placeholder="Pesquisar projetos" />
+      </label>
       <div class="floating-section">
-        <strong>Projeto ativo</strong>
         <div id="codeProjectChoices" class="compact-choice-list"></div>
       </div>
+      <hr />
       <form id="codeGithubQuickForm" class="quick-menu-form" novalidate>
         <strong>Hub ou GitHub</strong>
         <input name="repoUrl" placeholder="https://github.com/usuario/repositorio" required />
