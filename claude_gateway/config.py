@@ -75,7 +75,13 @@ class Settings:
     trusted_hosts: tuple[str, ...] = ("*",)
     admin_trusted_ips: tuple[str, ...] = ()
     trust_proxy_headers: bool = False
-    cors_allowed_origins: tuple[str, ...] = ("http://127.0.0.1:8787", "http://localhost:8787")
+    cors_allowed_origins: tuple[str, ...] = (
+        "https://claude-code-api.squareweb.app",
+        "http://127.0.0.1:8787",
+        "http://localhost:8787",
+    )
+    expose_openapi: bool = False
+    expose_detailed_health: bool = False
     mercado_pago_access_token: str = ""
     mercado_pago_public_url: str = ""
 
@@ -146,8 +152,10 @@ class Settings:
             trust_proxy_headers=_bool_env("TRUST_PROXY_HEADERS", False),
             cors_allowed_origins=_csv_env(
                 "CORS_ALLOWED_ORIGINS",
-                "http://127.0.0.1:8787,http://localhost:8787",
+                "https://claude-code-api.squareweb.app,http://127.0.0.1:8787,http://localhost:8787",
             ),
+            expose_openapi=_bool_env("EXPOSE_OPENAPI", False),
+            expose_detailed_health=_bool_env("EXPOSE_DETAILED_HEALTH", False),
             mercado_pago_access_token=os.getenv("MERCADO_PAGO_ACCESS_TOKEN", ""),
             mercado_pago_public_url=os.getenv("MERCADO_PAGO_PUBLIC_URL", ""),
             economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "claude-code-economy"),

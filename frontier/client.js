@@ -10,6 +10,9 @@ let serverHistory = [];
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
+let apiSecretsVisible = false;
+
+const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 
 const promptSuggestions = {
   code: {
@@ -65,7 +68,49 @@ const promptSuggestions = {
 };
 
 function account() {
-  return ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
+  const current = ClaudeApp.accounts().find((item) => item.id === currentAccountId) || null;
+  if (!current) return null;
+  const apiToken = sessionApiTokenFor(current.id);
+  return apiToken ? { ...current, apiToken } : current;
+}
+
+function sessionApiTokens() {
+  try {
+    return JSON.parse(sessionStorage.getItem(CLIENT_API_TOKEN_SESSION_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveSessionApiTokens(tokens) {
+  sessionStorage.setItem(CLIENT_API_TOKEN_SESSION_KEY, JSON.stringify(tokens));
+}
+
+function sessionApiTokenFor(accountId) {
+  if (!accountId) return "";
+  return sessionApiTokens()[accountId] || "";
+}
+
+function rememberSessionApiToken(accountId, apiToken) {
+  if (!accountId || !apiToken) return;
+  saveSessionApiTokens({ ...sessionApiTokens(), [accountId]: apiToken });
+}
+
+function forgetSessionApiToken(accountId) {
+  const tokens = sessionApiTokens();
+  if (accountId) delete tokens[accountId];
+  saveSessionApiTokens(tokens);
+}
+
+function withoutApiToken(accountData) {
+  const { apiToken, ...safeAccount } = accountData;
+  return safeAccount;
+}
+
+function stripStoredAccountTokens() {
+  const accounts = ClaudeApp.accounts();
+  if (!accounts.some((item) => item.apiToken)) return;
+  ClaudeApp.saveAccounts(accounts.map(withoutApiToken));
 }
 
 function openAuthModal(tab = "clientLoginForm") {
@@ -160,14 +205,19 @@ function updateModelButtons() {
 
 function loadApiForm() {
   const settings = ClaudeApp.apiSettings();
+  const current = account();
   const form = document.querySelector("#apiForm");
   form.elements.baseUrl.value = settings.baseUrl;
-  form.elements.token.value = settings.token;
+  form.elements.token.value = settings.token || current?.apiToken || "";
   form.elements.model.value = settings.model;
   document.querySelector("#heroModel").value = settings.model;
   document.querySelector("#bottomModel").value = settings.model;
   updateModelButtons();
   renderApiInstallGuide();
+}
+
+function activeApiToken() {
+  return account()?.apiToken || ClaudeApp.apiSettings().token;
 }
 
 function shellQuote(value) {
@@ -194,6 +244,19 @@ function apiConfigForCurrentUser() {
     plan: ClaudeApp.planDisplayName(current?.plan),
     hasAccount: Boolean(current?.apiToken),
   };
+}
+
+function maskSecret(value) {
+  const text = String(value || "");
+  if (!text || text === "TOKEN_DA_SUA_CONTA") return "TOKEN_DA_SUA_CONTA";
+  if (text.length <= 12) return "••••••••";
+  return `${text.slice(0, 6)}••••••••${text.slice(-4)}`;
+}
+
+function redactSecret(text, secret) {
+  const value = String(secret || "");
+  if (!value || value === "TOKEN_DA_SUA_CONTA") return text;
+  return String(text).replaceAll(value, maskSecret(value));
 }
 
 function accountInitial(current) {
@@ -418,9 +481,10 @@ function openAiEnvCommand(config) {
   return `export OPENAI_API_KEY=${shellQuote(config.token)}`;
 }
 
-function renderCodeBlock(title, code) {
+function renderCodeBlock(title, code, displayCode = code) {
   const escapedTitle = ClaudeApp.escapeHtml(title);
   const escapedCode = ClaudeApp.escapeHtml(code);
+  const escapedDisplayCode = ClaudeApp.escapeHtml(displayCode);
   return `
     <article class="api-step">
       <div class="api-step-head">
@@ -429,13 +493,14 @@ function renderCodeBlock(title, code) {
           <svg viewBox="0 0 24 24"><path d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.5L16.5 4H8Z" /><path d="M16 4v4h4M4 12v6a2 2 0 0 0 2 2h6" /></svg>
         </button>
       </div>
-      <textarea class="api-command-box" readonly spellcheck="false" aria-label="${escapedTitle}">${escapedCode}</textarea>
+      <textarea class="api-command-box" readonly spellcheck="false" aria-label="${escapedTitle}">${escapedDisplayCode}</textarea>
     </article>
   `;
 }
 
-function renderPrimaryCommand(code) {
+function renderPrimaryCommand(code, displayCode = code) {
   const escapedCode = ClaudeApp.escapeHtml(code);
+  const escapedDisplayCode = ClaudeApp.escapeHtml(displayCode);
   return `
     <section class="api-primary-command">
       <div class="api-primary-head">
@@ -447,7 +512,7 @@ function renderPrimaryCommand(code) {
           <svg viewBox="0 0 24 24"><path d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.5L16.5 4H8Z" /><path d="M16 4v4h4M4 12v6a2 2 0 0 0 2 2h6" /></svg>
         </button>
       </div>
-      <textarea class="api-command-box api-command-box-primary" readonly spellcheck="false" aria-label="Comando para terminal">${escapedCode}</textarea>
+      <textarea class="api-command-box api-command-box-primary" readonly spellcheck="false" aria-label="Comando para terminal">${escapedDisplayCode}</textarea>
     </section>
   `;
 }
@@ -484,9 +549,12 @@ function renderApiInstallGuide() {
   const loginHint = config.hasAccount
     ? "Configuracao pronta para esta conta."
     : "Entre em uma conta ativa para gerar a configuracao personalizada.";
+  const displayToken = apiSecretsVisible ? config.token : maskSecret(config.token);
+  const displayValue = (code) => (apiSecretsVisible ? code : redactSecret(code, config.token));
+  const revealLabel = apiSecretsVisible ? "Ocultar token" : "Revelar token";
 
   guide.innerHTML = `
-    ${renderPrimaryCommand(sessionCommand)}
+    ${renderPrimaryCommand(sessionCommand, displayValue(sessionCommand))}
     <section class="api-summary">
       <div>
         <span class="overline">Acesso da conta</span>
@@ -495,7 +563,8 @@ function renderApiInstallGuide() {
       <div class="api-kv">
         <code>URL da API: ${ClaudeApp.escapeHtml(config.baseUrl)}</code>
         <code>Plano: ${ClaudeApp.escapeHtml(config.plan)}</code>
-        <code>API Key: ${ClaudeApp.escapeHtml(config.token)}</code>
+        <code>API Key: ${ClaudeApp.escapeHtml(displayToken)}</code>
+        <button type="button" class="secondary" data-api-secret-toggle>${revealLabel}</button>
       </div>
     </section>
     <ol class="api-steps">
@@ -505,11 +574,11 @@ function renderApiInstallGuide() {
       <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
     </ol>
     ${renderCodeBlock("ChatGPT/Codex: ~/.codex/config.toml", codexConfig)}
-    ${renderCodeBlock("ChatGPT/Codex: chave OpenAI-compatible", openAiEnv)}
-    ${renderCodeBlock("ChatGPT/Codex: testar Responses API", openAiCurlTest)}
-    ${renderCodeBlock("Instalador Python com pergunta", installCommand)}
-    ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand)}
-    ${renderCodeBlock("Testar conexão", curlTest)}
+    ${renderCodeBlock("ChatGPT/Codex: chave OpenAI-compatible", openAiEnv, displayValue(openAiEnv))}
+    ${renderCodeBlock("ChatGPT/Codex: testar Responses API", openAiCurlTest, displayValue(openAiCurlTest))}
+    ${renderCodeBlock("Instalador Python com pergunta", installCommand, displayValue(installCommand))}
+    ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand, displayValue(settingsCommand))}
+    ${renderCodeBlock("Testar conexão", curlTest, displayValue(curlTest))}
   `;
 }
 
@@ -555,7 +624,7 @@ async function supportRequest(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.token}`,
+      Authorization: `Bearer ${activeApiToken()}`,
       ...(options.headers || {}),
     },
   });
@@ -582,7 +651,7 @@ async function customerRequest(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${current?.apiToken || settings.token}`,
+      Authorization: `Bearer ${activeApiToken()}`,
       ...(options.headers || {}),
     },
   });
@@ -602,24 +671,23 @@ async function customerRequest(path, options = {}) {
 }
 
 function saveServerAccount(accountData) {
+  rememberSessionApiToken(accountData.id, accountData.apiToken);
+  const safeAccount = withoutApiToken(accountData);
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex(
-    (item) => item.id === accountData.id || item.login === accountData.login,
+    (item) => item.id === safeAccount.id || item.login === safeAccount.login,
   );
   if (index >= 0) {
-    accounts[index] = { ...accounts[index], ...accountData };
+    accounts[index] = withoutApiToken({ ...accounts[index], ...safeAccount });
   } else {
-    accounts.push(accountData);
+    accounts.push(safeAccount);
   }
   ClaudeApp.saveAccounts(accounts);
-  return ClaudeApp.accounts().find((item) => item.id === accountData.id) || accountData;
+  return { ...safeAccount, apiToken: accountData.apiToken };
 }
 
 function syncCustomerApiToken(current) {
   if (!current?.apiToken) return;
-  const settings = ClaudeApp.apiSettings();
-  if (settings.token === current.apiToken) return;
-  ClaudeApp.saveApiSettings({ ...settings, token: current.apiToken });
   loadApiForm();
 }
 
@@ -774,6 +842,9 @@ function renderAccount() {
 
 function setPanel(panelId) {
   closeFloatingMenus();
+  if (panelId !== "searchPanel") {
+    document.querySelector("#searchInput")?.blur();
+  }
   document.querySelectorAll(".client-panel").forEach((panel) => panel.classList.remove("active"));
   document.querySelector(`#${panelId}`)?.classList.add("active");
   document.querySelectorAll(".icon-rail [data-panel]").forEach((button) => {
@@ -820,7 +891,7 @@ async function conversationRequest(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.token}`,
+      Authorization: `Bearer ${activeApiToken()}`,
       ...(options.headers || {}),
     },
   });
@@ -949,7 +1020,7 @@ async function callGateway(selectedModel, messages, onText) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.token}`,
+      Authorization: `Bearer ${activeApiToken()}`,
     },
     body: JSON.stringify({
       model: selectedModel,
@@ -1763,9 +1834,11 @@ document.querySelector("#bottomComposer").addEventListener("submit", async (even
 document.querySelector("#apiForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const current = account();
+  const manualToken = values.token === current?.apiToken ? "" : values.token;
   ClaudeApp.saveApiSettings({
     baseUrl: values.baseUrl || "http://127.0.0.1:8787",
-    token: values.token || "local-dev-token",
+    token: manualToken || "",
     model: values.model || ClaudeApp.apiSettings().model,
   });
   fillModelSelects();
@@ -1773,6 +1846,13 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
 });
 
 document.querySelector("#apiInstallGuide").addEventListener("click", async (event) => {
+  const toggle = event.target.closest("[data-api-secret-toggle]");
+  if (toggle) {
+    if (!apiSecretsVisible && !window.confirm("Revelar o token completo nesta tela?")) return;
+    apiSecretsVisible = !apiSecretsVisible;
+    renderApiInstallGuide();
+    return;
+  }
   const button = event.target.closest("[data-copy-value]");
   if (!button) return;
   const originalSvg = button.innerHTML;
@@ -1897,6 +1977,7 @@ document.querySelector("#artifactStartModal").addEventListener("click", (event) 
 document.querySelector("#clientLogout").addEventListener("click", async () => {
   await saveConversation();
   stopSupportPolling();
+  forgetSessionApiToken(currentAccountId);
   currentAccountId = null;
   activeConversationId = null;
   serverHistory = [];
@@ -1964,6 +2045,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 fillModelSelects();
+stripStoredAccountTokens();
 loadApiForm();
 renderSidePanels();
 renderSupport();

@@ -208,9 +208,6 @@ const ClaudeApp = (() => {
     const limit = calculateLimit(account.price, account.modelKey, account.manualLimit);
     return {
       ...account,
-      apiToken:
-        account.apiToken ||
-        `sk-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       modelKey: normalizeModelKey(account.modelKey),
       dailyLimit: limit.dailyLimit,
       computedDailyTokens: limit.computedDailyTokens,
@@ -263,9 +260,6 @@ const ClaudeApp = (() => {
   function makeAccount(values) {
     const account = {
       id: `acct_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      apiToken:
-        values.apiToken ||
-        `sk-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
       name: values.name.trim(),
       displayName: (values.displayName || values.name).trim(),
       login: values.login.trim(),
@@ -278,6 +272,7 @@ const ClaudeApp = (() => {
       usedToday: 0,
       createdAt: new Date().toISOString(),
     };
+    if (values.apiToken) account.apiToken = values.apiToken;
     return recalculateAccount(account);
   }
 

@@ -123,6 +123,22 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("claude-code-pro", model_ids)
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
+        self.assertNotIn("localhost", response.headers["content-security-policy"])
+        self.assertNotIn("127.0.0.1", response.headers["content-security-policy"])
+
+    def test_public_health_is_minimal_and_admin_health_has_details(self) -> None:
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+        admin_response = self.client.get("/v1/admin/health", headers=self.headers)
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertTrue(admin_response.json()["openrouter_configured"])
+        self.assertIn("cost_target", admin_response.json())
+
+    def test_openapi_is_not_public_by_default(self) -> None:
+        response = self.client.get("/openapi.json")
+        self.assertEqual(response.status_code, 404)
 
     def test_admin_login_is_checked_on_server(self) -> None:
         settings = make_settings()
@@ -393,6 +409,24 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "http://127.0.0.1:8787")
+
+    def test_cors_allows_production_origin_by_default(self) -> None:
+        app = create_app(settings=make_settings(), client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.options(
+            "/v1/messages",
+            headers={
+                "Origin": "https://claude-code-api.squareweb.app",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "https://claude-code-api.squareweb.app",
+        )
 
     def test_trusted_admin_ip_does_not_bypass_non_admin_routes(self) -> None:
         settings = make_settings()

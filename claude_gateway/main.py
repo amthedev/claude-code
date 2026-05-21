@@ -66,7 +66,14 @@ def create_app(
     openai_helper_factory: Callable[[Settings], OpenAIHelperClient] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
-    app = FastAPI(title="Claude Code", version="0.1.0", docs_url=None, redoc_url=None)
+    openapi_url = "/openapi.json" if resolved_settings.expose_openapi else None
+    app = FastAPI(
+        title="Claude Code",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=openapi_url,
+    )
     app.state.settings = resolved_settings
     app.state.rate_limiter = InMemoryRateLimiter()
     app.state.usage = UsageStore()
@@ -100,6 +107,16 @@ def create_app(
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
+        if not app.state.settings.expose_detailed_health:
+            return {"status": "ok"}
+        return _detailed_health(app)
+
+    @app.get("/v1/admin/health")
+    async def admin_health(request: Request) -> dict[str, Any]:
+        _require_admin(request, app.state.settings)
+        return _detailed_health(app)
+
+    def _detailed_health(app: FastAPI) -> dict[str, Any]:
         return {
             "status": "ok",
             "openrouter_configured": bool(app.state.settings.openrouter_api_key),
