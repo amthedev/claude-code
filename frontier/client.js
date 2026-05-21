@@ -8,6 +8,7 @@ let pendingAttachments = [];
 let activeConversationId = null;
 let activeChatSessionKey = `chat_${Date.now()}`;
 let serverHistory = [];
+let activeProjectId = localStorage.getItem("claude_frontier_active_project") || "";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -81,6 +82,10 @@ function account() {
   if (!current) return null;
   const apiToken = sessionApiTokenFor(current.id);
   return apiToken ? { ...current, apiToken } : current;
+}
+
+function activeAccountId() {
+  return account()?.id || currentAccountId || "";
 }
 
 function sessionApiTokens() {
@@ -1392,15 +1397,22 @@ async function loadServerHistory() {
     return;
   }
 
+  serverHistory = localHistoryForCurrentAccount();
+  renderSidePanels();
+
   try {
     const data = await conversationRequest("/v1/conversations");
-    serverHistory = (data.data || []).map((item) => ({
-      ...item,
-      title: repairDuplicatedText(item.title),
-    }));
+    serverHistory = mergeConversationLists(
+      (data.data || []).map((item) => ({
+        ...item,
+        title: repairDuplicatedText(item.title),
+      })),
+      localHistoryForCurrentAccount(),
+    );
+    saveLocalHistory(serverHistory);
     renderSidePanels();
   } catch {
-    serverHistory = [];
+    serverHistory = localHistoryForCurrentAccount();
     renderSidePanels();
   }
 }
@@ -1451,18 +1463,72 @@ function toTitleCase(value) {
 
 function upsertHistoryConversation(conversation) {
   if (!conversation?.id) return;
+  const localMatch = localHistoryForCurrentAccount().find((item) => item.id === conversation.id);
+  const mergedConversation = {
+    ...localMatch,
+    ...conversation,
+    accountId: activeAccountId(),
+    messages: conversation.messages || localMatch?.messages || [],
+  };
   const index = serverHistory.findIndex((item) => item.id === conversation.id);
   if (index >= 0) {
-    serverHistory[index] = { ...serverHistory[index], ...conversation };
+    serverHistory[index] = { ...serverHistory[index], ...mergedConversation };
   } else {
-    serverHistory.unshift(conversation);
+    serverHistory.unshift(mergedConversation);
   }
   serverHistory.sort(
     (left, right) =>
       new Date(right.updatedAt || right.createdAt).getTime() -
       new Date(left.updatedAt || left.createdAt).getTime(),
   );
+  saveLocalHistory(serverHistory);
   renderSidePanels();
+}
+
+function localHistoryForCurrentAccount() {
+  const accountId = activeAccountId();
+  if (!accountId) return [];
+  return ClaudeApp.history()
+    .filter((item) => item.accountId === accountId)
+    .map((item) => ({
+      ...item,
+      title: repairDuplicatedText(item.title || "Nova conversa"),
+      messages: Array.isArray(item.messages) ? item.messages : [],
+    }));
+}
+
+function saveLocalHistory(conversations) {
+  const accountId = activeAccountId();
+  if (!accountId) return;
+  const others = ClaudeApp.history().filter((item) => item.accountId !== accountId);
+  const current = mergeConversationLists(conversations, localHistoryForCurrentAccount())
+    .filter((item) => item.accountId === accountId)
+    .slice(0, 80);
+  ClaudeApp.saveHistory([...current, ...others].slice(0, 240));
+}
+
+function removeLocalHistoryConversation(conversationId) {
+  ClaudeApp.saveHistory(ClaudeApp.history().filter((item) => item.id !== conversationId));
+}
+
+function mergeConversationLists(primary, fallback) {
+  const byId = new Map();
+  [...fallback, ...primary].forEach((item) => {
+    if (!item?.id) return;
+    const previous = byId.get(item.id) || {};
+    byId.set(item.id, {
+      ...previous,
+      ...item,
+      accountId: item.accountId || previous.accountId || activeAccountId(),
+      title: repairDuplicatedText(item.title || previous.title || "Nova conversa"),
+      messages: item.messages?.length ? item.messages : previous.messages || [],
+    });
+  });
+  return [...byId.values()].sort(
+    (left, right) =>
+      new Date(right.updatedAt || right.createdAt).getTime() -
+      new Date(left.updatedAt || left.createdAt).getTime(),
+  );
 }
 
 function optimisticActiveConversation() {
@@ -1512,6 +1578,10 @@ async function saveConversationSnapshot(
     ) {
       activeConversationId = data.conversation.id;
     }
+    if (optimistic.id.startsWith("local_") && data.conversation.id !== optimistic.id) {
+      serverHistory = serverHistory.filter((item) => item.id !== optimistic.id);
+      removeLocalHistoryConversation(optimistic.id);
+    }
     upsertHistoryConversation(data.conversation);
     showChatNotice("Conversa salva.");
     await loadServerHistory();
@@ -1543,7 +1613,9 @@ function renderConversationMessages(messages) {
 }
 
 async function openConversation(conversationId) {
-  const cached = serverHistory.find((item) => item.id === conversationId);
+  const cached =
+    serverHistory.find((item) => item.id === conversationId) ||
+    localHistoryForCurrentAccount().find((item) => item.id === conversationId);
   if (cached?.messages?.length) {
     activeConversationId = cached.id;
     activeChatSessionKey = newChatSessionKey();
@@ -1559,6 +1631,13 @@ async function openConversation(conversationId) {
     renderConversationMessages(data.conversation.messages || []);
     setPanel("chatPanel");
   } catch (error) {
+    if (cached?.messages?.length) {
+      activeConversationId = cached.id;
+      activeChatSessionKey = newChatSessionKey();
+      renderConversationMessages(cached.messages);
+      setPanel("chatPanel");
+      return;
+    }
     showChatNotice(error.message);
   }
 }
@@ -1724,7 +1803,10 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   const outgoingMessages = activeConversation
     .filter((item) => item.role === "user" || item.role === "assistant")
     .map((item) => ({ role: item.role, content: item.content }));
-  outgoingMessages[outgoingMessages.length - 1].content = buildMessageContent(prompt, attachments);
+  outgoingMessages[outgoingMessages.length - 1].content = buildMessageContent(
+    promptWithActiveProjectContext(prompt),
+    attachments,
+  );
   const assistantMessage = addMessage("assistant", "Pensando...");
 
   let answer = "";
@@ -1762,6 +1844,30 @@ function createArtifactIfUseful(prompt, answer) {
     createdAt: new Date().toISOString(),
   });
   ClaudeApp.saveArtifacts(artifacts.slice(0, 30));
+  renderSidePanels();
+}
+
+function activeProject() {
+  if (!activeProjectId) return null;
+  return ClaudeApp.projects().find((item) => item.id === activeProjectId) || null;
+}
+
+function activeProjectContextBlock() {
+  const project = activeProject();
+  if (!project) return "";
+  return [
+    `Projeto ativo: ${project.name}`,
+    project.context ? `Contexto do projeto: ${project.context}` : "",
+    "Use esse contexto para responder e manter continuidade neste projeto.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function promptWithActiveProjectContext(prompt) {
+  const context = activeProjectContextBlock();
+  if (!context) return prompt;
+  return `${context}\n\nMensagem do usuário:\n${prompt}`;
 }
 
 function historyDate(item) {
@@ -1840,13 +1946,13 @@ function renderSidePanels() {
     ? visibleProjects
         .map(
           (item) => `
-            <article class="project-card">
+            <button class="project-card ${item.id === activeProjectId ? "active" : ""}" type="button" data-project-id="${ClaudeApp.escapeHtml(item.id)}">
               <div>
                 <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
                 <p>${ClaudeApp.escapeHtml(item.context || "Sem contexto adicional.")}</p>
-                <span class="badge">Projeto local</span>
+                <span class="badge">${item.id === activeProjectId ? "Projeto ativo" : "Abrir no chat"}</span>
               </div>
-            </article>
+            </button>
           `,
         )
         .join("")
@@ -1861,14 +1967,43 @@ function renderSidePanels() {
     ? visibleArtifacts
         .map(
           (item) => `
-            <article class="artifact-card">
+            <button class="artifact-card" type="button" data-artifact-id="${ClaudeApp.escapeHtml(item.id)}">
               <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
               <p>${ClaudeApp.escapeHtml(item.body.slice(0, 180))}</p>
-            </article>
+            </button>
           `,
         )
         .join("")
     : `<div class="empty-workspace"><strong>${artifactQuery ? "Nenhum artefato encontrado." : "O que você vai construir com artefatos?"}</strong><p>${artifactQuery ? "Tente outra busca." : "Transforme apps, jogos, templates e ferramentas de ideias em realidade."}</p></div>`;
+}
+
+function openProject(projectId) {
+  const project = ClaudeApp.projects().find((item) => item.id === projectId);
+  if (!project) {
+    showChatNotice("Projeto não encontrado.");
+    return;
+  }
+  activeProjectId = project.id;
+  localStorage.setItem("claude_frontier_active_project", project.id);
+  clearActiveChat();
+  fillHeroPrompt(`No projeto ${project.name}, quero continuar daqui.`);
+  showChatNotice(`Projeto ativo: ${project.name}`);
+  renderSidePanels();
+}
+
+function openArtifact(artifactId) {
+  const artifact = ClaudeApp.artifacts().find((item) => item.id === artifactId);
+  if (!artifact) {
+    showChatNotice("Artefato não encontrado.");
+    return;
+  }
+  clearActiveChat();
+  activeConversationId = null;
+  activeChatSessionKey = newChatSessionKey();
+  addMessage("user", `Abrir artefato: ${artifact.title}`);
+  addMessage("assistant", artifact.body || "Artefato vazio.");
+  setPanel("chatPanel");
+  showChatNotice("Artefato aberto no chat.");
 }
 
 function searchLocal(query) {
@@ -1893,19 +2028,19 @@ function searchLocal(query) {
           ...conversationResults.map((item) => commandItemMarkup(item)),
           ...projects.map(
             (item) => `
-              <button class="command-option" type="button" data-open-panel="projectsPanel">
+              <button class="command-option" type="button" data-project-id="${ClaudeApp.escapeHtml(item.id)}">
                 <span class="command-type">Projeto</span>
                 <strong>${ClaudeApp.escapeHtml(item.name)}</strong>
-                <span>Projeto local</span>
+                <span>Abrir no chat</span>
               </button>
             `,
           ),
           ...artifacts.map(
             (item) => `
-              <button class="command-option" type="button" data-open-panel="artifactsPanel">
+              <button class="command-option" type="button" data-artifact-id="${ClaudeApp.escapeHtml(item.id)}">
                 <span class="command-type">Artefato</span>
                 <strong>${ClaudeApp.escapeHtml(item.title)}</strong>
-                <span>Artefato local</span>
+                <span>Abrir no chat</span>
               </button>
             `,
           ),
@@ -2405,10 +2540,30 @@ document.querySelector("#sidebarRecentList").addEventListener("click", (event) =
   if (item) openConversation(item.dataset.conversationId);
 });
 
+document.querySelector("#projectList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-project-id]");
+  if (item) openProject(item.dataset.projectId);
+});
+
+document.querySelector("#artifactList").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-artifact-id]");
+  if (item) openArtifact(item.dataset.artifactId);
+});
+
 document.querySelector("#searchResults").addEventListener("click", (event) => {
   const item = event.target.closest("[data-conversation-id]");
   if (item) {
     openConversation(item.dataset.conversationId);
+    return;
+  }
+  const project = event.target.closest("[data-project-id]");
+  if (project) {
+    openProject(project.dataset.projectId);
+    return;
+  }
+  const artifact = event.target.closest("[data-artifact-id]");
+  if (artifact) {
+    openArtifact(artifact.dataset.artifactId);
     return;
   }
   const panel = event.target.closest("[data-open-panel]");
@@ -2674,16 +2829,20 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
     return;
   }
   const projects = ClaudeApp.projects();
-  projects.unshift({
+  const project = {
     id: `project_${Date.now()}`,
     name: values.name,
     context: values.context,
     createdAt: new Date().toISOString(),
-  });
+  };
+  projects.unshift(project);
   ClaudeApp.saveProjects(projects);
   event.currentTarget.reset();
   closeProjectModal();
+  activeProjectId = project.id;
+  localStorage.setItem("claude_frontier_active_project", project.id);
   renderSidePanels();
+  openProject(project.id);
 });
 
 document.querySelector("#supportForm").addEventListener("submit", async (event) => {
@@ -2787,8 +2946,10 @@ async function logoutClient({ confirmOpenConversation = true } = {}) {
   currentAccountId = null;
   sessionStatusMessage = "";
   activeConversationId = null;
+  activeProjectId = "";
   serverHistory = [];
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
+  localStorage.removeItem("claude_frontier_active_project");
   activeConversation = [];
   document.querySelector("#chatThread").innerHTML = "";
   document.querySelector("#chatThread").classList.add("hidden");

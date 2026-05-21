@@ -1563,10 +1563,17 @@ code {
   border-color: var(--cloud-line);
   background: #fff;
   margin-bottom: 8px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .project-card .badge {
   justify-self: start;
+}
+
+.project-card.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--cloud-line));
+  background: #fff8f4;
 }
 
 .artifact-card,
@@ -1574,6 +1581,12 @@ code {
   max-width: 720px;
   border-color: var(--cloud-line);
   background: #fff;
+}
+
+.artifact-card {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
 }
 
 .empty-workspace {
