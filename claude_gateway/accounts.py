@@ -315,6 +315,11 @@ class AccountStore:
                 raise HTTPException(status_code=404, detail="Account not found.")
             account = _account_from_row(row)
             purchase = _purchase_for_plan(account, plan, self.settings)
+            payer_document = _normalize_document(
+                values.get("payerDocument") or values.get("payer_document") or values.get("cpf")
+            )
+            if payer_document:
+                purchase["payerDocument"] = payer_document
             db.execute(
                 """
                 INSERT INTO purchases (
@@ -942,6 +947,13 @@ def _normalize_model_key(value: Any) -> str:
     if "opus" in raw or "ultra" in raw:
         return "opus"
     return "sonnet"
+
+
+def _normalize_document(value: Any) -> str:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    if len(digits) in {11, 14}:
+        return digits
+    return ""
 
 
 def _purchase_status_from_payment(status: str) -> str:

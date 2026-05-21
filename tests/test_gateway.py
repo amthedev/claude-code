@@ -73,6 +73,8 @@ class FakeHttpResponse:
 
 
 class FakeMercadoPagoClient:
+    last_post_json: dict[str, Any] | None = None
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
 
@@ -83,6 +85,7 @@ class FakeMercadoPagoClient:
         return None
 
     async def post(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+        self.__class__.last_post_json = kwargs.get("json")
         return FakeHttpResponse(
             {
                 "id": "pref_test",
@@ -551,13 +554,22 @@ class GatewayTestCase(unittest.TestCase):
                 purchase = client.post(
                     "/v1/billing/purchases",
                     headers=customer_headers,
-                    json={"planId": "pro"},
+                    json={"planId": "pro", "payerDocument": "123.456.789-09"},
                 )
             self.assertEqual(purchase.status_code, 200)
             purchase_id = purchase.json()["purchase"]["id"]
             self.assertEqual(purchase.json()["purchase"]["status"], "pending")
             self.assertEqual(purchase.json()["purchase"]["mercadoPagoPreferenceId"], "pref_test")
             self.assertIn("mercadopago.com.br", purchase.json()["purchase"]["checkoutUrl"])
+            preference_payload = FakeMercadoPagoClient.last_post_json or {}
+            self.assertEqual(preference_payload["payer"]["name"], "Cliente")
+            self.assertEqual(preference_payload["payer"]["surname"], "Upgrade")
+            self.assertEqual(
+                preference_payload["payer"]["identification"],
+                {"type": "CPF", "number": "12345678909"},
+            )
+            self.assertEqual(preference_payload["payment_methods"]["installments"], 1)
+            self.assertFalse(preference_payload["binary_mode"])
 
             admin_purchases = client.get("/v1/admin/purchases", headers=self.headers)
             self.assertEqual(admin_purchases.status_code, 200)

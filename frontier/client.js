@@ -1005,6 +1005,17 @@ function focusHighlightedPlan() {
   });
 }
 
+function promptPaymentDocument() {
+  const value = window.prompt("Digite o CPF ou CNPJ do pagador para continuar no Mercado Pago:");
+  if (value === null) return null;
+  const digits = String(value || "").replace(/\D+/g, "");
+  if (![11, 14].includes(digits.length)) {
+    showChatNotice("Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.");
+    return null;
+  }
+  return digits;
+}
+
 async function loadPurchases() {
   if (!account()?.apiToken) return;
   try {
@@ -1029,10 +1040,18 @@ async function requestPlanPurchase(planId, button = null) {
   } else {
     showChatNotice(`Criando pedido do plano ${plan.name}...`);
   }
+  const payerDocument = promptPaymentDocument();
+  if (!payerDocument) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+    return;
+  }
   try {
     const data = await customerRequest("/v1/billing/purchases", {
       method: "POST",
-      body: JSON.stringify({ planId }),
+      body: JSON.stringify({ planId, payerDocument }),
     });
     const purchases = ClaudeApp.purchases();
     purchases.unshift(data.purchase);

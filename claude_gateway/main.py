@@ -664,31 +664,7 @@ async def _create_mercado_pago_preference(
         raise HTTPException(status_code=503, detail="Configure MERCADO_PAGO_ACCESS_TOKEN to sell plans.")
 
     base_url = _public_base_url(request, app.state.settings)
-    payload = {
-        "items": [
-            {
-                "id": purchase["planId"],
-                "title": f"Claude {purchase['plan']}",
-                "description": f"Plano {purchase['plan']} do Claude",
-                "quantity": 1,
-                "currency_id": "BRL",
-                "unit_price": float(purchase["price"]),
-            }
-        ],
-        "payer": {
-            "name": purchase["name"],
-            "email": purchase["login"],
-        },
-        "external_reference": purchase["id"],
-        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
-        "back_urls": {
-            "success": f"{base_url}/app?payment=success",
-            "failure": f"{base_url}/app?payment=failure",
-            "pending": f"{base_url}/app?payment=pending",
-        },
-        "auto_return": "approved",
-        "statement_descriptor": "CLAUDE",
-    }
+    payload = _mercado_pago_preference_payload(base_url, purchase)
 
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
@@ -709,6 +685,73 @@ async def _create_mercado_pago_preference(
     if not data.get("id") or not data.get("init_point"):
         raise HTTPException(status_code=502, detail="Mercado Pago did not return a checkout URL.")
     return data
+
+
+def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "items": [
+            {
+                "id": purchase["planId"],
+                "title": f"Claude {purchase['plan']}",
+                "description": f"Plano {purchase['plan']} do Claude",
+                "quantity": 1,
+                "currency_id": "BRL",
+                "unit_price": float(purchase["price"]),
+            }
+        ],
+        "payer": _mercado_pago_payer(purchase),
+        "external_reference": purchase["id"],
+        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
+        "back_urls": {
+            "success": f"{base_url}/app?payment=success",
+            "failure": f"{base_url}/app?payment=failure",
+            "pending": f"{base_url}/app?payment=pending",
+        },
+        "auto_return": "approved",
+        "binary_mode": False,
+        "payment_methods": {
+            "installments": 1,
+            "default_installments": 1,
+        },
+        "statement_descriptor": "CLAUDE",
+        "metadata": {
+            "account_id": purchase["accountId"],
+            "plan_id": purchase["planId"],
+            "purchase_id": purchase["id"],
+        },
+    }
+    return payload
+
+
+def _mercado_pago_payer(purchase: dict[str, Any]) -> dict[str, Any]:
+    first_name, surname = _split_payer_name(purchase.get("name"))
+    payer = {
+        "name": first_name,
+        "surname": surname,
+        "email": purchase["login"],
+    }
+    document = _payer_document(purchase.get("payerDocument"))
+    if document:
+        payer["identification"] = document
+    return payer
+
+
+def _split_payer_name(name: Any) -> tuple[str, str]:
+    parts = [part for part in str(name or "").strip().split() if part]
+    if not parts:
+        return "Cliente", "Claude"
+    if len(parts) == 1:
+        return parts[0][:40], "Claude"
+    return parts[0][:40], " ".join(parts[1:])[:80]
+
+
+def _payer_document(value: Any) -> dict[str, str] | None:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    if len(digits) == 11:
+        return {"type": "CPF", "number": digits}
+    if len(digits) == 14:
+        return {"type": "CNPJ", "number": digits}
+    return None
 
 
 def _mercado_pago_payment_id(request: Request, payload: dict[str, Any]) -> str:
