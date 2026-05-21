@@ -19,7 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .accounts import AccountStore
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
-from .anthropic import build_text_message
+from .anthropic import build_text_message, clean_model_text
 from .config import Settings, get_settings
 from .conversations import ConversationStore
 from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
@@ -865,6 +865,9 @@ def _with_public_model_identity(
         f"Match Anthropic Claude Code response behavior as closely as possible: be helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
+        f"tables when they make comparison easier, and a warmer practical voice with concrete next steps. "
+        f"Do not over-format tiny answers, and never put Markdown markers around every word. "
         f"Act with strong execution autonomy: when the user has given a reasonable goal, choose sensible "
         f"project-consistent defaults and proceed instead of asking them to pick between options. State "
         f"brief assumptions only when helpful. Ask a clarifying question only when blocked by missing "
@@ -1153,9 +1156,9 @@ def _stream_overlap_length(left: str, right: str) -> int:
 def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamTextNormalizer) -> None:
     delta = payload.get("delta")
     if isinstance(delta, dict) and isinstance(delta.get("text"), str):
-        delta["text"] = normalizer.delta_for(delta["text"])
+        delta["text"] = normalizer.delta_for(clean_model_text(delta["text"], strip=False))
     elif isinstance(delta, str) and payload.get("type") == "response.output_text.delta":
-        payload["delta"] = normalizer.delta_for(delta)
+        payload["delta"] = normalizer.delta_for(clean_model_text(delta, strip=False))
 
     choices = payload.get("choices")
     if not isinstance(choices, list):
@@ -1169,11 +1172,11 @@ def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamT
             continue
         content = choice_delta.get("content")
         if isinstance(content, str):
-            choice_delta["content"] = normalizer.delta_for(content)
+            choice_delta["content"] = normalizer.delta_for(clean_model_text(content, strip=False))
         elif isinstance(content, list):
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-                    part["text"] = normalizer.delta_for(part["text"])
+                    part["text"] = normalizer.delta_for(clean_model_text(part["text"], strip=False))
 
 
 def _rewrite_stream_event_model(

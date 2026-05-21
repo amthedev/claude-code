@@ -116,16 +116,40 @@ function stripStoredAccountTokens() {
 }
 
 function repairDuplicatedToken(token) {
-  if (token.length >= 4 && token[0] === token[1]) {
-    const rest = token.slice(2);
-    const half = rest.length / 2;
-    if (Number.isInteger(half) && rest.slice(0, half) === rest.slice(half)) {
-      return `${token[0]}${rest.slice(0, half)}`;
-    }
+  let repaired = String(token || "");
+  for (let pass = 0; pass < 3; pass += 1) {
+    const next = repairDuplicatedTokenOnce(repaired);
+    if (next === repaired) return repaired;
+    repaired = next;
   }
+  return repaired;
+}
+
+function repairDuplicatedTokenOnce(token) {
+  if (token.length < 4) return token;
+  const folded = token.toLocaleLowerCase("pt-BR");
   if (token.length % 2 === 0) {
     const half = token.length / 2;
-    if (token.slice(0, half) === token.slice(half)) return token.slice(0, half);
+    if (folded.slice(0, half) === folded.slice(half)) return token.slice(0, half);
+  }
+  for (let size = Math.min(4, Math.floor(token.length / 2)); size > 0; size -= 1) {
+    const fragment = folded.slice(0, size);
+    if (folded.startsWith(fragment + fragment)) return token.slice(size);
+  }
+  for (let size = Math.floor(token.length / 2); size > 1; size -= 1) {
+    const stem = token.slice(0, -size);
+    const suffix = token.slice(-size);
+    if (stem.length < Math.max(4, size + 1)) continue;
+    if (stem.toLocaleLowerCase("pt-BR").endsWith(suffix.toLocaleLowerCase("pt-BR"))) {
+      return stem;
+    }
+  }
+  if (
+    token.length >= 6 &&
+    folded.slice(-1) === folded.slice(-2, -1) &&
+    ["a", "e", "i", "o", "u"].includes(folded.slice(-1))
+  ) {
+    return token.slice(0, -1);
   }
   return token;
 }
@@ -133,7 +157,15 @@ function repairDuplicatedToken(token) {
 function repairDuplicatedText(text) {
   const value = String(text || "");
   if (!value) return value;
-  const tokens = value.split(/(\s+)/);
+  let current = value.replace(/(\*\*|__|\*|_)\s+\1/g, "$1");
+  for (let pass = 0; pass < 4; pass += 1) {
+    const previous = current;
+    current = current
+      .replace(/\b([\p{L}\p{N}]+)(\s+)\1\b/giu, "$1")
+      .replace(/\b([\p{L}\p{N}]{1,8})(\s+)(\1[\p{L}\p{N}]{2,})\b/giu, "$3");
+    if (current === previous) break;
+  }
+  const tokens = current.split(/(\s+)/);
   const repaired = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -145,6 +177,11 @@ function repairDuplicatedText(text) {
     if (nextToken && token.toLowerCase() === nextToken.toLowerCase()) {
       repaired.push(repairDuplicatedToken(token));
       index += 2;
+      continue;
+    }
+    const word = token.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}'’]+)([^\p{L}\p{N}]*)$/u);
+    if (word) {
+      repaired.push(`${word[1]}${repairDuplicatedToken(word[2])}${word[3]}`);
       continue;
     }
     repaired.push(repairDuplicatedToken(token));
@@ -960,12 +997,124 @@ function setPanel(panelId) {
   }
 }
 
+function renderInlineMarkdown(text) {
+  return ClaudeApp.escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+function renderMarkdownTable(lines) {
+  const rows = lines
+    .filter((line) => !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map((cell) => renderInlineMarkdown(cell.trim())),
+    );
+  if (!rows.length) return "";
+  const [head, ...body] = rows;
+  return `
+    <div class="message-table-wrap">
+      <table>
+        <thead><tr>${head.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead>
+        <tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderAssistantMarkdown(text) {
+  const cleaned = repairDuplicatedText(text);
+  const lines = cleaned.split(/\r?\n/);
+  const html = [];
+  let listItems = [];
+  let codeLines = [];
+  let tableLines = [];
+  let inCode = false;
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    html.push(`<ul>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
+    listItems = [];
+  };
+  const flushTable = () => {
+    if (!tableLines.length) return;
+    html.push(renderMarkdownTable(tableLines));
+    tableLines = [];
+  };
+
+  lines.forEach((line) => {
+    if (line.trim().startsWith("```")) {
+      if (inCode) {
+        html.push(`<pre><code>${ClaudeApp.escapeHtml(codeLines.join("\n"))}</code></pre>`);
+        codeLines = [];
+        inCode = false;
+      } else {
+        flushList();
+        flushTable();
+        inCode = true;
+      }
+      return;
+    }
+    if (inCode) {
+      codeLines.push(line);
+      return;
+    }
+    if (/^\s*\|.+\|\s*$/.test(line)) {
+      flushList();
+      tableLines.push(line);
+      return;
+    }
+    flushTable();
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    if (/^---+$/.test(trimmed)) {
+      flushList();
+      html.push("<hr />");
+      return;
+    }
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = Math.min(4, Math.max(3, heading[1].length));
+      html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      return;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    flushList();
+    html.push(`<p>${renderInlineMarkdown(trimmed)}</p>`);
+  });
+
+  flushList();
+  flushTable();
+  if (inCode) html.push(`<pre><code>${ClaudeApp.escapeHtml(codeLines.join("\n"))}</code></pre>`);
+  return html.join("");
+}
+
+function renderMessageNode(node, role, text) {
+  if (role === "assistant") {
+    node.innerHTML = renderAssistantMarkdown(text);
+    return;
+  }
+  node.textContent = text;
+}
+
 function addMessage(role, text) {
   const index = activeConversation.push({ role, content: text }) - 1;
   const thread = document.querySelector("#chatThread");
   const node = document.createElement("div");
   node.className = `message ${role}`;
-  node.textContent = text;
+  renderMessageNode(node, role, text);
   thread.appendChild(node);
   document.querySelector("#emptyState").classList.add("hidden");
   document.querySelector("#chatThread").classList.remove("hidden");
@@ -977,7 +1126,7 @@ function addMessage(role, text) {
 function updateMessage(message, text) {
   const nextText = text || "Pensando...";
   activeConversation[message.index].content = nextText;
-  message.node.textContent = nextText;
+  renderMessageNode(message.node, activeConversation[message.index].role, nextText);
   message.node.scrollIntoView({ block: "end" });
 }
 

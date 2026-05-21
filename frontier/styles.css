@@ -1135,18 +1135,120 @@ code {
   border-radius: 8px;
   padding: 10px 13px;
   line-height: 1.5;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .message.user {
   justify-self: end;
   background: #f1f0eb;
+  white-space: pre-wrap;
 }
 
 .message.assistant {
   justify-self: start;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(251, 250, 247, 0.32));
+  border-left: 3px solid color-mix(in srgb, var(--accent) 58%, #fff);
+}
+
+.message.assistant p,
+.message.assistant ul,
+.message.assistant table,
+.message.assistant pre {
+  margin: 0 0 12px;
+}
+
+.message.assistant p:last-child,
+.message.assistant ul:last-child,
+.message.assistant table:last-child,
+.message.assistant pre:last-child {
+  margin-bottom: 0;
+}
+
+.message.assistant h3,
+.message.assistant h4 {
+  margin: 16px 0 8px;
+  color: #9d4f32;
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 750;
+}
+
+.message.assistant h3:first-child,
+.message.assistant h4:first-child {
+  margin-top: 0;
+}
+
+.message.assistant strong {
+  color: #7e442f;
+  font-weight: 760;
+}
+
+.message.assistant ul {
+  padding-left: 20px;
+}
+
+.message.assistant li {
+  margin: 5px 0;
+}
+
+.message.assistant li::marker {
+  color: var(--accent);
+}
+
+.message.assistant hr {
+  height: 1px;
+  border: 0;
+  background: var(--cloud-line);
+  margin: 14px 0;
+}
+
+.message.assistant code {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--cloud-line));
+  background: #fff8f4;
+  color: #6d3928;
+  padding: 2px 5px;
+}
+
+.message.assistant pre {
+  overflow: auto;
+  border: 1px solid var(--cloud-line);
+  border-radius: 8px;
+  background: #24211d;
+  color: #fff8ee;
+  padding: 12px;
+}
+
+.message.assistant pre code {
+  border: 0;
   background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.message-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.message.assistant table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--cloud-line);
+  background: #fff;
+}
+
+.message.assistant th,
+.message.assistant td {
+  border-bottom: 1px solid var(--cloud-line);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.message.assistant th {
+  background: #f4eee8;
+  color: #7e442f;
+  font-weight: 750;
 }
 
 .bottom-composer {

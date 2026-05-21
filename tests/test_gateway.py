@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from claude_gateway.anthropic import clean_model_text
 from claude_gateway.config import Settings
 from claude_gateway.customers import _today, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
@@ -195,6 +196,17 @@ class GatewayTestCase(unittest.TestCase):
         text = asyncio.run(collect_stream_text(stream_events(payloads)))
 
         self.assertEqual(text, "How to become fluent in English")
+
+    def test_clean_model_text_repairs_fragmented_duplicate_words(self) -> None:
+        broken = (
+            "AAquiqui está está um um ** **plplanoano real realistaista e e pratic praticoo "
+            "para para fic ficarar flu fluenteente em em ingl inglêsês em em 33 meses meses"
+        )
+
+        self.assertEqual(
+            clean_model_text(broken),
+            "Aqui está um **plano realista e pratico para ficar fluente em inglês em 33 meses",
+        )
 
     def test_openapi_is_not_public_by_default(self) -> None:
         response = self.client.get("/openapi.json")
