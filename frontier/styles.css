@@ -1403,6 +1403,13 @@ code {
   background: #fff;
 }
 
+#apiPanel {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .panel-header h2 {
   margin: 4px 0 0;
   font-size: 26px;
