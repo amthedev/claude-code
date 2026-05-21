@@ -2344,6 +2344,39 @@ button.result-item {
   background: #f0efeb;
 }
 
+#attachMenu {
+  width: min(300px, calc(100vw - 24px));
+  padding: 7px;
+}
+
+#attachMenu button {
+  min-height: 42px;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 8px;
+  font-size: 14px;
+}
+
+#attachMenu button > span:first-child {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e2dc;
+  border-radius: 8px;
+  background: #f7f6f2;
+  color: #68635d;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+#attachMenu kbd {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
 .floating-menu button > span:first-child,
 .account-menu button > span:first-child {
   color: var(--cloud-muted);

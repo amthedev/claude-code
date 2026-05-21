@@ -432,7 +432,14 @@ function loadApiForm() {
 }
 
 function activeApiToken() {
-  return account()?.apiToken || ClaudeApp.apiSettings().token;
+  return (account()?.apiToken || ClaudeApp.apiSettings().token || "").trim();
+}
+
+function ensureCodeCustomerSession() {
+  if (account()?.active && activeApiToken()) return true;
+  openAuthForIntent("project", "clientLoginForm");
+  showChatNotice("Entre novamente para conectar projetos de código.");
+  return false;
 }
 
 function shellQuote(value) {
@@ -894,18 +901,17 @@ async function codeRequest(path, options = {}) {
 
 function saveServerAccount(accountData) {
   rememberSessionApiToken(accountData.id, accountData.apiToken);
-  const safeAccount = withoutApiToken(accountData);
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex(
-    (item) => item.id === safeAccount.id || item.login === safeAccount.login,
+    (item) => item.id === accountData.id || item.login === accountData.login,
   );
   if (index >= 0) {
-    accounts[index] = withoutApiToken({ ...accounts[index], ...safeAccount });
+    accounts[index] = { ...accounts[index], ...accountData };
   } else {
-    accounts.push(safeAccount);
+    accounts.push(accountData);
   }
   ClaudeApp.saveAccounts(accounts);
-  return { ...safeAccount, apiToken: accountData.apiToken };
+  return accountData;
 }
 
 function syncCustomerApiToken(current) {
@@ -1064,6 +1070,13 @@ async function requestPlanPurchase(planId, button = null) {
     }
     return;
   }
+  const checkoutWindow = window.open("about:blank", "_blank");
+  if (checkoutWindow) {
+    checkoutWindow.opener = null;
+    checkoutWindow.document.title = "Mercado Pago";
+    checkoutWindow.document.body.innerHTML =
+      "<p style=\"font-family: system-ui, sans-serif; padding: 24px; color: #333;\">Abrindo Mercado Pago...</p>";
+  }
   try {
     const data = await customerRequest("/v1/billing/purchases", {
       method: "POST",
@@ -1075,13 +1088,20 @@ async function requestPlanPurchase(planId, button = null) {
     pendingPlanId = "";
     pendingAuthIntent = "";
     renderBilling();
-    if (data.purchase.checkoutUrl) {
+    const checkoutUrl = data.purchase.checkoutUrl || data.purchase.sandboxCheckoutUrl || "";
+    if (checkoutUrl) {
       showChatNotice("Abrindo Mercado Pago...");
-      window.location.href = data.purchase.checkoutUrl;
+      if (checkoutWindow) {
+        checkoutWindow.location.href = checkoutUrl;
+      } else {
+        window.location.assign(checkoutUrl);
+      }
       return;
     }
-    showChatNotice("Pedido criado. Configure Mercado Pago para liberar checkout automático.");
+    if (checkoutWindow) checkoutWindow.close();
+    showChatNotice("Pedido criado, mas o Mercado Pago não retornou link de pagamento.");
   } catch (error) {
+    if (checkoutWindow) checkoutWindow.close();
     showChatNotice(error.message);
     if (button) {
       button.disabled = false;
@@ -2240,7 +2260,7 @@ function renderCodePanel() {
 }
 
 async function loadCodeWorkspaces() {
-  if (!account()?.active) {
+  if (!account()?.active || !activeApiToken()) {
     codeWorkspaces = [];
     renderCodePanel();
     return;
@@ -2265,6 +2285,7 @@ async function loadCodeWorkspaces() {
 }
 
 async function loadCodeFiles(workspaceId) {
+  if (!ensureCodeCustomerSession()) return;
   activeCodeWorkspaceId = workspaceId;
   localStorage.setItem("claude_frontier_active_code_workspace", workspaceId);
   activeCodeFilePath = "";
@@ -2330,6 +2351,7 @@ async function saveCodeFile() {
 
 async function downloadCodeWorkspace() {
   if (!activeCodeWorkspaceId) return;
+  if (!ensureCodeCustomerSession()) return;
   try {
     const settings = ClaudeApp.apiSettings();
     const response = await fetch(
@@ -2354,6 +2376,7 @@ async function uploadCodeWorkspaceFromFile(file, name = "") {
     showChatNotice("Escolha um ZIP.");
     return null;
   }
+  if (!ensureCodeCustomerSession()) return null;
   setActiveChatMode("code");
   setPanel("chatPanel");
   showChatNotice("Subindo projeto...");
@@ -2988,6 +3011,7 @@ document.querySelector("#codeProjectMenu").addEventListener("click", async (even
   if (!actionButton) return;
   closeFloatingMenus();
   if (actionButton.dataset.codeProjectAction === "upload") {
+    if (!ensureCodeCustomerSession()) return;
     setActiveChatMode("code");
     document.querySelector("#codeZipInput")?.click();
     return;
@@ -3008,6 +3032,7 @@ document.querySelector("#codeGithubQuickForm").addEventListener("submit", async 
     form.elements.repoUrl.focus();
     return;
   }
+  if (!ensureCodeCustomerSession()) return;
   closeFloatingMenus();
   setActiveChatMode("code");
   setPanel("chatPanel");
@@ -3296,6 +3321,10 @@ document.querySelector("#githubImportForm").addEventListener("submit", async (ev
   event.preventDefault();
   const form = event.currentTarget;
   const values = Object.fromEntries(new FormData(form).entries());
+  if (!ensureCodeCustomerSession()) {
+    document.querySelector("#codeStatus").textContent = "Entre novamente para importar repositórios.";
+    return;
+  }
   document.querySelector("#codeStatus").textContent = "Importando repositório...";
   try {
     const data = await codeRequest("/workspaces/github", {
@@ -3322,6 +3351,10 @@ document.querySelector("#zipUploadForm").addEventListener("submit", async (event
     document.querySelector("#codeStatus").textContent = "Escolha um ZIP.";
     return;
   }
+  if (!ensureCodeCustomerSession()) {
+    document.querySelector("#codeStatus").textContent = "Entre novamente para subir ZIP.";
+    return;
+  }
   document.querySelector("#codeStatus").textContent = "Subindo ZIP...";
   const workspace = await uploadCodeWorkspaceFromFile(file, form.elements.name.value || "");
   if (workspace) document.querySelector("#codeStatus").textContent = "ZIP importado.";
@@ -3332,6 +3365,10 @@ document.querySelector("#codeZipInput").addEventListener("change", async (event)
   const input = event.currentTarget;
   const file = input.files?.[0];
   if (!file) return;
+  if (!ensureCodeCustomerSession()) {
+    input.value = "";
+    return;
+  }
   await uploadCodeWorkspaceFromFile(file);
   input.value = "";
 });
@@ -3446,7 +3483,11 @@ async function logoutClient({ confirmOpenConversation = true } = {}) {
   }
   await saveConversation();
   stopSupportPolling();
-  forgetSessionApiToken(currentAccountId);
+  const signedOutAccountId = currentAccountId;
+  forgetSessionApiToken(signedOutAccountId);
+  ClaudeApp.saveAccounts(
+    ClaudeApp.accounts().map((item) => (item.id === signedOutAccountId ? withoutApiToken(item) : item)),
+  );
   currentAccountId = null;
   sessionStatusMessage = "";
   activeConversationId = null;
@@ -3530,7 +3571,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 fillModelSelects();
-stripStoredAccountTokens();
 repairStoredDuplicateArtifacts();
 loadApiForm();
 renderSidePanels();
