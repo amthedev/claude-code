@@ -11,6 +11,7 @@ let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
 let apiSecretsVisible = false;
+let highlightedPlanId = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 
@@ -554,31 +555,34 @@ function renderApiInstallGuide() {
   const revealLabel = apiSecretsVisible ? "Ocultar token" : "Revelar token";
 
   guide.innerHTML = `
-    ${renderPrimaryCommand(sessionCommand, displayValue(sessionCommand))}
     <section class="api-summary">
       <div>
         <span class="overline">Acesso da conta</span>
         <strong>${ClaudeApp.escapeHtml(loginHint)}</strong>
       </div>
+      <ol class="api-steps compact">
+        <li>Copie o comando abaixo.</li>
+        <li>Cole no terminal.</li>
+        <li>Abra o Claude Code e use o modelo escolhido.</li>
+      </ol>
+      ${renderPrimaryCommand(sessionCommand, displayValue(sessionCommand))}
       <div class="api-kv">
         <code>URL da API: ${ClaudeApp.escapeHtml(config.baseUrl)}</code>
         <code>Plano: ${ClaudeApp.escapeHtml(config.plan)}</code>
         <code>API Key: ${ClaudeApp.escapeHtml(displayToken)}</code>
+        <button type="button" class="secondary" data-copy-value="${ClaudeApp.escapeHtml(config.token)}">Copiar token</button>
         <button type="button" class="secondary" data-api-secret-toggle>${revealLabel}</button>
       </div>
     </section>
-    <ol class="api-steps">
-      <li>O comando acima ja vem com os dados da conta logada e o modelo escolhido.</li>
-      <li>Use o instalador Python: ele pergunta se quer usar esta API e configura terminal/extensao.</li>
-      <li>No terminal, depois da instalacao, ao rodar <code>claude</code> ele pergunta antes de usar a API.</li>
-      <li>Na extensao, a pergunta acontece no instalador antes de gravar o settings.json.</li>
-    </ol>
-    ${renderCodeBlock("ChatGPT/Codex: ~/.codex/config.toml", codexConfig)}
-    ${renderCodeBlock("ChatGPT/Codex: chave OpenAI-compatible", openAiEnv, displayValue(openAiEnv))}
-    ${renderCodeBlock("ChatGPT/Codex: testar Responses API", openAiCurlTest, displayValue(openAiCurlTest))}
-    ${renderCodeBlock("Instalador Python com pergunta", installCommand, displayValue(installCommand))}
-    ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand, displayValue(settingsCommand))}
-    ${renderCodeBlock("Testar conexão", curlTest, displayValue(curlTest))}
+    <details class="api-advanced">
+      <summary>Configurações avançadas</summary>
+      ${renderCodeBlock("ChatGPT/Codex: ~/.codex/config.toml", codexConfig)}
+      ${renderCodeBlock("ChatGPT/Codex: chave OpenAI-compatible", openAiEnv, displayValue(openAiEnv))}
+      ${renderCodeBlock("ChatGPT/Codex: testar Responses API", openAiCurlTest, displayValue(openAiCurlTest))}
+      ${renderCodeBlock("Instalador Python com pergunta", installCommand, displayValue(installCommand))}
+      ${renderCodeBlock("Somente extensão: salvar settings.json", settingsCommand, displayValue(settingsCommand))}
+      ${renderCodeBlock("Testar conexão", curlTest, displayValue(curlTest))}
+    </details>
   `;
 }
 
@@ -702,15 +706,30 @@ function renderPlanCards() {
   const current = account();
   const target = document.querySelector("#planCards");
   if (!target) return;
+  const notice = document.querySelector("#planUpgradeNotice");
+  if (notice) {
+    notice.classList.toggle("hidden", !highlightedPlanId);
+    notice.textContent =
+      highlightedPlanId === "ultra"
+        ? "Opus 4.7 está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
+        : "";
+  }
   target.innerHTML = ClaudeApp.paidPlans()
     .map((plan) => {
       const currentPlan =
         current &&
         ClaudeApp.planDisplayName(current.plan).toLowerCase() ===
           ClaudeApp.planDisplayName(plan.name).toLowerCase();
+      const highlighted = highlightedPlanId === plan.id;
+      const badges = [
+        currentPlan ? `<span class="plan-badge current">Seu plano atual</span>` : "",
+        plan.id === "ultra" ? `<span class="plan-badge featured">Mais vendido</span>` : "",
+        highlighted ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
+      ].join("");
       return `
-        <article class="plan-card ${currentPlan ? "current" : ""}">
+        <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}">
           <div>
+            <div class="plan-badges">${badges}</div>
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
@@ -927,9 +946,47 @@ async function loadServerHistory() {
   }
 }
 
+function conversationTitle(messages) {
+  const firstUser = messages.find((message) => message.role === "user")?.content || "";
+  const cleaned = String(firstUser).replace(/\n+/g, " ").split("Anexos:", 1)[0].trim();
+  if (!cleaned) return "Nova conversa";
+  return cleaned.length <= 54 ? cleaned : `${cleaned.slice(0, 54).trim()}...`;
+}
+
+function upsertHistoryConversation(conversation) {
+  if (!conversation?.id) return;
+  const index = serverHistory.findIndex((item) => item.id === conversation.id);
+  if (index >= 0) {
+    serverHistory[index] = { ...serverHistory[index], ...conversation };
+  } else {
+    serverHistory.unshift(conversation);
+  }
+  serverHistory.sort(
+    (left, right) =>
+      new Date(right.updatedAt || right.createdAt).getTime() -
+      new Date(left.updatedAt || left.createdAt).getTime(),
+  );
+  renderSidePanels();
+}
+
+function optimisticActiveConversation() {
+  const now = new Date().toISOString();
+  return {
+    id: activeConversationId || `local_${Date.now()}`,
+    title: conversationTitle(activeConversation),
+    createdAt: now,
+    updatedAt: now,
+    messages: activeConversation,
+  };
+}
+
 async function saveConversation() {
   if (incognitoMode || !activeConversation.length || !account()?.active) return;
 
+  const optimistic = optimisticActiveConversation();
+  activeConversationId = optimistic.id;
+  upsertHistoryConversation(optimistic);
+  showChatNotice("Salvando conversa...");
   try {
     const data = await conversationRequest("/v1/conversations", {
       method: "POST",
@@ -939,9 +996,11 @@ async function saveConversation() {
       }),
     });
     activeConversationId = data.conversation.id;
+    upsertHistoryConversation(data.conversation);
+    showChatNotice("Conversa salva.");
     await loadServerHistory();
   } catch {
-    showChatNotice("Não consegui salvar a conversa no banco agora.");
+    showChatNotice("Não consegui salvar no banco agora. Mantive a conversa nesta tela.");
   }
 }
 
@@ -964,6 +1023,14 @@ function renderConversationMessages(messages) {
 }
 
 async function openConversation(conversationId) {
+  const cached = serverHistory.find((item) => item.id === conversationId);
+  if (cached?.messages?.length) {
+    activeConversationId = cached.id;
+    renderConversationMessages(cached.messages);
+    setPanel("chatPanel");
+    return;
+  }
+
   try {
     const data = await conversationRequest(`/v1/conversations/${conversationId}`);
     activeConversationId = data.conversation.id;
@@ -991,8 +1058,14 @@ function parseGatewayStreamChunk(buffer, onText) {
     try {
       const event = JSON.parse(raw);
       const delta = event.delta || {};
-      if (delta.type === "text_delta" && delta.text) onText(delta.text);
-      if (typeof delta.text === "string" && delta.text) onText(delta.text);
+      if (delta.type === "text_delta" && typeof delta.text === "string" && delta.text) {
+        onText(delta.text);
+        return;
+      }
+      if (typeof delta.text === "string" && delta.text) {
+        onText(delta.text);
+        return;
+      }
 
       const choices = Array.isArray(event.choices) ? event.choices : [];
       choices.forEach((choice) => {
@@ -1092,7 +1165,6 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   outgoingMessages[outgoingMessages.length - 1].content = buildMessageContent(prompt, attachments);
   const assistantMessage = addMessage("assistant", "Pensando...");
 
-  const settings = ClaudeApp.apiSettings();
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
     updateMessage(assistantMessage, partialAnswer);
@@ -1717,8 +1789,13 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
   const current = account();
   if (!ClaudeApp.allowedPublicModelsForAccount(current).includes(item.dataset.modelValue)) {
     closeFloatingMenus();
+    highlightedPlanId = item.dataset.modelValue === "claude-code-ultra" ? "ultra" : "";
     setPanel("plansPanel");
-    showChatNotice("Esse modelo exige upgrade de plano.");
+    showChatNotice(
+      item.dataset.modelValue === "claude-code-ultra"
+        ? "Opus 4.7 está no plano Max 30X."
+        : "Esse modelo exige upgrade de plano.",
+    );
     return;
   }
   const select = document.querySelector(`#${activeModelSelectId}`);
@@ -1952,6 +2029,9 @@ function closeProjectModal() {
 
 document.querySelector("#projectModalClose").addEventListener("click", closeProjectModal);
 document.querySelector("#projectModalCancel").addEventListener("click", closeProjectModal);
+document.querySelector("#projectModal").addEventListener("click", (event) => {
+  if (event.target.id === "projectModal") closeProjectModal();
+});
 
 document.querySelector("#newArtifact").addEventListener("click", () => {
   document.querySelector("#artifactStartModal").classList.remove("hidden");
@@ -2039,7 +2119,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeFloatingMenus();
     if (document.querySelector("#searchPanel").classList.contains("active")) setPanel("chatPanel");
-    document.querySelector("#projectModal").classList.add("hidden");
+    closeProjectModal();
     document.querySelector("#artifactStartModal").classList.add("hidden");
   }
 });

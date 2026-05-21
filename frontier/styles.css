@@ -441,6 +441,8 @@ code {
 }
 
 .icon-rail {
+  position: relative;
+  z-index: 19;
   border-right: 1px solid var(--cloud-line);
   background: #fbfaf7;
   padding: 14px 8px;
@@ -516,6 +518,8 @@ code {
 }
 
 .claude-sidebar {
+  position: relative;
+  z-index: 19;
   min-width: 0;
   height: 100vh;
   border-right: 1px solid var(--cloud-line);
@@ -1414,6 +1418,21 @@ code {
   gap: 14px;
 }
 
+.api-advanced {
+  display: grid;
+  gap: 12px;
+}
+
+.api-advanced summary {
+  cursor: pointer;
+  color: var(--cloud-text);
+  font-weight: 600;
+}
+
+.api-advanced[open] summary {
+  margin-bottom: 12px;
+}
+
 .api-summary,
 .api-step,
 .api-primary-command {
@@ -1453,6 +1472,10 @@ code {
   padding-left: 22px;
   color: var(--cloud-muted);
   line-height: 1.55;
+}
+
+.api-steps.compact {
+  padding-left: 19px;
 }
 
 .api-step {
@@ -2060,6 +2083,46 @@ button.result-item {
 .plan-card.current {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--cloud-line));
   background: #fff8f4;
+}
+
+.plan-card.highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 18px 48px rgba(184, 93, 56, 0.16);
+}
+
+.upgrade-notice {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--cloud-line));
+  border-radius: 8px;
+  background: #fff8f4;
+  color: var(--cloud-text);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.plan-badges {
+  min-height: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.plan-badge {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: #f0efeb;
+  color: var(--cloud-muted);
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.plan-badge.current,
+.plan-badge.upgrade {
+  background: color-mix(in srgb, var(--accent) 14%, #fff);
+  color: var(--accent);
 }
 
 .plan-card h2 {
