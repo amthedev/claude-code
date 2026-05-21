@@ -10,7 +10,7 @@ let activeChatSessionKey = `chat_${Date.now()}`;
 let serverHistory = [];
 let activeProjectId = localStorage.getItem("claude_frontier_active_project") || "";
 let codeWorkspaces = [];
-let activeCodeWorkspaceId = "";
+let activeCodeWorkspaceId = localStorage.getItem("claude_frontier_active_code_workspace") || "";
 let activeCodeFilePath = "";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
@@ -1171,6 +1171,7 @@ function renderAccount() {
   document.querySelector("#newArtifact").textContent = "Novo artefato";
   renderBilling();
   fillModelSelects();
+  renderCodeContextButtons();
   startSupportPolling();
 }
 
@@ -1876,8 +1877,39 @@ function activeProjectContextBlock() {
 
 function promptWithActiveProjectContext(prompt) {
   const context = activeProjectContextBlock();
-  if (!context) return prompt;
-  return `${context}\n\nMensagem do usuário:\n${prompt}`;
+  const codeContext = activeCodeWorkspaceContextBlock();
+  const blocks = [context, codeContext].filter(Boolean);
+  if (!blocks.length) return prompt;
+  return `${blocks.join("\n\n")}\n\nMensagem do usuário:\n${prompt}`;
+}
+
+function activeCodeWorkspace() {
+  if (!activeCodeWorkspaceId) return null;
+  return codeWorkspaces.find((item) => item.id === activeCodeWorkspaceId) || null;
+}
+
+function activeCodeWorkspaceContextBlock() {
+  const workspace = activeCodeWorkspace();
+  if (!workspace) return "";
+  const filePath = activeCodeFilePath;
+  const fileContent = filePath ? document.querySelector("#codeEditor")?.value || "" : "";
+  return [
+    `Workspace de código ativo: ${workspace.name}`,
+    workspace.repoUrl ? `Origem GitHub: ${workspace.repoUrl}` : "",
+    filePath ? `Arquivo aberto: ${filePath}` : "",
+    fileContent ? `Conteúdo atual do arquivo aberto:\n\`\`\`\n${fileContent.slice(0, 12000)}\n\`\`\`` : "",
+    "Quando sugerir mudanças, seja específico sobre os arquivos. Se for editar o arquivo aberto, devolva o conteúdo ou trecho de substituição com clareza.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function renderCodeContextButtons() {
+  const workspace = activeCodeWorkspace();
+  document.querySelectorAll("[data-code-context-open]").forEach((button) => {
+    button.textContent = workspace ? `Código: ${workspace.name}` : "Código";
+    button.classList.toggle("active", Boolean(workspace));
+  });
 }
 
 function historyDate(item) {
@@ -2079,6 +2111,7 @@ function renderCodePanel() {
   }
   document.querySelector("#downloadCodeWorkspace").disabled = !activeCodeWorkspaceId;
   document.querySelector("#saveCodeFile").disabled = !activeCodeWorkspaceId || !activeCodeFilePath;
+  renderCodeContextButtons();
 }
 
 async function loadCodeWorkspaces() {
@@ -2091,6 +2124,7 @@ async function loadCodeWorkspaces() {
     const data = await codeRequest("/workspaces");
     codeWorkspaces = data.data || [];
     if (!activeCodeWorkspaceId && codeWorkspaces[0]) activeCodeWorkspaceId = codeWorkspaces[0].id;
+    if (activeCodeWorkspaceId) localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
     renderCodePanel();
     if (activeCodeWorkspaceId) await loadCodeFiles(activeCodeWorkspaceId);
   } catch (error) {
@@ -2101,6 +2135,7 @@ async function loadCodeWorkspaces() {
 
 async function loadCodeFiles(workspaceId) {
   activeCodeWorkspaceId = workspaceId;
+  localStorage.setItem("claude_frontier_active_code_workspace", workspaceId);
   activeCodeFilePath = "";
   document.querySelector("#codeEditor").value = "";
   document.querySelector("#codeFileTitle").textContent = "Selecione um arquivo";
@@ -2122,6 +2157,7 @@ async function loadCodeFiles(workspaceId) {
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
+  renderCodeContextButtons();
 }
 
 async function openCodeFile(filePath) {
@@ -2135,6 +2171,7 @@ async function openCodeFile(filePath) {
     document.querySelector("#codeEditor").value = data.content;
     document.querySelector("#codeStatus").textContent = "";
     renderCodePanel();
+    renderCodeContextButtons();
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
@@ -2615,6 +2652,7 @@ document.querySelector("#clientLoginForm").addEventListener("submit", async (eve
   renderAccount();
   loadServerHistory();
   loadPurchases();
+  loadCodeWorkspaces();
   continuePendingAuthFlow();
 });
 
@@ -2644,6 +2682,7 @@ document.querySelector("#clientSignupForm").addEventListener("submit", async (ev
     renderAccount();
     loadServerHistory();
     loadPurchases();
+    loadCodeWorkspaces();
     continuePendingAuthFlow();
     return;
   } catch (error) {
@@ -2734,6 +2773,24 @@ document.querySelector("#attachMenu").addEventListener("click", (event) => {
     setPanel("projectsPanel");
     return;
   }
+  if (action === "code-open") {
+    setPanel("codePanel");
+    return;
+  }
+  if (action === "code-github") {
+    setPanel("codePanel");
+    window.setTimeout(() => document.querySelector("#githubImportForm input[name='repoUrl']")?.focus(), 0);
+    return;
+  }
+  if (action === "code-zip") {
+    setPanel("codePanel");
+    window.setTimeout(() => document.querySelector("#codeZipInput")?.click(), 0);
+    return;
+  }
+});
+
+document.querySelectorAll("[data-code-context-open]").forEach((button) => {
+  button.addEventListener("click", () => setPanel("codePanel"));
 });
 
 document.querySelectorAll("[data-model-trigger]").forEach((button) => {
@@ -2991,10 +3048,12 @@ document.querySelector("#githubImportForm").addEventListener("submit", async (ev
       body: JSON.stringify(values),
     });
     activeCodeWorkspaceId = data.workspace.id;
+    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
     activeCodeFilePath = "";
     form.reset();
     document.querySelector("#codeStatus").textContent = "Repositório importado.";
     await loadCodeWorkspaces();
+    fillHeroPrompt(`Analise este projeto (${data.workspace.name}) e me diga por onde começar.`);
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
@@ -3018,10 +3077,12 @@ document.querySelector("#zipUploadForm").addEventListener("submit", async (event
       }),
     });
     activeCodeWorkspaceId = data.workspace.id;
+    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
     activeCodeFilePath = "";
     form.reset();
     document.querySelector("#codeStatus").textContent = "ZIP importado.";
     await loadCodeWorkspaces();
+    fillHeroPrompt(`Analise este projeto (${data.workspace.name}) e me diga por onde começar.`);
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
@@ -3142,9 +3203,12 @@ async function logoutClient({ confirmOpenConversation = true } = {}) {
   sessionStatusMessage = "";
   activeConversationId = null;
   activeProjectId = "";
+  activeCodeWorkspaceId = "";
+  activeCodeFilePath = "";
   serverHistory = [];
   localStorage.removeItem(ClaudeApp.CLIENT_SESSION_KEY);
   localStorage.removeItem("claude_frontier_active_project");
+  localStorage.removeItem("claude_frontier_active_code_workspace");
   activeConversation = [];
   document.querySelector("#chatThread").innerHTML = "";
   document.querySelector("#chatThread").classList.add("hidden");
@@ -3233,3 +3297,4 @@ if (currentAccountId && !account()) {
 renderAccount();
 if (sessionStatusMessage) showChatNotice(sessionStatusMessage);
 loadServerHistory();
+loadCodeWorkspaces();

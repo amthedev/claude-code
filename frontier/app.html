@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=workspace-actions-20260521" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=codex-style-code-20260521" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell sidebar-open">
@@ -151,6 +151,7 @@
                   <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
                     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   </button>
+                  <button class="code-context-button" type="button" data-code-context-open>Código</button>
                 </div>
                 <div class="composer-right">
                   <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
@@ -207,6 +208,7 @@
                 <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
+                <button class="code-context-button" type="button" data-code-context-open>Código</button>
               </div>
               <div class="composer-right">
                 <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
@@ -416,6 +418,9 @@
     <div id="attachMenu" class="floating-menu hidden" role="menu" aria-label="Adicionar arquivos e projetos">
       <button type="button" data-attach-action="files"><span>＋</span>Adicionar arquivos ou fotos <kbd>⌘U</kbd></button>
       <button type="button" data-attach-action="project"><span>▤</span>Abrir projetos</button>
+      <button type="button" data-attach-action="code-open"><span>&lt;/&gt;</span>Abrir código</button>
+      <button type="button" data-attach-action="code-github"><span>Git</span>Conectar GitHub</button>
+      <button type="button" data-attach-action="code-zip"><span>ZIP</span>Subir pasta compactada</button>
     </div>
 
     <div id="modelMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Modelo">
@@ -533,7 +538,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=free-plan-fix-20260521"></script>
-    <script src="/frontier/client.js?v=workspace-actions-20260521"></script>
+    <script src="/frontier/shared.js?v=codex-style-code-20260521"></script>
+    <script src="/frontier/client.js?v=codex-style-code-20260521"></script>
   </body>
 </html>

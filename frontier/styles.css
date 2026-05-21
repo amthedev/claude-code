@@ -886,6 +886,9 @@ code {
 
 .composer-menu-wrap {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .composer-row select,
@@ -1873,6 +1876,24 @@ code {
 
 .copy-icon-button.copy-primary svg {
   stroke: white;
+}
+
+.code-context-button {
+  min-height: 36px;
+  max-width: 180px;
+  border-color: var(--cloud-line);
+  background: var(--cloud-panel-2);
+  color: var(--cloud-text);
+  padding: 7px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-context-button.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--cloud-line));
+  background: #fff8f4;
+  color: var(--accent-dark);
 }
 
 .api-command-box-primary {
