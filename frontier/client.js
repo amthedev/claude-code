@@ -578,7 +578,7 @@ def ask(question, default=True):
         return default
     return answer in {"s", "sim", "y", "yes"}
 
-print("Frontier AI API para Claude Code")
+print("Claude API para Claude Code")
 print(f"API: {base_url}")
 print(f"Modelo padrao: {selected_model}")
 print()
@@ -616,7 +616,7 @@ GATEWAY_KEYS = {{
 
 def wants_gateway():
     try:
-        answer = input(f"Usar Frontier AI API no Claude Code ({{BASE_URL}})? [S/n] ").strip().lower()
+        answer = input(f"Usar Claude API no Claude Code ({{BASE_URL}})? [S/n] ").strip().lower()
     except EOFError:
         answer = "s"
     return answer not in {{"n", "nao", "não", "no"}}
@@ -765,7 +765,7 @@ function codexConfigToml(config) {
 model_provider = "claude_gateway"
 
 [model_providers.claude_gateway]
-name = "Frontier AI Gateway"
+name = "Claude Gateway"
 base_url = ${JSON.stringify(openAiCompatBaseUrl(config.baseUrl))}
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"`;
