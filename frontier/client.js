@@ -194,7 +194,7 @@ function repairDuplicatedText(text) {
     .replace(/\*(\d+[–-]\d+\s*min)\*\*/g, "$1");
   for (let pass = 0; pass < 4; pass += 1) {
     const previous = current;
-    current = removeRestartedAnswer(current)
+    current = removeShortRestartedPrefix(removeRestartedAnswer(current))
       .replace(/\b([\p{L}\p{N}]+)(\s+)\1\b/giu, "$1")
       .replace(/\b([\p{L}\p{N}]{1,8})(\s+)(\1[\p{L}\p{N}]{2,})\b/giu, "$3");
     if (current === previous) break;
@@ -237,6 +237,26 @@ function removeRestartedAnswer(text) {
     const tail = prefix.slice(-48).trimEnd();
     if (prefix.length > 180 && !/[.!?:\n]$/.test(tail)) return suffix;
     return prefix.trimEnd();
+  }
+  return value;
+}
+
+function removeShortRestartedPrefix(text) {
+  const value = String(text || "");
+  const maxRestartAt = Math.min(80, value.length - 8);
+  for (let restartAt = 8; restartAt <= maxRestartAt; restartAt += 1) {
+    const prefix = value.slice(0, restartAt);
+    const suffix = value.slice(restartAt);
+    if (suffix.length < prefix.length || !/[\s.!?]/.test(prefix)) continue;
+    let common = 0;
+    const max = Math.min(prefix.length, suffix.length);
+    while (
+      common < max &&
+      prefix[common].toLocaleLowerCase("pt-BR") === suffix[common].toLocaleLowerCase("pt-BR")
+    ) {
+      common += 1;
+    }
+    if (common >= 8) return suffix;
   }
   return value;
 }
@@ -2144,24 +2164,40 @@ function parseGatewayStreamChunk(buffer, onText) {
 function overlapLength(left, right) {
   const max = Math.min(left.length, right.length);
   for (let size = max; size > 0; size -= 1) {
-    if (left.slice(-size) === right.slice(0, size)) return size;
+    if (streamTextEqual(left.slice(-size), right.slice(0, size))) return size;
   }
   return 0;
+}
+
+function streamTextFold(text) {
+  return String(text || "").toLocaleLowerCase("pt-BR");
+}
+
+function streamTextEqual(left, right) {
+  return streamTextFold(left) === streamTextFold(right);
+}
+
+function streamTextStartsWith(text, prefix) {
+  return streamTextFold(text.slice(0, prefix.length)) === streamTextFold(prefix);
+}
+
+function streamTextEndsWith(text, suffix) {
+  return !suffix || streamTextFold(text.slice(-suffix.length)) === streamTextFold(suffix);
 }
 
 function mergeStreamText(current, incoming) {
   const text = String(incoming || "");
   if (!text) return current;
   if (!current) return text;
-  if (text === current || current.endsWith(text)) return current;
-  if (text.startsWith(current)) return text;
+  if (streamTextEqual(text, current) || streamTextEndsWith(current, text)) return current;
+  if (streamTextStartsWith(text, current)) return text;
 
   const overlap = overlapLength(current, text);
   if (overlap > 0) return current + text.slice(overlap);
 
   const stripped = text.trimStart();
   if (stripped && stripped !== text) {
-    if (current.endsWith(stripped)) return current;
+    if (streamTextEndsWith(current, stripped)) return current;
     const strippedOverlap = overlapLength(current, stripped);
     if (strippedOverlap > 0) return current + stripped.slice(strippedOverlap);
   }

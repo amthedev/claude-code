@@ -251,6 +251,19 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(text, "Seu texto já contém um plano")
 
+    def test_public_stream_normalizes_case_changed_cumulative_restart(self) -> None:
+        payloads = [
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Oi! Como pos"}},
+            {
+                "type": "content_block_delta",
+                "delta": {"type": "text_delta", "text": "Oi! Como Posso ajudar você hoje?"},
+            },
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(text, "Oi! Como posso ajudar você hoje?")
+
     def test_public_stream_normalizes_cumulative_openai_text_deltas(self) -> None:
         payloads = [
             {"choices": [{"delta": {"content": "How"}}]},
@@ -274,6 +287,11 @@ class GatewayTestCase(unittest.TestCase):
             clean_model_text(broken),
             "Aqui está um **plano realista e pratico para ficar fluente em inglês em 33 meses",
         )
+
+    def test_clean_model_text_repairs_short_restarted_greeting(self) -> None:
+        broken = "Oi! Como posOi! Como Posso ajudar você hoje?"
+
+        self.assertEqual(clean_model_text(broken), "Oi! Como Posso ajudar você hoje?")
 
     def test_clean_model_text_repairs_glued_words_without_dropping_spaces(self) -> None:
         broken = (

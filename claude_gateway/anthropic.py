@@ -170,6 +170,7 @@ def _clean_prose_text(text: str) -> str:
             break
         previous = current
         current = _remove_restarted_answer(current)
+        current = _remove_short_restarted_prefix(current)
         current = _DUPLICATED_WORD_RE.sub(r"\1", current)
         current = _PREFIX_FRAGMENT_RE.sub(r"\3", current)
         current = _WORD_RE.sub(lambda match: _repair_word(match.group(0)), current)
@@ -194,6 +195,22 @@ def _remove_restarted_answer(text: str) -> str:
         if len(prefix) > 180 and not tail.rstrip().endswith((".", "!", "?", ":", "\n")):
             return suffix
         return prefix.rstrip()
+    return text
+
+
+def _remove_short_restarted_prefix(text: str) -> str:
+    max_restart_at = min(80, len(text) - 8)
+    for restart_at in range(8, max_restart_at + 1):
+        prefix = text[:restart_at]
+        suffix = text[restart_at:]
+        if len(suffix) < restart_at or not re.search(r"[\s.!?]", prefix):
+            continue
+        common = 0
+        max_common = min(len(prefix), len(suffix))
+        while common < max_common and prefix[common].casefold() == suffix[common].casefold():
+            common += 1
+        if common >= 8:
+            return suffix
     return text
 
 

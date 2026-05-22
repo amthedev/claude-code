@@ -1963,9 +1963,9 @@ class _StreamTextNormalizer:
             return ""
         self.raw_text = _merge_stream_text(self.raw_text, text)
         next_cleaned = clean_model_text(self.raw_text, strip=False)
-        if next_cleaned == self.cleaned_text or self.cleaned_text.endswith(next_cleaned):
+        if _stream_text_equal(next_cleaned, self.cleaned_text) or _stream_text_endswith(self.cleaned_text, next_cleaned):
             return ""
-        if next_cleaned.startswith(self.cleaned_text):
+        if _stream_text_startswith(next_cleaned, self.cleaned_text):
             delta = next_cleaned[len(self.cleaned_text):]
             self.cleaned_text = next_cleaned
             return delta
@@ -1979,9 +1979,9 @@ class _StreamTextNormalizer:
 def _merge_stream_text(current: str, incoming: str) -> str:
     if not current:
         return incoming
-    if incoming == current or current.endswith(incoming):
+    if _stream_text_equal(incoming, current) or _stream_text_endswith(current, incoming):
         return current
-    if incoming.startswith(current):
+    if _stream_text_startswith(incoming, current):
         return incoming
 
     overlap = _stream_overlap_length(current, incoming)
@@ -1990,7 +1990,7 @@ def _merge_stream_text(current: str, incoming: str) -> str:
 
     stripped = incoming.lstrip()
     if stripped and stripped != incoming:
-        if current.endswith(stripped):
+        if _stream_text_endswith(current, stripped):
             return current
         stripped_overlap = _stream_overlap_length(current, stripped)
         if stripped_overlap:
@@ -2002,9 +2002,21 @@ def _merge_stream_text(current: str, incoming: str) -> str:
 def _stream_overlap_length(left: str, right: str) -> int:
     max_size = min(len(left), len(right))
     for size in range(max_size, 0, -1):
-        if left[-size:] == right[:size]:
+        if _stream_text_equal(left[-size:], right[:size]):
             return size
     return 0
+
+
+def _stream_text_equal(left: str, right: str) -> bool:
+    return left.casefold() == right.casefold()
+
+
+def _stream_text_startswith(text: str, prefix: str) -> bool:
+    return text[: len(prefix)].casefold() == prefix.casefold()
+
+
+def _stream_text_endswith(text: str, suffix: str) -> bool:
+    return text[-len(suffix) :].casefold() == suffix.casefold() if suffix else True
 
 
 def _normalize_stream_payload_text(payload: dict[str, Any], normalizer: _StreamTextNormalizer) -> None:
