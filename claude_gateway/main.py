@@ -4,6 +4,8 @@ import io
 import base64
 import json
 import os
+import statistics
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -23,6 +25,7 @@ from .accounts import AccountStore, AccountUsageReservation
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
 from .anthropic import build_text_message, clean_model_text
+from .benchmark import BENCHMARK_CASES, benchmark_failures, benchmark_payload
 from .code_workspaces import CodeWorkspaceStore, github_repo_parts
 from .config import Settings, get_settings
 from .conversations import ConversationStore
@@ -150,6 +153,16 @@ def create_app(
     async def admin_health(request: Request) -> dict[str, Any]:
         _require_admin(request, app.state.settings)
         return _detailed_health(app)
+
+    @app.post("/v1/admin/benchmark")
+    async def admin_benchmark(
+        request: Request,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> dict[str, Any]:
+        auth = _require_admin(request, app.state.settings)
+        if payload is not None and not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return _admin_benchmark(app, auth)
 
     def _detailed_health(app: FastAPI) -> dict[str, Any]:
         return {
@@ -1912,6 +1925,179 @@ def _production_readiness(app: FastAPI) -> dict[str, Any]:
         "account_data_file": settings.account_data_file,
         "quota_data_file": settings.quota_data_file,
     }
+
+
+def _admin_benchmark(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    rows.extend(_benchmark_system_rows(app))
+    route_rows = _benchmark_route_rows(app, auth)
+    rows.extend(route_rows)
+
+    required_failures = [row for row in rows if row["status"] == "FAIL"]
+    warnings = [row for row in rows if row["status"] == "WARN"]
+    route_latencies = [row["latency_ms"] for row in route_rows if isinstance(row.get("latency_ms"), (int, float))]
+    summary = {
+        "status": "fail" if required_failures else "ok",
+        "total": len(rows),
+        "passed": len([row for row in rows if row["status"] == "OK"]),
+        "failed": len(required_failures),
+        "warnings": len(warnings),
+        "route_median_ms": round(statistics.median(route_latencies), 1) if route_latencies else 0,
+        "mode": "safe_router_only",
+        "spends_credits": False,
+    }
+    return {
+        "status": summary["status"],
+        "generated_at": datetime.now(ZoneInfo("America/Recife")).isoformat(),
+        "summary": summary,
+        "results": rows,
+        "advice": _benchmark_advice(rows),
+    }
+
+
+def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
+    settings = app.state.settings
+    readiness = _production_readiness(app)
+    protected_margin = min(max(settings.customer_profit_margin, 0.50), 0.95)
+    checks = [
+        (
+            "openrouter",
+            "OpenRouter configurado",
+            readiness["openrouter"],
+            "required",
+            "Sem chave OpenRouter o chat real nao responde.",
+        ),
+        (
+            "web_search",
+            "Pesquisa web configurada",
+            readiness["web_search"],
+            "warning",
+            "Sem OPENAI_API_KEY a opcao Web avisa fallback e nao busca fontes atuais.",
+        ),
+        (
+            "mercado_pago",
+            "Mercado Pago configurado",
+            readiness["mercado_pago"],
+            "required",
+            "Necessario para vender upgrades pagos.",
+        ),
+        (
+            "admin_password",
+            "Senha admin",
+            readiness["admin_password"],
+            "required",
+            "Protege o painel administrativo.",
+        ),
+        (
+            "cors_restricted",
+            "CORS restrito",
+            readiness["cors_restricted"],
+            "required",
+            "Evita uso do navegador por origens inesperadas.",
+        ),
+        (
+            "trusted_hosts",
+            "Trusted hosts restritos",
+            readiness["trusted_hosts_restricted"],
+            "required",
+            "Use dominio explicito em producao.",
+        ),
+        (
+            "persistent_storage",
+            "SQLite persistente",
+            readiness["persistent_storage"],
+            "required",
+            "Contas, compras e cotas devem ficar no mesmo banco persistente.",
+        ),
+        (
+            "cost_guard",
+            "Custo abaixo do alvo",
+            settings.max_cost_ratio_vs_claude <= 0.50,
+            "required",
+            f"MAX_COST_RATIO_VS_CLAUDE={settings.max_cost_ratio_vs_claude:.2f}.",
+        ),
+        (
+            "profit_margin",
+            "Margem minima protegida",
+            protected_margin >= 0.50,
+            "required",
+            f"Margem efetiva protegida: {protected_margin:.0%}.",
+        ),
+    ]
+    rows: list[dict[str, Any]] = []
+    for check_id, label, ok, severity, detail in checks:
+        status = "OK" if ok else ("WARN" if severity == "warning" else "FAIL")
+        rows.append(
+            {
+                "category": "setup",
+                "id": check_id,
+                "label": label,
+                "status": status,
+                "severity": severity,
+                "detail": detail,
+                "notes": "" if ok else detail,
+            }
+        )
+    return rows
+
+
+def _benchmark_route_rows(app: FastAPI, auth: AuthContext) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for case in BENCHMARK_CASES:
+        started = time.perf_counter()
+        payload = _prepare_payload(benchmark_payload(case), app.state.settings, auth)
+        decision = app.state.planner.plan(payload).to_dict()
+        web_search = _web_search_debug(payload, app.state.settings, auth)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        data = {
+            **decision,
+            "web_search_policy": web_search["policy"],
+            "web_search_reason": web_search["reason"],
+            "web_search_enabled": web_search["enabled"],
+            "web_search_should_search": web_search["should_search"],
+        }
+        failures = benchmark_failures(case, data)
+        effective_path = (data.get("cost_estimate") or {}).get("effective_path") or {}
+        rows.append(
+            {
+                "category": "route",
+                "id": case.id,
+                "label": case.label,
+                "status": "FAIL" if failures else "OK",
+                "severity": "required",
+                "latency_ms": round(elapsed_ms, 1),
+                "mode": data.get("mode"),
+                "task_type": data.get("task_type"),
+                "complexity": data.get("complexity"),
+                "selected_model": data.get("selected_openrouter_model"),
+                "public_model": data.get("public_model"),
+                "orchestration": data.get("use_orchestration"),
+                "web_search": data.get("web_search_should_search"),
+                "web_search_reason": data.get("web_search_reason"),
+                "cost_ratio": effective_path.get("cost_ratio_vs_claude"),
+                "within_budget": effective_path.get("within_budget"),
+                "notes": "; ".join(failures),
+            }
+        )
+    return rows
+
+
+def _benchmark_advice(rows: list[dict[str, Any]]) -> list[str]:
+    advice: list[str] = []
+    if any(row["status"] == "FAIL" and row["category"] == "setup" for row in rows):
+        advice.append("Corrija os itens FAIL de setup antes de vender acesso em producao.")
+    if any(row["status"] == "FAIL" and row["category"] == "route" for row in rows):
+        advice.append("Revise claude_gateway/routing.py: algum caso de roteamento saiu do esperado.")
+
+    architecture = next((row for row in rows if row["id"] == "architecture_ultra"), None)
+    if architecture and float(architecture.get("cost_ratio") or 0) > 0.45:
+        advice.append("Architecture Ultra esta perto do limite de custo; considere revisor mais barato.")
+
+    if not any(row["status"] == "FAIL" for row in rows):
+        advice.append("Roteamento seguro: nao ha troca obrigatoria de modelo agora.")
+    if any(row["status"] == "WARN" for row in rows):
+        advice.append("Itens WARN nao bloqueiam o app, mas melhoram qualidade ou operacao quando configurados.")
+    return advice
 
 
 async def _generate_conversation_title(app: FastAPI, payload: dict[str, Any]) -> str:

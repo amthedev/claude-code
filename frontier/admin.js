@@ -7,6 +7,7 @@ let supportPollTimer = null;
 let adminSetupConfigured = true;
 let purchaseState = [];
 let gatewayHealthState = null;
+let benchmarkState = null;
 
 const adminTabTitles = {
   accountsPanel: "Gift cards e clientes",
@@ -54,6 +55,12 @@ function forgetAdminDevice() {
 }
 
 async function unlockRememberedAdminDevice() {
+  const settings = adminApiSettings();
+  if (!settings.token) {
+    forgetAdminDevice();
+    return false;
+  }
+
   try {
     await refreshFromServer();
   } catch {
@@ -320,6 +327,86 @@ function renderProductionChecklist() {
     .join("");
 }
 
+function renderBenchmark() {
+  const summary = document.querySelector("#benchmarkSummary");
+  const table = document.querySelector("#benchmarkTable");
+  const advice = document.querySelector("#benchmarkAdvice");
+  if (!summary || !table || !advice) return;
+
+  if (!benchmarkState) {
+    summary.innerHTML = `
+      <article>
+        <span>Aguardando</span>
+        <strong>Nenhum benchmark rodado</strong>
+      </article>
+    `;
+    table.innerHTML = `<tr><td colspan="5" class="muted">Clique em Rodar benchmark para testar setup, rotas, custo e pesquisa web.</td></tr>`;
+    advice.innerHTML = "";
+    return;
+  }
+
+  const data = benchmarkState.summary || {};
+  summary.innerHTML = `
+    <article>
+      <span>Status</span>
+      <strong>${data.status === "ok" ? "OK" : "Atenção"}</strong>
+    </article>
+    <article>
+      <span>Passaram</span>
+      <strong>${ClaudeApp.integer.format(data.passed || 0)}</strong>
+    </article>
+    <article>
+      <span>Falhas</span>
+      <strong>${ClaudeApp.integer.format(data.failed || 0)}</strong>
+    </article>
+    <article>
+      <span>Roteador mediano</span>
+      <strong>${ClaudeApp.escapeHtml(String(data.route_median_ms || 0))} ms</strong>
+    </article>
+  `;
+
+  const rows = benchmarkState.results || [];
+  table.innerHTML = rows
+    .map((row) => {
+      const statusClass = row.status === "OK" ? "ok" : row.status === "FAIL" ? "bad" : "";
+      const route =
+        row.category === "route"
+          ? `${row.mode || "-"} / ${row.task_type || "-"}${row.orchestration ? " / pipeline" : " / direto"}`
+          : row.severity === "warning"
+            ? "Aviso"
+            : "Setup";
+      const cost =
+        row.category === "route" && row.cost_ratio !== undefined && row.cost_ratio !== null
+          ? `${Math.round(Number(row.cost_ratio) * 1000) / 10}% do Claude`
+          : "-";
+      const detail =
+        row.category === "route"
+          ? `${row.selected_model || "-"}${row.web_search ? " / web" : ""}`
+          : row.detail || "";
+      const note = row.notes && row.notes !== detail ? row.notes : "";
+      return `
+        <tr>
+          <td>
+            <strong>${ClaudeApp.escapeHtml(row.label || row.id)}</strong>
+            <div class="muted">${ClaudeApp.escapeHtml(row.id || "")}</div>
+          </td>
+          <td><span class="badge ${statusClass}">${ClaudeApp.escapeHtml(row.status || "-")}</span></td>
+          <td>${ClaudeApp.escapeHtml(route)}</td>
+          <td>${ClaudeApp.escapeHtml(cost)}</td>
+          <td>
+            ${ClaudeApp.escapeHtml(detail)}
+            ${note ? `<div class="muted">${ClaudeApp.escapeHtml(note)}</div>` : ""}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  advice.innerHTML = (benchmarkState.advice || [])
+    .map((item) => `<p>${ClaudeApp.escapeHtml(item)}</p>`)
+    .join("");
+}
+
 function giftCardStatus(card) {
   if (card.usedByAccountId) return "Resgatado";
   return card.active ? "Disponível" : "Pausado";
@@ -498,6 +585,7 @@ function renderAll() {
   renderPurchases();
   renderSupportAdmin();
   renderProductionChecklist();
+  renderBenchmark();
 }
 
 function uniqueGiftCard(values) {
@@ -590,6 +678,37 @@ document.querySelector("#adminApiTargetForm").addEventListener("submit", async (
     startSupportPolling();
   } catch (error) {
     message.textContent = error.fallback ? "API admin indisponível." : error.message;
+  }
+});
+
+document.querySelector("#runBenchmark").addEventListener("click", async () => {
+  const button = document.querySelector("#runBenchmark");
+  button.disabled = true;
+  button.textContent = "Rodando...";
+  try {
+    benchmarkState = await adminRequest("/v1/admin/benchmark", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  } catch (error) {
+    benchmarkState = {
+      summary: { status: "fail", passed: 0, failed: 1, warnings: 0, route_median_ms: 0 },
+      results: [
+        {
+          category: "setup",
+          id: "benchmark_request",
+          label: "Benchmark indisponível",
+          status: "FAIL",
+          severity: "required",
+          detail: error.fallback ? "API admin indisponível." : error.message,
+        },
+      ],
+      advice: ["Confira a URL da API e o token admin antes de rodar novamente."],
+    };
+  } finally {
+    button.disabled = false;
+    button.textContent = "Rodar benchmark";
+    renderBenchmark();
   }
 });
 

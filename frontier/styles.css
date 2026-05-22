@@ -424,6 +424,48 @@ th {
   line-height: 1.35;
 }
 
+.benchmark-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.benchmark-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.benchmark-summary article {
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: #fffdfa;
+  padding: 12px;
+}
+
+.benchmark-summary span {
+  display: block;
+  color: var(--admin-muted);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.benchmark-summary strong {
+  font-size: 20px;
+}
+
+.benchmark-advice {
+  display: grid;
+  gap: 8px;
+}
+
+.benchmark-advice p {
+  margin: 0;
+  border-left: 3px solid #d97757;
+  padding-left: 10px;
+  color: var(--admin-muted);
+  line-height: 1.4;
+}
+
 code {
   border: 1px solid var(--admin-line);
   border-radius: 8px;

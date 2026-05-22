@@ -287,6 +287,34 @@
               </div>
               <div id="productionChecklist" class="readiness-grid"></div>
             </section>
+            <section class="readiness-panel benchmark-panel">
+              <div class="panel-heading inline">
+                <div>
+                  <span class="overline">Benchmark seguro</span>
+                  <h2>Teste da IA e do roteador</h2>
+                </div>
+                <button id="runBenchmark" type="button">Rodar benchmark</button>
+              </div>
+              <p class="muted">
+                Este teste usa o roteador e os checks de produção sem chamar modelo, então não gasta créditos.
+              </p>
+              <div id="benchmarkSummary" class="benchmark-summary"></div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Teste</th>
+                      <th>Status</th>
+                      <th>Rota</th>
+                      <th>Custo</th>
+                      <th>Obs.</th>
+                    </tr>
+                  </thead>
+                  <tbody id="benchmarkTable"></tbody>
+                </table>
+              </div>
+              <div id="benchmarkAdvice" class="benchmark-advice"></div>
+            </section>
             <label>
               CUSTOMER_ACCOUNTS para o backend
               <textarea id="customerEnvSnippet" readonly rows="5"></textarea>

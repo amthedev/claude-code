@@ -9,91 +9,17 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from claude_gateway.benchmark import (
+    BENCHMARK_CASES,
+    benchmark_failures,
+    benchmark_payload,
+)
+
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8787"
-
-
-@dataclass(frozen=True, slots=True)
-class BenchCase:
-    id: str
-    model: str
-    prompt: str
-    max_tokens: int = 96
-    gateway_web_search: str = "auto"
-    tools: tuple[dict[str, Any], ...] = ()
-    live_default: bool = False
-    expect_mode: str | None = None
-    expect_task_type: str | None = None
-    expect_orchestration: bool | None = None
-    expect_web_search: bool | None = None
-
-
-CASES: tuple[BenchCase, ...] = (
-    BenchCase(
-        id="simple_pro",
-        model="claude-code-pro",
-        prompt="Explique em 3 bullets o que e uma funcao Python simples.",
-        live_default=True,
-        expect_task_type="explanation",
-        expect_orchestration=False,
-        expect_web_search=False,
-    ),
-    BenchCase(
-        id="identity_no_upstream",
-        model="claude-code-ultra",
-        prompt="qual modelo voce e?",
-        live_default=True,
-        expect_mode="ultra",
-        expect_web_search=False,
-    ),
-    BenchCase(
-        id="current_web_auto",
-        model="claude-code-pro",
-        prompt="Pesquise noticias atuais sobre IA e resuma em 2 frases.",
-        gateway_web_search="auto",
-        expect_web_search=True,
-    ),
-    BenchCase(
-        id="tool_contract",
-        model="claude-code-pro",
-        prompt="Leia um arquivo local e diga o proximo passo.",
-        tools=({"name": "read_file", "input_schema": {"type": "object"}},),
-        live_default=True,
-        expect_mode="pro",
-        expect_orchestration=False,
-        expect_web_search=False,
-    ),
-    BenchCase(
-        id="frontend_auto",
-        model="claude-code-auto",
-        prompt="Crie um dashboard React bonito para metricas financeiras.",
-        expect_mode="ui",
-        expect_task_type="frontend",
-        expect_orchestration=True,
-        expect_web_search=False,
-    ),
-    BenchCase(
-        id="bugfix_deep",
-        model="claude-code-pro",
-        prompt="Corrija um bug dificil de autenticacao em producao e liste os testes necessarios.",
-        expect_mode="pro",
-        expect_orchestration=True,
-        expect_web_search=False,
-    ),
-    BenchCase(
-        id="architecture_ultra",
-        model="claude-code-ultra",
-        prompt="Analise a arquitetura integral de todo o projeto e encontre riscos.",
-        expect_mode="ultra",
-        expect_task_type="architecture",
-        expect_orchestration=True,
-        expect_web_search=False,
-    ),
-)
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -145,36 +71,6 @@ def request_json(
     return data, elapsed_ms
 
 
-def payload_for(case: BenchCase) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "model": case.model,
-        "max_tokens": case.max_tokens,
-        "gateway_web_search": case.gateway_web_search,
-        "messages": [{"role": "user", "content": case.prompt}],
-    }
-    if case.tools:
-        payload["tools"] = list(case.tools)
-    return payload
-
-
-def evaluate(case: BenchCase, data: dict[str, Any]) -> list[str]:
-    failures: list[str] = []
-    if case.expect_mode is not None and data.get("mode") != case.expect_mode:
-        failures.append(f"mode expected {case.expect_mode}, got {data.get('mode')}")
-    if case.expect_task_type is not None and data.get("task_type") != case.expect_task_type:
-        failures.append(f"task_type expected {case.expect_task_type}, got {data.get('task_type')}")
-    if case.expect_orchestration is not None and data.get("use_orchestration") != case.expect_orchestration:
-        failures.append(
-            f"use_orchestration expected {case.expect_orchestration}, got {data.get('use_orchestration')}"
-        )
-    if case.expect_web_search is not None and data.get("web_search_should_search") != case.expect_web_search:
-        failures.append(
-            f"web_search_should_search expected {case.expect_web_search}, "
-            f"got {data.get('web_search_should_search')}"
-        )
-    return failures
-
-
 def text_from_message(data: dict[str, Any]) -> str:
     chunks: list[str] = []
     content = data.get("content")
@@ -185,7 +81,10 @@ def text_from_message(data: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
-def run_route_suite(args: argparse.Namespace, cases: list[BenchCase]) -> tuple[list[dict[str, Any]], int]:
+def run_route_suite(
+    args: argparse.Namespace,
+    cases: list[Any],
+) -> tuple[list[dict[str, Any]], int]:
     rows: list[dict[str, Any]] = []
     failures = 0
     for case in cases:
@@ -193,10 +92,10 @@ def run_route_suite(args: argparse.Namespace, cases: list[BenchCase]) -> tuple[l
             "POST",
             f"{args.base_url.rstrip('/')}/v1/router/debug",
             token=args.token,
-            payload=payload_for(case),
+            payload=benchmark_payload(case),
             timeout=args.timeout,
         )
-        case_failures = evaluate(case, data)
+        case_failures = benchmark_failures(case, data)
         failures += len(case_failures)
         rows.append(
             {
@@ -221,7 +120,10 @@ def run_route_suite(args: argparse.Namespace, cases: list[BenchCase]) -> tuple[l
     return rows, failures
 
 
-def run_live_suite(args: argparse.Namespace, cases: list[BenchCase]) -> tuple[list[dict[str, Any]], int]:
+def run_live_suite(
+    args: argparse.Namespace,
+    cases: list[Any],
+) -> tuple[list[dict[str, Any]], int]:
     rows: list[dict[str, Any]] = []
     failures = 0
     selected_cases = [case for case in cases if args.live_deep or case.live_default]
@@ -230,7 +132,7 @@ def run_live_suite(args: argparse.Namespace, cases: list[BenchCase]) -> tuple[li
             "POST",
             f"{args.base_url.rstrip('/')}/v1/messages",
             token=args.token,
-            payload=payload_for(case),
+            payload=benchmark_payload(case),
             timeout=args.timeout,
         )
         text = text_from_message(data)
@@ -305,7 +207,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    cases = list(CASES)
+    cases = list(BENCHMARK_CASES)
     rows, failures = run_route_suite(args, cases)
     if args.live:
         live_rows, live_failures = run_live_suite(args, cases)

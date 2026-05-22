@@ -251,6 +251,26 @@ class GatewayTestCase(unittest.TestCase):
         self.assertTrue(admin_response.json()["openrouter_configured"])
         self.assertIn("cost_target", admin_response.json())
 
+    def test_admin_benchmark_reports_setup_and_route_results_without_upstream_call(self) -> None:
+        response = self.client.post("/v1/admin/benchmark", headers=self.headers, json={})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertFalse(data["summary"]["spends_credits"])
+        self.assertEqual(data["summary"]["mode"], "safe_router_only")
+        self.assertGreaterEqual(data["summary"]["passed"], 10)
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
+        rows = {row["id"]: row for row in data["results"]}
+        self.assertEqual(rows["simple_pro"]["status"], "OK")
+        self.assertFalse(rows["simple_pro"]["orchestration"])
+        self.assertEqual(rows["current_web_auto"]["status"], "OK")
+        self.assertTrue(rows["current_web_auto"]["web_search"])
+        self.assertEqual(rows["tool_contract"]["status"], "OK")
+        self.assertFalse(rows["tool_contract"]["orchestration"])
+        self.assertEqual(rows["architecture_ultra"]["status"], "OK")
+        self.assertLessEqual(rows["architecture_ultra"]["cost_ratio"], 0.4)
+
     def test_public_stream_normalizes_overlapping_anthropic_text_deltas(self) -> None:
         payloads = [
             {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Se"}},
