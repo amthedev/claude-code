@@ -155,31 +155,31 @@ def model_profiles(settings: Settings) -> list[ModelProfile]:
     return [
         ModelProfile(
             id=settings.economy_public_model,
-            display_name="Frontier AI Economy",
+            display_name="Claude Haiku 4.5",
             mode="economy",
             description="Caminho econômico para conversas e tarefas simples.",
         ),
         ModelProfile(
             id=settings.pro_public_model,
-            display_name="Frontier AI Pro",
+            display_name="Claude Sonnet 4.6",
             mode="pro",
             description="Mais força para código, análise e trabalho diário.",
         ),
         ModelProfile(
             id=settings.ultra_public_model,
-            display_name="Frontier AI Ultra",
+            display_name="Claude Opus 4.7",
             mode="ultra",
             description="Rota reforçada para tarefas críticas e projetos maiores.",
         ),
         ModelProfile(
             id=settings.ui_public_model,
-            display_name="Frontier AI UI",
+            display_name="Claude Code UI",
             mode="ui",
             description="Especialista em frontend, layout e experiência visual.",
         ),
         ModelProfile(
             id=settings.auto_public_model,
-            display_name="Frontier AI Auto",
+            display_name="Claude Code Auto",
             mode="auto",
             description="Escolhe automaticamente entre Economy, Pro, Ultra e UI.",
         ),
@@ -267,13 +267,13 @@ class RoutePlanner:
         )
         has_tool_contract = payload_has_tool_contract(payload)
         is_streaming = bool(payload.get("stream"))
-        deep_stream_request = is_streaming and self._needs_deep_reasoning(task_type, complexity)
+        deep_request = self._needs_deep_reasoning(task_type, complexity)
         can_orchestrate = (
             self.settings.enable_agent_orchestration
             and not has_tool_contract
             and mode in {"pro", "ultra", "ui"}
             and pipeline_cost.within_budget
-            and (not is_streaming or deep_stream_request)
+            and deep_request
         )
         use_orchestration = can_orchestrate or (
             force_orchestration and mode in {"pro", "ultra", "ui"} and pipeline_cost.within_budget

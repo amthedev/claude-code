@@ -107,7 +107,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=um-token-emergencial-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
-OPENROUTER_APP_NAME=Frontier AI
+OPENROUTER_APP_NAME=Claude Code
 ENABLE_WEB_SEARCH=true
 WEB_SEARCH_MODEL=gpt-5.5
 WEB_SEARCH_CONTEXT_SIZE=low
@@ -154,7 +154,7 @@ curl https://SEU-SUBDOMINIO.squareweb.app/v1/budget \
    Adicionar logs estruturados, alertas de orcamento e painel de uso por cliente.
 
 6. Marca.
-   A UI publica agora usa a marca Frontier AI. Para producao, mantenha a compatibilidade com Claude Code apenas nos aliases de API e materiais tecnicos, deixando a experiencia final com identidade propria.
+   A UI publica usa a marca Claude. Para producao, mantenha a compatibilidade com Claude Code nos aliases de API e materiais tecnicos, deixando a experiencia final consistente para o cliente.
 
 ## Verificacao feita
 

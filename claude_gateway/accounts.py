@@ -1008,7 +1008,8 @@ def _calculate_limit(
             "computedDailyTokens": manual_limit,
             "maxCostUsd": 0.0,
         }
-    max_cost_brl = monthly_revenue * (1 - settings.customer_profit_margin)
+    margin = min(max(settings.customer_profit_margin, 0.50), 0.95)
+    max_cost_brl = monthly_revenue * (1 - margin)
     max_cost_usd = max_cost_brl / max(0.01, settings.usd_to_brl)
     daily_cost_usd = max_cost_usd / 30
     computed = math.floor(daily_cost_usd / PLAN_LIMIT_TOKEN_PRICE)

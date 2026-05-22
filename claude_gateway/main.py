@@ -78,7 +78,7 @@ Return implementation guidance that helps write better code: file structure, API
 small pitfalls, and verification. Prefer concrete decisions over options. Keep it short. Do not mention Gemini,
 internal routing, providers, or hidden helpers."""
 
-SUPPORT_ASSISTANT_PROMPT = """Você é o primeiro atendimento de suporte do app Frontier AI em português do Brasil.
+SUPPORT_ASSISTANT_PROMPT = """Você é o primeiro atendimento de suporte do app Claude em português do Brasil.
 Resolva dúvidas simples sobre login, planos, Pix, GitHub, ZIP/pastas, limite de tokens, chat, histórico, suporte e uso geral.
 Se a mensagem pedir pessoa humana, "mano", atendente, dono/admin, reembolso/estorno, cobrança indevida, conta invadida,
 pagamento aprovado sem liberar plano, dado sensível exposto, ameaça jurídica, ou algo que exija ação manual no banco,
@@ -95,7 +95,7 @@ def create_app(
     resolved_settings = settings or get_settings()
     openapi_url = "/openapi.json" if resolved_settings.expose_openapi else None
     app = FastAPI(
-        title="Frontier AI",
+        title="Claude Code Gateway",
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
@@ -1186,7 +1186,7 @@ async def _create_mercado_pago_pix_payment(
     base_url = _public_base_url(request, app.state.settings)
     payload = {
         "transaction_amount": float(purchase["price"]),
-        "description": f"Frontier AI {purchase['plan']}",
+        "description": f"Claude {purchase['plan']}",
         "payment_method_id": "pix",
         "external_reference": purchase["id"],
         "payer": _mercado_pago_payment_payer(purchase),
@@ -1227,7 +1227,7 @@ async def _create_mercado_pago_subscription(
 
     base_url = _public_base_url(request, app.state.settings)
     payload = {
-        "reason": f"Assinatura Frontier AI {purchase['plan']}",
+        "reason": f"Assinatura Claude {purchase['plan']}",
         "external_reference": purchase["id"],
         "payer_email": purchase["login"],
         "auto_recurring": {
@@ -1393,8 +1393,8 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
         "items": [
             {
                 "id": purchase["planId"],
-                "title": f"Frontier AI {purchase['plan']}",
-                "description": f"Plano {purchase['plan']} do Frontier AI",
+                "title": f"Claude {purchase['plan']}",
+                "description": f"Plano {purchase['plan']} do Claude",
                 "quantity": 1,
                 "currency_id": "BRL",
                 "unit_price": float(purchase["price"]),
@@ -1457,9 +1457,9 @@ def _mercado_pago_payment_payer(purchase: dict[str, Any]) -> dict[str, Any]:
 def _split_payer_name(name: Any) -> tuple[str, str]:
     parts = [part for part in str(name or "").strip().split() if part]
     if not parts:
-        return "Cliente", "Frontier"
+        return "Cliente", "Claude"
     if len(parts) == 1:
-        return parts[0][:40], "Frontier"
+        return parts[0][:40], "Claude"
     return parts[0][:40], " ".join(parts[1:])[:80]
 
 
@@ -1670,9 +1670,9 @@ def _with_public_model_identity(
     label = _public_model_label(public_model, settings)
     today = datetime.now(ZoneInfo("America/Recife")).strftime("%Y-%m-%d")
     prompt = (
-        f"Public Frontier AI profile: the user selected {label} for this chat. "
+        f"Public Claude profile: the user selected {label} for this chat. "
         f"Current date for user-facing and factual work: {today}, timezone America/Recife. "
-        f"Keep Anthropic-compatible Claude Code API behavior while presenting Frontier AI clearly: be helpful, "
+        f"Keep Anthropic-compatible Claude Code API behavior while presenting Claude clearly: be helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
         f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
@@ -1716,6 +1716,8 @@ async def _with_openai_execution_guidance(
 ) -> dict[str, Any]:
     settings = app.state.settings
     if not _allow_openai_helper(auth, settings) or not app.state.openai_helper:
+        return payload
+    if payload_has_tool_contract(payload) or not _needs_internal_guidance(decision):
         return payload
 
     wants_design = settings.enable_openai_design_director and (
@@ -1772,6 +1774,8 @@ async def _with_gemini_code_guidance(
     settings = app.state.settings
     if not settings.enable_gemini_code_helper or not settings.openrouter_api_key:
         return payload
+    if payload_has_tool_contract(payload) or not _needs_internal_guidance(decision):
+        return payload
     if decision.use_orchestration:
         return payload
     if decision.mode == "economy" or decision.task_type == "explanation":
@@ -1819,6 +1823,17 @@ async def _with_gemini_code_guidance(
             f"{guidance[:3000]}"
         ),
     )
+
+
+def _needs_internal_guidance(decision: RouteDecision) -> bool:
+    return decision.complexity in {"high", "critical"} or decision.task_type in {
+        "architecture",
+        "debugging",
+        "file_edit",
+        "frontend",
+        "review",
+        "testing",
+    }
 
 
 def _extract_text_blocks(response: dict[str, Any]) -> str:
@@ -2219,20 +2234,23 @@ def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any
 
 def _public_model_label(public_model: str, settings: Settings) -> str:
     labels = {
-        settings.economy_public_model: "Frontier AI Economy",
-        settings.pro_public_model: "Frontier AI Pro",
-        settings.ultra_public_model: "Frontier AI Ultra",
-        settings.ui_public_model: "Frontier AI UI",
-        settings.auto_public_model: "Frontier AI Auto",
+        settings.economy_public_model: "Claude Haiku 4.5",
+        settings.pro_public_model: "Claude Sonnet 4.6",
+        settings.ultra_public_model: "Claude Opus 4.7",
+        settings.ui_public_model: "Claude Code UI",
+        settings.auto_public_model: "Claude Code Auto",
     }
     return labels.get(public_model, public_model)
 
 
 def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:
     try:
-        requested = int(payload.get("max_tokens") or settings.max_request_output_tokens)
+        if payload.get("max_tokens") is None:
+            requested = min(4096, settings.max_request_output_tokens)
+        else:
+            requested = int(payload.get("max_tokens") or settings.max_request_output_tokens)
     except (TypeError, ValueError):
-        requested = settings.max_request_output_tokens
+        requested = min(4096, settings.max_request_output_tokens)
     return max(1, min(requested, settings.max_request_output_tokens))
 
 

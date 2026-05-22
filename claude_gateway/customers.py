@@ -287,7 +287,7 @@ def daily_cost_budget_usd(plan: CustomerPlan, settings: Settings) -> float:
         )
         token_price = (price.prompt + price.completion) if price else 0.000000336
         return max(0.00000001, plan.daily_token_limit * token_price * settings.cost_reserve_multiplier)
-    margin = min(max(settings.customer_profit_margin, 0.0), 0.95)
+    margin = min(max(settings.customer_profit_margin, 0.50), 0.95)
     exchange = max(0.01, settings.usd_to_brl)
     return max(0.0, plan.monthly_price_brl * (1 - margin) / exchange / 30)
 

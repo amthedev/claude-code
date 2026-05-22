@@ -1,6 +1,6 @@
-# Frontier AI Gateway
+# Claude Code Gateway
 
-FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, supports optional OpenAI web search, and keeps Claude Code tool use safe by proxying tool and streaming calls directly upstream.
+FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, supports optional OpenAI web search, and keeps Claude Code tool use safe by proxying tool calls directly upstream.
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ The default model combo is tuned for Claude Code terminal work: direct tool call
 - `google/gemini-2.5-flash-lite`: cheap code helper for implementation structure, edge cases, and verification.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
-Every request also receives a Frontier AI public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
+Every request also receives a Claude public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
 
 See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and terminal setup.
 
@@ -110,7 +110,7 @@ OPENAI_HELPER_MODEL=gpt-5.5
 
 ## Optional Web Search
 
-When `OPENAI_API_KEY` is configured, Frontier AI can run a lightweight OpenAI Responses API `web_search` pass before the main model only when fresh information is needed or when the request sets `gateway_web_search` to `required`.
+When `OPENAI_API_KEY` is configured, Claude can run a lightweight OpenAI Responses API `web_search` pass before the main model only when fresh information is needed or when the request sets `gateway_web_search` to `required`.
 
 ```env
 ENABLE_WEB_SEARCH=true
@@ -234,6 +234,8 @@ QUOTA_DATA_FILE=data/customer_usage.json
 ACCOUNT_DATA_FILE=data/accounts.json
 ```
 
+`CUSTOMER_PROFIT_MARGIN` has a hard safety floor of `0.50`: even if it is configured lower by mistake, paid plans reserve at most 50% of the customer's payment for API cost.
+
 Format:
 
 ```text
@@ -264,7 +266,7 @@ model = "claude-code-pro"
 model_provider = "claude_gateway"
 
 [model_providers.claude_gateway]
-name = "Frontier AI Gateway"
+name = "Claude Code Gateway"
 base_url = "https://your-subdomain.squareweb.app/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -299,7 +301,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
 OPENROUTER_SITE_URL=https://your-subdomain.squareweb.app
-OPENROUTER_APP_NAME=Frontier AI
+OPENROUTER_APP_NAME=Claude Code
 ENABLE_WEB_SEARCH=true
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
@@ -313,9 +315,10 @@ See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_RE
 
 Claude Code relies heavily on streaming and tool calls. For that reason:
 
-- requests with `stream: true` are proxied directly to one selected OpenRouter model;
+- simple `stream: true` requests are proxied directly to one selected OpenRouter model;
+- deep text-only streaming requests may use the internal pipeline and then stream the final answer;
 - requests with `tools`, `tool_choice`, `tool_use`, or `tool_result` are proxied directly;
-- non-streaming text-only requests can use the multi-agent pipeline.
+- text-only requests use the multi-agent pipeline only when the router sees real depth, such as debugging, architecture, review, file edits, testing, or frontend work.
 
 This keeps the gateway compatible with Claude Code while still supporting agent debate for normal API calls.
 

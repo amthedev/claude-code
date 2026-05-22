@@ -1,4 +1,4 @@
-# Frontier AI production readiness
+# Claude Code production readiness
 
 Este checklist prepara o projeto para vender acesso real na Square Cloud sem depender de configuração manual frágil.
 
@@ -12,7 +12,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=um-token-admin-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
-OPENROUTER_APP_NAME=Frontier AI
+OPENROUTER_APP_NAME=Claude Code
 ENABLE_WEB_SEARCH=true
 WEB_SEARCH_MODEL=gpt-5.5
 WEB_SEARCH_CONTEXT_SIZE=low
@@ -37,6 +37,7 @@ EXPOSE_OPENAPI=false
 - O chat responde com pesquisa web em `Auto` apenas para pedidos atuais, e com fontes quando usar dados da internet.
 - O toggle `Web` força pesquisa; `Off` impede pesquisa.
 - Gift cards, contas, compras e uso diário persistem no mesmo SQLite.
+- Planos pagos reservam no máximo 50% do valor recebido para custo de API, mesmo se `CUSTOMER_PROFIT_MARGIN` for configurado abaixo disso por engano.
 - Admin usa senha/hash no backend e `GATEWAY_API_KEYS` forte.
 
 ## Smoke tests

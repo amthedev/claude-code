@@ -116,7 +116,7 @@ class Settings:
     enable_gemini_code_helper: bool = True
 
     openrouter_site_url: str = "http://localhost:8787"
-    openrouter_app_name: str = "Frontier AI"
+    openrouter_app_name: str = "Claude Code"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -202,7 +202,7 @@ class Settings:
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",
-                "Frontier AI",
+                "Claude Code",
             ),
         )
 

@@ -16,17 +16,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-economy",
-      label: "Claude Haiku",
+      label: "Claude Haiku 4.5",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude Sonnet",
+      label: "Claude Sonnet 4.6",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-ultra",
-      label: "Claude Opus",
+      label: "Claude Opus 4.7",
       usdPerToken: 0.00000087,
     },
   };
@@ -189,7 +189,8 @@ const ClaudeApp = (() => {
 
   function calculateLimit(priceBrl, modelKey, manualLimit) {
     const monthlyRevenue = Math.max(0, Number(priceBrl) || 0);
-    const maxCostBrl = monthlyRevenue * (1 - MIN_PROFIT_MARGIN);
+    const protectedMargin = Math.max(0.5, MIN_PROFIT_MARGIN);
+    const maxCostBrl = monthlyRevenue * (1 - protectedMargin);
     const maxCostUsd = maxCostBrl / USD_TO_BRL;
     const dailyCostUsd = maxCostUsd / 30;
     const computedDailyTokens = Math.floor(dailyCostUsd / PLAN_LIMIT_USD_PER_TOKEN);
@@ -200,7 +201,7 @@ const ClaudeApp = (() => {
       dailyLimit: Math.max(0, dailyLimit),
       computedDailyTokens: Math.max(0, computedDailyTokens),
       maxCostUsd,
-      protectedProfitBrl: monthlyRevenue * MIN_PROFIT_MARGIN,
+      protectedProfitBrl: monthlyRevenue * protectedMargin,
     };
   }
 

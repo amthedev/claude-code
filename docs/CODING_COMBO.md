@@ -58,7 +58,7 @@ ENABLE_AGENT_ORCHESTRATION=true
 ## Regras do roteador
 
 - `claude-code-economy`: força o caminho barato.
-- `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools/streaming incompatível, faz pipeline com DeepSeek/Kimi/Gemini.
+- `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools e o pedido realmente precisar de raciocínio profundo, faz pipeline com DeepSeek/Kimi/Gemini.
 - `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e só sobe para DeepSeek R1 em tarefas críticas.
 - `claude-code-ui`: usa Qwen3 Coder Next para construir frontend, DeepSeek Flash para correções simples e Hy3 para raciocínio de UI.
 - `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
@@ -68,9 +68,9 @@ Para compatibilidade com Claude Code, chamadas com `tools`, `tool_choice`, `tool
 
 ## Compatibilidade de resposta Anthropic
 
-O gateway injeta um perfil público do Frontier AI em cada chamada, mantendo compatibilidade Anthropic:
+O gateway injeta um perfil público do Claude em cada chamada, mantendo compatibilidade Anthropic:
 
-- responde usando a identidade pública selecionada (`Frontier AI Economy`, `Frontier AI Pro`, `Frontier AI Ultra`, `Frontier AI UI` ou `Frontier AI Auto`);
+- responde usando a identidade pública selecionada (`Claude Haiku 4.5`, `Claude Sonnet 4.6`, `Claude Opus 4.7`, `Claude Code UI` ou `Claude Code Auto`);
 - preserva compatibilidade com Anthropic Messages API, streaming e tool calls;
 - mantém tom de Claude Code: direto, cuidadoso com código, orientado a arquivos/comandos/testes;
 - evita mencionar provedores internos, roteamento e agentes escondidos, salvo quando o usuário pedir detalhes técnicos.

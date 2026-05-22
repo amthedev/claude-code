@@ -13,8 +13,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from claude_gateway.anthropic import clean_model_text
+from claude_gateway.accounts import _calculate_limit
 from claude_gateway.config import Settings
-from claude_gateway.customers import _today, parse_customer_accounts
+from claude_gateway.customers import _today, daily_cost_budget_usd, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.openrouter import OpenRouterClient
 from claude_gateway.research import WebSearchResult, WebSource, parse_web_search_response
@@ -910,9 +911,8 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
-        self.assertEqual(len(self.app.state.openrouter.calls), 2)
-        self.assertEqual(self.app.state.openrouter.calls[0][0], "google/gemini-2.5-flash-lite")
-        self.assertIn("Internal Gemini coding guidance", self.app.state.openrouter.calls[-1][1]["system"])
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertNotIn("Internal Gemini coding guidance", str(self.app.state.openrouter.calls[-1][1]))
 
     def test_auto_routes_terminal_file_edits_to_pro_coder(self) -> None:
         response = self.client.post(
@@ -949,6 +949,22 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["model"], "claude-code-pro")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
+
+    def test_simple_pro_request_uses_single_fast_call_and_smaller_default_output(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "messages": [{"role": "user", "content": "Explique uma função Python simples"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertEqual(payload["max_tokens"], 4096)
+        self.assertNotIn("Internal Gemini coding guidance", str(payload))
 
     def test_openai_helper_can_review_agent_pipeline_for_admin(self) -> None:
         settings = make_settings()
@@ -1020,6 +1036,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(stable["web_search_policy"], "auto")
         self.assertFalse(stable["web_search_should_search"])
         self.assertEqual(stable["web_search_reason"], "stable_request")
+        self.assertFalse(stable["use_orchestration"])
 
         response = self.client.post(
             "/v1/router/debug",
@@ -1302,7 +1319,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.json()["requested_model"], "claude-code-economy")
             self.assertEqual(response.json()["public_model"], "claude-code-economy")
 
-    def test_openai_design_director_guides_frontend_tool_requests(self) -> None:
+    def test_frontend_tool_requests_skip_internal_helpers_for_speed(self) -> None:
         settings = make_settings()
         settings.openai_api_key = "test-openai-token"
         app = create_app(
@@ -1329,15 +1346,13 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(app.state.openai_helper.calls), 1)
-        self.assertEqual(len(app.state.openrouter.calls), 2)
-        self.assertEqual(app.state.openrouter.calls[0][0], "google/gemini-2.5-flash-lite")
+        self.assertEqual(app.state.openai_helper.calls, [])
+        self.assertEqual(len(app.state.openrouter.calls), 1)
         payload = app.state.openrouter.calls[-1][1]
-        self.assertIn("Internal execution guidance", payload["system"])
-        self.assertIn("Internal Gemini coding guidance", payload["system"])
-        self.assertIn("Use stricter validation", payload["system"])
+        self.assertNotIn("Internal execution guidance", str(payload))
+        self.assertNotIn("Internal Gemini coding guidance", str(payload))
 
-    def test_openai_decision_director_guides_pro_tool_requests(self) -> None:
+    def test_openai_decision_director_skips_simple_requests_for_speed(self) -> None:
         settings = make_settings()
         settings.openai_api_key = "test-openai-token"
         app = create_app(
@@ -1353,22 +1368,31 @@ class GatewayTestCase(unittest.TestCase):
             json={
                 "model": "claude-code-pro",
                 "max_tokens": 256,
-                "tools": [{"name": "write_file", "input_schema": {"type": "object"}}],
                 "messages": [
                     {
                         "role": "user",
-                        "content": "Implemente uma API e escolha a melhor estrutura de arquivos",
+                        "content": "Explique uma função Python simples",
                     }
                 ],
             },
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(app.state.openai_helper.calls), 1)
-        self.assertIn("decision director", app.state.openai_helper.calls[0]["instructions"])
+        self.assertEqual(app.state.openai_helper.calls, [])
+        self.assertEqual(len(app.state.openrouter.calls), 1)
         payload = app.state.openrouter.calls[-1][1]
-        self.assertIn("Internal execution guidance", payload["system"])
-        self.assertIn("choose defaults", payload["system"])
+        self.assertNotIn("Internal execution guidance", str(payload))
+
+    def test_paid_customer_budget_has_half_revenue_safety_floor(self) -> None:
+        settings = make_settings()
+        settings.usd_to_brl = 5.0
+        settings.customer_profit_margin = 0.10
+        settings.customer_accounts = "paid-token|Maria|300|999999|claude-code-pro|true"
+        plan = parse_customer_accounts(settings)["paid-token"]
+
+        self.assertLessEqual(daily_cost_budget_usd(plan, settings), 300 * 0.50 / 5.0 / 30 + 1e-9)
+        limit = _calculate_limit(300, "sonnet", 999999999, settings)
+        self.assertLessEqual(float(limit["maxCostUsd"]), 300 * 0.50 / 5.0 + 1e-9)
 
     def test_customer_quota_blocks_before_upstream_call(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -1795,7 +1819,7 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
-        self.assertIn("Frontier AI Ultra", payload["system"])
+        self.assertIn("Claude Opus 4.7", payload["system"])
         self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
         self.assertIn("Automatic senior skill routing is active", payload["system"])
@@ -1851,7 +1875,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("Frontier AI Pro", payload["system"])
+        self.assertIn("Claude Sonnet 4.6", payload["system"])
         self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 16000)
 
@@ -1886,7 +1910,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["model"], "claude-code-ultra")
-        self.assertIn("Frontier AI Ultra", response.json()["content"][0]["text"])
+        self.assertIn("Claude Opus 4.7", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_streaming_model_identity_question_returns_selected_public_model(self) -> None:
@@ -1904,7 +1928,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"Frontier AI Pro", body)
+        self.assertIn(b"Claude Sonnet 4.6", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

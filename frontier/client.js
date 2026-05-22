@@ -16,7 +16,10 @@ let activeCodeFiles = [];
 let activeChatMode = localStorage.getItem("claude_frontier_active_chat_mode") || "chat";
 let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "full";
 let codeOutputMode = localStorage.getItem("claude_frontier_code_output_mode") || "normal";
-let webSearchMode = localStorage.getItem("frontier_web_search_mode") || "auto";
+let webSearchMode =
+  localStorage.getItem("claude_web_search_mode") ||
+  localStorage.getItem("frontier_web_search_mode") ||
+  "auto";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -80,7 +83,7 @@ const promptSuggestions = {
     ],
   },
   choice: {
-    title: "Escolha da Frontier",
+    title: "Escolha do Claude",
     items: [
       "Escolha o melhor modelo para esta tarefa",
       "Transforme uma ideia solta em plano",
@@ -447,13 +450,13 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Claude Sonnet";
+  return option?.textContent || "Claude Sonnet 4.6";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet";
+    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet 4.6";
   });
 }
 
@@ -1082,9 +1085,9 @@ function syncCustomerApiToken(current) {
 
 function modelKeyLabel(modelKey) {
   const key = ClaudeApp.normalizeModelKey(modelKey);
-  if (key === "haiku") return "Claude Haiku";
-  if (key === "sonnet") return "Claude Sonnet";
-  return "Claude Opus";
+  if (key === "haiku") return "Claude Haiku 4.5";
+  if (key === "sonnet") return "Claude Sonnet 4.6";
+  return "Claude Opus 4.7";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1107,7 +1110,7 @@ function renderPlanCards() {
     notice.classList.toggle("hidden", !highlightedPlanId);
     notice.textContent =
       highlightedPlanId === "ultra"
-        ? "Frontier Ultra está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
+        ? "Claude Opus 4.7 está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
         : "";
   }
   target.innerHTML = ClaudeApp.paidPlans()
@@ -1132,7 +1135,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Claude Opus para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Claude Sonnet para trabalho diário." : "Inclui Claude Haiku para tarefas leves."}</p>
+            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Claude Opus 4.7 para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Claude Sonnet 4.6 para trabalho diário." : "Inclui Claude Haiku 4.5 para tarefas leves."}</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -3652,7 +3655,8 @@ document.querySelector("#codeOutputMenu").addEventListener("click", (event) => {
 document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
   button.addEventListener("click", () => {
     webSearchMode = button.dataset.webSearchMode || "auto";
-    localStorage.setItem("frontier_web_search_mode", webSearchMode);
+    localStorage.setItem("claude_web_search_mode", webSearchMode);
+    localStorage.removeItem("frontier_web_search_mode");
     renderWebSearchControls();
   });
 });
@@ -3681,7 +3685,7 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
     focusHighlightedPlan();
     showChatNotice(
       item.dataset.modelValue === "claude-code-ultra"
-        ? "Frontier Ultra está no plano Max 30X."
+        ? "Claude Opus 4.7 está no plano Max 30X."
         : "Esse modelo exige upgrade de plano.",
     );
     return;
