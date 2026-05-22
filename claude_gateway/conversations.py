@@ -183,9 +183,94 @@ def _title_from_messages(messages: list[dict[str, str]]) -> str:
     cleaned = cleaned.split("Anexos:", 1)[0].strip()
     if not cleaned:
         return "Nova conversa"
-    if len(cleaned) <= 54:
+    if _is_literal_title(cleaned):
         return cleaned
-    return f"{cleaned[:54].rstrip()}..."
+    semantic = _semantic_title(cleaned)
+    if semantic:
+        return semantic
+    if len(cleaned) <= 42:
+        return cleaned
+    return f"{cleaned[:42].rstrip()}..."
+
+
+def _is_literal_title(text: str) -> bool:
+    normalized = " ".join(text.lower().replace("?", "").replace("!", "").split())
+    words = normalized.split()
+    if len(words) <= 3:
+        return True
+    greetings = {
+        "oi",
+        "ola",
+        "olá",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "tudo bem",
+        "oi tudo bem",
+        "olá tudo bem",
+        "ola tudo bem",
+    }
+    return normalized in greetings
+
+
+def _semantic_title(text: str) -> str:
+    value = text.strip()
+    lowered = value.lower()
+    greetings = ("bom dia", "boa tarde", "boa noite", "oi", "olá", "ola")
+    for greeting in greetings:
+        if lowered.startswith(f"{greeting},"):
+            value = value[len(greeting) + 1 :].strip()
+            lowered = value.lower()
+            break
+
+    patterns: list[tuple[tuple[str, ...], str]] = [
+        (("crie ", "criar ", "faça ", "faca ", "monte ", "desenvolva "), "Criação de"),
+        (("corrija ", "corrigir ", "arrume ", "conserte "), "Correção de"),
+        (("analise ", "analisar ", "revise ", "revisar "), "Análise de"),
+        (("planeje ", "planejar "), "Planejamento de"),
+        (("explique ", "explica ", "me explique "), "Explicação sobre"),
+        (("preciso de ", "preciso criar ", "quero criar ", "queria criar "), "Criação de"),
+        (("quero entender ", "preciso entender ", "me ensine "), "Guia de"),
+    ]
+    for prefixes, label in patterns:
+        for prefix in prefixes:
+            if lowered.startswith(prefix):
+                subject = value[len(prefix) :].strip(" .,:;!?")
+                subject = _strip_leading_articles(subject)
+                if subject:
+                    return _clamp_title(f"{label} {_title_case_pt(subject)}")
+
+    if any(word in lowered for word in ("bug", "erro", "falha", "quebr")):
+        return "Correção de Bug"
+    if any(word in lowered for word in ("app", "aplicativo", "site", "landing page", "sistema")):
+        return "Planejamento do Projeto"
+    return ""
+
+
+def _strip_leading_articles(value: str) -> str:
+    lowered = value.lower()
+    for prefix in ("um ", "uma ", "o ", "a ", "os ", "as "):
+        if lowered.startswith(prefix):
+            return value[len(prefix) :]
+    return value
+
+
+def _title_case_pt(value: str) -> str:
+    small = {"a", "o", "os", "as", "um", "uma", "de", "do", "da", "dos", "das", "e", "em", "para", "por", "com"}
+    words = value.split()
+    titled = []
+    for index, word in enumerate(words):
+        lowered = word.lower()
+        if index > 0 and lowered in small:
+            titled.append(lowered)
+        else:
+            titled.append(lowered[:1].upper() + lowered[1:])
+    return " ".join(titled)
+
+
+def _clamp_title(value: str) -> str:
+    cleaned = " ".join(value.split())
+    return cleaned if len(cleaned) <= 54 else f"{cleaned[:54].rstrip()}..."
 
 
 def _now() -> str:

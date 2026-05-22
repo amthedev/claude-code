@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import base64
 import io
-import json
 import secrets
+import shlex
 import shutil
 import sqlite3
+import subprocess
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,16 @@ from .config import Settings
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 MAX_FILE_BYTES = 800 * 1024
 MAX_FILES = 1500
+MAX_COMMAND_SECONDS = 60
+DEFAULT_ALLOWED_COMMANDS = {
+    "python3 -m pytest -q",
+    "python -m pytest -q",
+    "pytest -q",
+    "npm test",
+    "npm run test",
+    "npm run lint",
+    "npm run build",
+}
 
 
 class CodeWorkspaceStore:
@@ -101,6 +112,72 @@ class CodeWorkspaceStore:
             source="upload",
         )
 
+    def create_from_base64_files(self, token: str, values: dict[str, Any]) -> dict[str, Any]:
+        files = values.get("files")
+        if not isinstance(files, list) or not files:
+            raise HTTPException(status_code=400, detail="Arquivos da pasta são obrigatórios.")
+        if len(files) > MAX_FILES:
+            raise HTTPException(status_code=413, detail=f"Pasta excede {MAX_FILES} arquivos.")
+
+        decoded_files: list[tuple[str, bytes]] = []
+        total_bytes = 0
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            relative_path = str(item.get("path") or "").strip().replace("\\", "/")
+            raw = str(item.get("contentBase64") or item.get("content_base64") or "")
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            if not relative_path or _ignored_path(relative_path):
+                continue
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Arquivo inválido: {relative_path}") from exc
+            total_bytes += len(data)
+            if total_bytes > MAX_ARCHIVE_BYTES * 4:
+                raise HTTPException(status_code=413, detail="Pasta grande demais.")
+            decoded_files.append((relative_path, data))
+
+        if not decoded_files:
+            raise HTTPException(status_code=400, detail="Nenhum arquivo válido encontrado na pasta.")
+
+        workspace_id = f"code_{secrets.token_hex(12)}"
+        now = _now()
+        with self._connect() as db:
+            account = self._account_by_token(db, token)
+            workspace_dir = self._workspace_dir(account["id"], workspace_id)
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                root_prefix = _common_root_prefix([path for path, _ in decoded_files])
+                count = 0
+                for relative_path, data in decoded_files:
+                    if root_prefix and relative_path.startswith(root_prefix):
+                        relative_path = relative_path[len(root_prefix) :]
+                    relative_path = relative_path.strip("/")
+                    if not relative_path or _ignored_path(relative_path):
+                        continue
+                    target = _safe_child(workspace_dir, relative_path)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
+                    count += 1
+            except Exception:
+                shutil.rmtree(workspace_dir, ignore_errors=True)
+                raise
+            display_name = (str(values.get("name") or "").strip() or "Pasta de código")[:120]
+            db.execute(
+                """
+                INSERT INTO code_workspaces (
+                    id, account_id, name, source, repo_url, ref, file_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (workspace_id, account["id"], display_name, "folder", "", "", count, now, now),
+            )
+            db.commit()
+            return _workspace_from_row(
+                db.execute("SELECT * FROM code_workspaces WHERE id = ?", (workspace_id,)).fetchone()
+            )
+
     def list_files(self, token: str, workspace_id: str) -> dict[str, Any]:
         workspace, workspace_dir = self._workspace_for_token(token, workspace_id)
         files: list[dict[str, Any]] = []
@@ -153,6 +230,50 @@ class CodeWorkspaceStore:
             )
             db.commit()
         return {"workspace": {**workspace, "updatedAt": now}, "path": file_path, "saved": True}
+
+    def run_command(self, token: str, workspace_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        workspace, workspace_dir = self._workspace_for_token(token, workspace_id)
+        command = " ".join(shlex.split(str(values.get("command") or "")))
+        if not command:
+            raise HTTPException(status_code=400, detail="Comando é obrigatório.")
+        if command not in DEFAULT_ALLOWED_COMMANDS:
+            raise HTTPException(
+                status_code=400,
+                detail="Comando não permitido. Use testes/builds seguros como npm test, npm run build ou python -m pytest -q.",
+            )
+        try:
+            timeout_value = int(values.get("timeoutSeconds") or MAX_COMMAND_SECONDS)
+        except (TypeError, ValueError):
+            timeout_value = MAX_COMMAND_SECONDS
+        timeout = max(1, min(timeout_value, MAX_COMMAND_SECONDS))
+        try:
+            completed = subprocess.run(
+                shlex.split(command),
+                cwd=workspace_dir,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Comando não encontrado: {command}") from exc
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "workspace": workspace,
+                "command": command,
+                "exitCode": None,
+                "timedOut": True,
+                "stdout": (exc.stdout or "")[-12000:] if isinstance(exc.stdout, str) else "",
+                "stderr": (exc.stderr or "")[-12000:] if isinstance(exc.stderr, str) else "",
+            }
+        return {
+            "workspace": workspace,
+            "command": command,
+            "exitCode": completed.returncode,
+            "timedOut": False,
+            "stdout": completed.stdout[-12000:],
+            "stderr": completed.stderr[-12000:],
+        }
 
     def zip_bytes_for(self, token: str, workspace_id: str) -> tuple[str, bytes]:
         workspace, workspace_dir = self._workspace_for_token(token, workspace_id)

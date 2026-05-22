@@ -1187,7 +1187,7 @@ class GatewayTestCase(unittest.TestCase):
             )
             self.assertEqual(saved.status_code, 200)
             conversation = saved.json()["conversation"]
-            self.assertEqual(conversation["title"], "Boa noite, preciso de um app")
+            self.assertEqual(conversation["title"], "Criação de App")
 
             listed = client.get("/v1/conversations", headers=customer_headers)
             self.assertEqual(listed.status_code, 200)
@@ -1259,6 +1259,83 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(downloaded.status_code, 200)
             with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
                 self.assertEqual(archive.read("README.md").decode(), "# Atualizado\n")
+
+            command = client.post(
+                f"/v1/code/workspaces/{workspace_id}/terminal",
+                headers=customer_headers,
+                json={"command": "python3 -m pytest -q"},
+            )
+            self.assertEqual(command.status_code, 200)
+            self.assertEqual(command.json()["result"]["command"], "python3 -m pytest -q")
+
+    def test_customer_can_upload_code_workspace_from_folder_files(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Pasta",
+                    "login": "pasta@example.com",
+                    "password": "secret-code",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            uploaded = client.post(
+                "/v1/code/workspaces/upload",
+                headers=customer_headers,
+                json={
+                    "name": "Pasta teste",
+                    "files": [
+                        {
+                            "path": "minha-pasta/README.md",
+                            "contentBase64": base64.b64encode(b"# Pasta\n").decode(),
+                        },
+                        {
+                            "path": "minha-pasta/src/app.py",
+                            "contentBase64": base64.b64encode(b"print('pasta')\n").decode(),
+                        },
+                    ],
+                },
+            )
+            self.assertEqual(uploaded.status_code, 200)
+            self.assertEqual(uploaded.json()["workspace"]["source"], "folder")
+            workspace_id = uploaded.json()["workspace"]["id"]
+
+            files = client.get(f"/v1/code/workspaces/{workspace_id}/files", headers=customer_headers)
+            paths = {item["path"] for item in files.json()["files"]}
+            self.assertEqual(paths, {"README.md", "src/app.py"})
+
+    def test_github_workspace_requires_access_token(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Git",
+                    "login": "git@example.com",
+                    "password": "secret-code",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            response = client.post(
+                "/v1/code/workspaces/github",
+                headers=customer_headers,
+                json={"repoUrl": "https://github.com/amthedev/claude-code"},
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("chave", response.json()["detail"].lower())
 
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(

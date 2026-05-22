@@ -650,6 +650,11 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        payload = dict(payload)
+        if not str(payload.get("title") or "").strip():
+            generated_title = await _generate_conversation_title(app, payload)
+            if generated_title:
+                payload["title"] = generated_title
         return JSONResponse({"conversation": app.state.conversation_store.save_for_customer(auth.token, payload)})
 
     @app.get("/v1/code/workspaces")
@@ -667,7 +672,10 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        workspace = app.state.code_workspaces.create_from_base64_zip(auth.token, payload)
+        if isinstance(payload.get("files"), list):
+            workspace = app.state.code_workspaces.create_from_base64_files(auth.token, payload)
+        else:
+            workspace = app.state.code_workspaces.create_from_base64_zip(auth.token, payload)
         return JSONResponse({"workspace": workspace})
 
     @app.post("/v1/code/workspaces/github")
@@ -682,6 +690,11 @@ def create_app(
         repo_url = str(payload.get("repoUrl") or payload.get("repo_url") or "").strip()
         ref = str(payload.get("ref") or "").strip()
         github_token = str(payload.get("githubToken") or payload.get("github_token") or "").strip()
+        if not github_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Para importar GitHub, entre com sua conta GitHub ou informe uma chave de acesso.",
+            )
         zip_bytes, resolved_ref = await _download_github_zip(repo_url, ref, github_token)
         workspace = app.state.code_workspaces.create_from_zip(
             auth.token,
@@ -720,6 +733,18 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"file": app.state.code_workspaces.write_file(auth.token, workspace_id, payload)})
+
+    @app.post("/v1/code/workspaces/{workspace_id}/terminal")
+    async def run_code_workspace_command(
+        workspace_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"result": app.state.code_workspaces.run_command(auth.token, workspace_id, payload)})
 
     @app.get("/v1/code/workspaces/{workspace_id}/download")
     async def download_code_workspace(workspace_id: str, request: Request) -> StreamingResponse:
@@ -1435,6 +1460,78 @@ def _extract_text_blocks(response: dict[str, Any]) -> str:
             if isinstance(block, dict) and isinstance(block.get("text"), str):
                 chunks.append(block["text"])
     return "\n".join(chunks)
+
+
+async def _generate_conversation_title(app: FastAPI, payload: dict[str, Any]) -> str:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    user_messages = [
+        _conversation_message_text(message)
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "user"
+    ]
+    first_user = next((message for message in user_messages if message), "")
+    if not first_user or _literal_conversation_title(first_user):
+        return ""
+    if not app.state.openai_helper:
+        return ""
+
+    excerpt = "\n".join(
+        f"{message.get('role', 'user')}: {_conversation_message_text(message)[:900]}"
+        for message in messages[:8]
+        if isinstance(message, dict)
+    )
+    try:
+        title = await app.state.openai_helper.generate_text(
+            instructions=(
+                "Create a concise conversation title in Brazilian Portuguese. "
+                "Infer the user's real intent instead of copying the first sentence. "
+                "Use 2 to 7 words, title case, no quotes, no punctuation at the end. "
+                "For greetings or tiny small talk, return an empty string."
+            ),
+            input_text=excerpt[:5000],
+            max_output_tokens=40,
+        )
+    except Exception:
+        return ""
+    return _clean_generated_title(title)
+
+
+def _conversation_message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return " ".join(content.split())
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+        return " ".join(" ".join(parts).split())
+    return " ".join(str(content or "").split())
+
+
+def _literal_conversation_title(text: str) -> bool:
+    cleaned = _normalize_text(text.replace("?", "").replace("!", ""))
+    if len(cleaned.split()) <= 3:
+        return True
+    return cleaned in {
+        "oi",
+        "ola",
+        "oi tudo bem",
+        "ola tudo bem",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "tudo bem",
+    }
+
+
+def _clean_generated_title(value: str) -> str:
+    title = " ".join(value.replace("\n", " ").strip(" \t\"'`“”‘’.:;!-").split())
+    if not title or title.lower() in {"empty", "vazio", "sem titulo", "sem título"}:
+        return ""
+    return title[:54].rstrip()
 
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:

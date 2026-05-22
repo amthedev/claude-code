@@ -1608,6 +1608,25 @@ function updateMessage(message, text) {
   message.node.scrollIntoView({ block: "end" });
 }
 
+function startCodeProgressMessage(message) {
+  if (activeChatMode !== "code") return () => {};
+  const workspace = activeCodeWorkspace();
+  const fileCount = activeCodeFiles.length;
+  const stages = [
+    workspace ? `Analisando o projeto ${workspace.name}...` : "Preparando chat de código...",
+    fileCount ? `Mapeando ${ClaudeApp.integer.format(fileCount)} arquivos disponíveis...` : "Procurando arquivos do workspace...",
+    activeCodeFilePath ? `Lendo o arquivo aberto: ${activeCodeFilePath}` : "Escolhendo o contexto mais relevante...",
+    "Preparando resposta com próximos passos verificáveis...",
+  ];
+  let index = 0;
+  updateMessage(message, stages[index]);
+  const timer = window.setInterval(() => {
+    index = Math.min(index + 1, stages.length - 1);
+    updateMessage(message, stages[index]);
+  }, 2600);
+  return () => window.clearInterval(timer);
+}
+
 async function conversationRequest(path, options = {}) {
   const settings = ClaudeApp.apiSettings();
   const baseUrl = settings.baseUrl.replace(/\/$/, "");
@@ -1678,14 +1697,18 @@ function titleFromPrompt(prompt) {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "";
+  const words = cleaned.split(/\s+/);
+  if (words.length <= 3) return cleaned;
 
   const lower = cleaned.toLocaleLowerCase("pt-BR");
   const patterns = [
-    [/^(como|quero|queria|preciso)\s+(aprender|estudar|entender)\s+(.+)$/i, "Guia para $2 $3"],
+    [/^(bom dia|boa tarde|boa noite|oi|olá|ola),?\s+(.+)$/i, "$2"],
+    [/^(como|quero|queria|preciso)\s+(aprender|estudar|entender)\s+(.+)$/i, "Guia de $3"],
     [/^(me\s+ensine|ensine)\s+(.+)$/i, "Guia de $2"],
-    [/^(crie|criar|faça|faca|monte|desenvolva)\s+(.+)$/i, "Pedido: $2"],
-    [/^(corrija|corrigir|arrume|conserte)\s+(.+)$/i, "Correção: $2"],
-    [/^(planeje|planejar)\s+(.+)$/i, "Plano: $2"],
+    [/^(crie|criar|faça|faca|monte|desenvolva|preciso criar|quero criar|queria criar|preciso de)\s+(.+)$/i, "Criação de $2"],
+    [/^(corrija|corrigir|arrume|conserte)\s+(.+)$/i, "Correção de $2"],
+    [/^(analise|analisar|revise|revisar)\s+(.+)$/i, "Análise de $2"],
+    [/^(planeje|planejar)\s+(.+)$/i, "Plano de $2"],
   ];
   for (const [pattern, replacement] of patterns) {
     if (pattern.test(cleaned)) return toTitleCase(cleaned.replace(pattern, replacement));
@@ -1813,7 +1836,6 @@ async function saveConversationSnapshot(
       method: "POST",
       body: JSON.stringify({
         id: optimistic.id.startsWith("local_") ? "" : optimistic.id,
-        title: optimistic.title,
         messages: optimistic.messages,
       }),
     });
@@ -2027,6 +2049,36 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200) {
   return repairDuplicatedText(answer).trim() || "Sem resposta.";
 }
 
+function defaultWorkspaceTestCommand() {
+  const paths = new Set(activeCodeFiles.map((file) => file.path));
+  if (paths.has("package.json")) return "npm test";
+  if (paths.has("pyproject.toml") || paths.has("pytest.ini") || [...paths].some((path) => path.startsWith("tests/"))) {
+    return "python3 -m pytest -q";
+  }
+  return "";
+}
+
+function promptRequestsTerminal(prompt) {
+  const text = String(prompt || "").toLocaleLowerCase("pt-BR");
+  return codeOutputMode === "tests" || /\b(test|teste|testes|verifica|verifique|validar|valide|build|terminal)\b/i.test(text);
+}
+
+async function runWorkspaceCommand(command) {
+  if (!activeCodeWorkspaceId || !command) return null;
+  const data = await codeRequest(`/workspaces/${encodeURIComponent(activeCodeWorkspaceId)}/terminal`, {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+  return data.result;
+}
+
+function terminalResultMarkdown(result) {
+  if (!result) return "";
+  const status = result.timedOut ? "tempo esgotado" : `exit ${result.exitCode}`;
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim() || "Sem saída.";
+  return `\n\n**Terminal**\n\n\`${result.command}\` terminou com ${status}.\n\n\`\`\`text\n${output.slice(-4000)}\n\`\`\``;
+}
+
 async function submitPrompt(prompt, selectedModel, attachments = []) {
   const sessionKey = activeChatSessionKey;
   const current = account();
@@ -2054,11 +2106,26 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
     attachments,
   );
   const assistantMessage = addMessage("assistant", "Pensando...");
+  const stopCodeProgress = startCodeProgressMessage(assistantMessage);
 
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
+    stopCodeProgress();
     updateMessage(assistantMessage, partialAnswer);
   }, reservedOutput);
+  stopCodeProgress();
+  if (activeChatMode === "code" && promptRequestsTerminal(prompt)) {
+    const command = defaultWorkspaceTestCommand();
+    if (command) {
+      updateMessage(assistantMessage, `${answer}\n\nExecutando terminal: ${command}...`);
+      try {
+        const terminalResult = await runWorkspaceCommand(command);
+        answer = `${answer}${terminalResultMarkdown(terminalResult)}`;
+      } catch (error) {
+        answer = `${answer}\n\n**Terminal**\n\nNão consegui executar testes agora: ${error.message}`;
+      }
+    }
+  }
   updateMessage(assistantMessage, answer);
 
   const accounts = ClaudeApp.accounts();
@@ -2130,7 +2197,7 @@ function activeCodeWorkspaceContextBlock() {
     return [
       "Chat de código ativo.",
       "Nenhum workspace de código selecionado ainda.",
-      "Quando o usuário pedir para trabalhar em código, peça para escolher um projeto salvo, conectar um repo do Hub/GitHub ou subir um ZIP pelo ícone de projeto.",
+      "Quando o usuário pedir para trabalhar em código, peça para escolher um projeto salvo, conectar um repo autenticado do Hub/GitHub, subir um ZIP ou selecionar uma pasta pelo ícone de projeto.",
     ].join("\n");
   }
   const filePath = activeCodeFilePath;
@@ -2160,7 +2227,8 @@ function activeCodeWorkspaceContextBlock() {
     visibleFiles ? `Arquivos disponíveis:\n${visibleFiles}` : "",
     filePath ? `Arquivo aberto: ${filePath}` : "",
     fileContent ? `Conteúdo atual do arquivo aberto:\n\`\`\`\n${fileContent.slice(0, 12000)}\n\`\`\`` : "",
-    "Trabalhe como um chat de código: mantenha contexto do projeto, seja específico sobre arquivos, proponha patches ou próximos passos verificáveis e não peça tokens de GitHub ao usuário.",
+    "Terminal seguro disponível quando o usuário pedir verificação: npm test, npm run test, npm run build, npm run lint, pytest -q, python -m pytest -q ou python3 -m pytest -q.",
+    "Trabalhe como um chat de código: mantenha contexto do projeto, seja específico sobre arquivos, proponha patches ou próximos passos verificáveis e não peça tokens de GitHub quando já houver workspace ativo.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2216,13 +2284,16 @@ function renderCodeProjectChoices() {
   const query = (document.querySelector("#codeProjectSearch")?.value || "").trim().toLowerCase();
   const matches = (text) => !query || String(text || "").toLowerCase().includes(query);
   const visibleWorkspaces = codeWorkspaces.filter((workspace) => matches(`${workspace.name} ${workspace.repoUrl || ""}`));
+  const sourceLabel = (workspace) => (workspace.source === "github" ? "Git" : workspace.source === "folder" ? "DIR" : "ZIP");
+  const sourceDescription = (workspace) =>
+    workspace.source === "github" ? workspace.repoUrl || "GitHub" : workspace.source === "folder" ? "Pasta local" : "Pasta compactada";
   const workspaceButtons = visibleWorkspaces
     .map(
       (workspace) => `
         <button type="button" class="${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
-          <span>${workspace.source === "github" ? "Git" : "ZIP"}</span>
+          <span>${sourceLabel(workspace)}</span>
           <strong>${ClaudeApp.escapeHtml(workspace.name)}</strong>
-          <small>${ClaudeApp.escapeHtml(workspace.source === "github" ? workspace.repoUrl || "GitHub" : "Pasta compactada")}</small>
+          <small>${ClaudeApp.escapeHtml(sourceDescription(workspace))}</small>
         </button>
       `,
     )
@@ -2454,12 +2525,12 @@ function renderCodePanel() {
           (workspace) => `
             <button type="button" class="code-list-item ${workspace.id === activeCodeWorkspaceId ? "active" : ""}" data-code-workspace-id="${ClaudeApp.escapeHtml(workspace.id)}">
               <strong>${ClaudeApp.escapeHtml(workspace.name)}</strong>
-              <span>${ClaudeApp.escapeHtml(workspace.source === "github" ? workspace.repoUrl : "ZIP local")}</span>
+              <span>${ClaudeApp.escapeHtml(workspace.source === "github" ? workspace.repoUrl : workspace.source === "folder" ? "Pasta local" : "ZIP local")}</span>
             </button>
           `,
         )
         .join("")
-    : `<div class="empty-workspace"><p>Importe um repo ou suba um ZIP para começar.</p></div>`;
+    : `<div class="empty-workspace"><p>Importe um repo autenticado, ZIP ou pasta para começar.</p></div>`;
   if (!activeCodeWorkspaceId) {
     fileList.innerHTML = `<div class="empty-workspace"><p>Escolha um projeto.</p></div>`;
   }
@@ -2610,6 +2681,46 @@ async function uploadCodeWorkspaceFromFile(file, name = "") {
     showChatNotice(error.message);
     return null;
   }
+}
+
+async function uploadCodeWorkspaceFromFolder(files, name = "") {
+  const selectedFiles = [...(files || [])].filter((file) => file.webkitRelativePath || file.name);
+  if (!selectedFiles.length) {
+    showChatNotice("Escolha uma pasta.");
+    return null;
+  }
+  if (!ensureCodeCustomerSession()) return null;
+  setActiveChatMode("code");
+  setPanel("chatPanel");
+  showChatNotice("Subindo pasta...");
+  try {
+    const data = await codeRequest("/workspaces/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        name: name || folderNameFromFiles(selectedFiles),
+        files: await Promise.all(
+          selectedFiles.map(async (file) => ({
+            path: file.webkitRelativePath || file.name,
+            contentBase64: await fileToBase64(file),
+          })),
+        ),
+      }),
+    });
+    activeCodeWorkspaceId = data.workspace.id;
+    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
+    activeCodeFilePath = "";
+    await loadCodeWorkspaces();
+    showChatNotice(`Projeto ativo: ${data.workspace.name}`);
+    return data.workspace;
+  } catch (error) {
+    showChatNotice(error.message);
+    return null;
+  }
+}
+
+function folderNameFromFiles(files) {
+  const firstPath = files[0]?.webkitRelativePath || "";
+  return firstPath.split("/", 1)[0] || "Pasta de código";
 }
 
 async function fileToBase64(file) {
@@ -3228,6 +3339,12 @@ document.querySelector("#codeProjectMenu").addEventListener("click", async (even
     document.querySelector("#codeZipInput")?.click();
     return;
   }
+  if (actionButton.dataset.codeProjectAction === "folder") {
+    if (!ensureCodeCustomerSession()) return;
+    setActiveChatMode("code");
+    document.querySelector("#codeFolderInput")?.click();
+    return;
+  }
   if (actionButton.dataset.codeProjectAction === "new-project") {
     startNewCodeProjectDraft();
   }
@@ -3242,6 +3359,11 @@ document.querySelector("#codeGithubQuickForm").addEventListener("submit", async 
   const values = Object.fromEntries(new FormData(form).entries());
   if (!String(values.repoUrl || "").trim()) {
     form.elements.repoUrl.focus();
+    return;
+  }
+  if (!String(values.githubToken || "").trim()) {
+    form.elements.githubToken.focus();
+    showChatNotice("Informe uma chave GitHub para conectar o repositório.");
     return;
   }
   if (!ensureCodeCustomerSession()) return;
@@ -3568,6 +3690,11 @@ document.querySelector("#githubImportForm").addEventListener("submit", async (ev
     document.querySelector("#codeStatus").textContent = "Entre novamente para importar repositórios.";
     return;
   }
+  if (!String(values.githubToken || "").trim()) {
+    document.querySelector("#codeStatus").textContent = "Informe uma chave GitHub para importar o repositório.";
+    form.elements.githubToken.focus();
+    return;
+  }
   document.querySelector("#codeStatus").textContent = "Importando repositório...";
   try {
     const data = await codeRequest("/workspaces/github", {
@@ -3604,6 +3731,14 @@ document.querySelector("#zipUploadForm").addEventListener("submit", async (event
   form.reset();
 });
 
+document.querySelector("[data-code-folder-pick]")?.addEventListener("click", () => {
+  if (!ensureCodeCustomerSession()) {
+    document.querySelector("#codeStatus").textContent = "Entre novamente para subir pasta.";
+    return;
+  }
+  document.querySelector("#codeFolderInput")?.click();
+});
+
 document.querySelector("#codeZipInput").addEventListener("change", async (event) => {
   const input = event.currentTarget;
   const file = input.files?.[0];
@@ -3613,6 +3748,19 @@ document.querySelector("#codeZipInput").addEventListener("change", async (event)
     return;
   }
   await uploadCodeWorkspaceFromFile(file);
+  input.value = "";
+});
+
+document.querySelector("#codeFolderInput").addEventListener("change", async (event) => {
+  const input = event.currentTarget;
+  const files = input.files;
+  if (!files?.length) return;
+  if (!ensureCodeCustomerSession()) {
+    input.value = "";
+    return;
+  }
+  const workspace = await uploadCodeWorkspaceFromFolder(files);
+  if (workspace) document.querySelector("#codeStatus").textContent = "Pasta importada.";
   input.value = "";
 });
 
