@@ -2424,6 +2424,19 @@ button.result-item {
   line-height: 1.45;
 }
 
+.settings-section {
+  margin: 16px 0;
+}
+
+.settings-section label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.settings-section .web-search-toggle {
+  margin-top: 8px;
+}
+
 .switch-line {
   display: flex;
   align-items: center;

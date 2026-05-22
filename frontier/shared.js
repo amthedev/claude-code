@@ -16,17 +16,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-economy",
-      label: "Frontier Economy",
+      label: "Claude Haiku",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Frontier Pro",
+      label: "Claude Sonnet",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-ultra",
-      label: "Frontier Ultra",
+      label: "Claude Opus",
       usdPerToken: 0.00000087,
     },
   };

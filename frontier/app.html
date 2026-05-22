@@ -162,14 +162,9 @@
                 <div class="composer-right">
                   <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
                   <button class="model-trigger" type="button" data-model-trigger="heroModel" aria-label="Modelo">
-                    <span data-model-label="heroModel">Frontier Pro</span>
+                    <span data-model-label="heroModel">Claude Sonnet</span>
                     <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                   </button>
-                  <div class="web-search-toggle" role="group" aria-label="Pesquisa web">
-                    <button type="button" data-web-search-mode="auto">Auto</button>
-                    <button type="button" data-web-search-mode="required">Web</button>
-                    <button type="button" data-web-search-mode="off">Off</button>
-                  </div>
                   <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                     <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                   </button>
@@ -244,14 +239,9 @@
               <div class="composer-right">
                 <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
                 <button class="model-trigger" type="button" data-model-trigger="bottomModel" aria-label="Modelo">
-                  <span data-model-label="bottomModel">Frontier Pro</span>
+                  <span data-model-label="bottomModel">Claude Sonnet</span>
                   <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                 </button>
-                <div class="web-search-toggle" role="group" aria-label="Pesquisa web">
-                  <button type="button" data-web-search-mode="auto">Auto</button>
-                  <button type="button" data-web-search-mode="required">Web</button>
-                  <button type="button" data-web-search-mode="off">Off</button>
-                </div>
                 <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                   <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                 </button>
@@ -434,6 +424,16 @@
             <div class="usage-bar"><div id="usageFill"></div></div>
             <p id="usageText">Limite diario do plano.</p>
           </div>
+          <div class="settings-section">
+            <label>
+              Pesquisa web
+              <div class="web-search-toggle" role="group" aria-label="Pesquisa web">
+                <button type="button" data-web-search-mode="auto">Auto</button>
+                <button type="button" data-web-search-mode="required">Web</button>
+                <button type="button" data-web-search-mode="off">Off</button>
+              </div>
+            </label>
+          </div>
           <div id="accountDetails" class="details-list"></div>
         </section>
 
@@ -498,15 +498,15 @@
 
     <div id="modelMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Modelo">
       <button type="button" data-model-value="claude-code-ultra">
-        <strong>Frontier Ultra</strong>
+        <strong>Claude Opus</strong>
         <span>Mais capaz para trabalhos ambiciosos</span>
       </button>
       <button type="button" data-model-value="claude-code-pro">
-        <strong>Frontier Pro</strong>
+        <strong>Claude Sonnet</strong>
         <span>Rápido para o trabalho diário</span>
       </button>
       <button type="button" data-model-value="claude-code-economy">
-        <strong>Frontier Economy</strong>
+        <strong>Claude Haiku</strong>
         <span>Mais rápido e econômico</span>
       </button>
     </div>
@@ -651,7 +651,7 @@
       </div>
     </section>
 
-    <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
+    <input id="attachmentInput" class="hidden" type="file" accept=".txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
     <script src="/frontier/shared.js?v=codex-code-chat-20260521l"></script>
     <script src="/frontier/client.js?v=codex-code-chat-20260521l"></script>
   </body>

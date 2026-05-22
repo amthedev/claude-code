@@ -447,13 +447,13 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Frontier Pro";
+  return option?.textContent || "Claude Sonnet";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Frontier Pro";
+    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet";
   });
 }
 
@@ -1082,9 +1082,9 @@ function syncCustomerApiToken(current) {
 
 function modelKeyLabel(modelKey) {
   const key = ClaudeApp.normalizeModelKey(modelKey);
-  if (key === "haiku") return "Frontier Economy";
-  if (key === "sonnet") return "Frontier Pro";
-  return "Frontier Ultra";
+  if (key === "haiku") return "Claude Haiku";
+  if (key === "sonnet") return "Claude Sonnet";
+  return "Claude Opus";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1132,7 +1132,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Frontier Ultra para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Frontier Pro para trabalho diário." : "Inclui Frontier Economy para tarefas leves."}</p>
+            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Claude Opus para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Claude Sonnet para trabalho diário." : "Inclui Claude Haiku para tarefas leves."}</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -3089,17 +3089,6 @@ async function readAttachment(file) {
     throw new Error(`${file.name} é maior que 4 MB.`);
   }
 
-  if (file.type.startsWith("image/")) {
-    const dataUrl = await fileToDataUrl(file);
-    const data = dataUrl.split(",", 2)[1] || "";
-    return {
-      name: file.name,
-      kind: "image",
-      mediaType: file.type || "image/png",
-      data,
-    };
-  }
-
   const text = await fileToText(file);
   return {
     name: file.name,
@@ -3119,18 +3108,6 @@ function buildMessageContent(prompt, attachments) {
 
   const content = [{ type: "text", text: prompt }];
   attachments.forEach((attachment) => {
-    if (attachment.kind === "image") {
-      content.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: attachment.mediaType,
-          data: attachment.data,
-        },
-      });
-      return;
-    }
-
     content.push({
       type: "text",
       text: [
