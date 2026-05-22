@@ -27,6 +27,7 @@ let pendingAuthIntent = "";
 let paymentPollTimer = null;
 let pendingPaymentPlanId = "";
 let pendingPaymentPlanForPolling = "";
+const messageTypewriterTimers = new WeakMap();
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
@@ -1695,6 +1696,14 @@ function renderMessageNode(node, role, text) {
   node.textContent = text;
 }
 
+function renderAssistantDisplay(message, displayText, isTyping = false) {
+  if (message.sessionKey !== activeChatSessionKey) return;
+  if (!activeConversation[message.index]) return;
+  message.node.dataset.typing = isTyping ? "true" : "false";
+  renderMessageNode(message.node, activeConversation[message.index].role, displayText);
+  message.node.scrollIntoView({ block: "end" });
+}
+
 function addMessage(role, text) {
   const index = activeConversation.push({ role, content: text }) - 1;
   const thread = document.querySelector("#chatThread");
@@ -1715,9 +1724,41 @@ function updateMessage(message, text) {
   if (message.sessionKey !== activeChatSessionKey) return;
   if (!activeConversation[message.index]) return;
   const nextText = text || "Pensando...";
+  const previousTimer = messageTypewriterTimers.get(message.node);
+  if (previousTimer) {
+    window.clearInterval(previousTimer);
+    messageTypewriterTimers.delete(message.node);
+  }
   activeConversation[message.index].content = nextText;
-  renderMessageNode(message.node, activeConversation[message.index].role, nextText);
-  message.node.scrollIntoView({ block: "end" });
+  renderAssistantDisplay(message, nextText, false);
+}
+
+function animateMessageTo(message, text, options = {}) {
+  if (message.sessionKey !== activeChatSessionKey) return;
+  if (!activeConversation[message.index]) return;
+  const nextText = text || "";
+  const previousTimer = messageTypewriterTimers.get(message.node);
+  if (previousTimer) window.clearInterval(previousTimer);
+  activeConversation[message.index].content = nextText;
+  const currentDisplay = message.node.querySelector(".message-body")?.textContent || "";
+  let position = nextText.startsWith(currentDisplay) ? currentDisplay.length : 0;
+  if (position === 0) renderAssistantDisplay(message, "", true);
+  const step = options.step || Math.max(4, Math.min(24, Math.ceil(nextText.length / 90)));
+  const intervalMs = options.intervalMs || 14;
+  const timer = window.setInterval(() => {
+    if (message.sessionKey !== activeChatSessionKey) {
+      window.clearInterval(timer);
+      return;
+    }
+    position = Math.min(nextText.length, position + step);
+    renderAssistantDisplay(message, nextText.slice(0, position), position < nextText.length);
+    if (position >= nextText.length) {
+      window.clearInterval(timer);
+      messageTypewriterTimers.delete(message.node);
+      renderAssistantDisplay(message, nextText, false);
+    }
+  }, intervalMs);
+  messageTypewriterTimers.set(message.node, timer);
 }
 
 function startCodeProgressMessage(message) {
@@ -1736,6 +1777,34 @@ function startCodeProgressMessage(message) {
     index = Math.min(index + 1, stages.length - 1);
     updateMessage(message, stages[index]);
   }, 2600);
+  return () => window.clearInterval(timer);
+}
+
+function promptNeedsFreshInfo(prompt) {
+  const text = String(prompt || "").toLocaleLowerCase("pt-BR");
+  return /\b(hoje|agora|atual|atuais|latest|mais recente|recentes|noticia|notícias|preço|preco|cotação|cotacao|agenda|calendário|calendario|versão atual|versao atual|2026|amanhã|ontem)\b/i.test(text);
+}
+
+function startChatProgressMessage(message, prompt) {
+  if (activeChatMode === "code") return startCodeProgressMessage(message);
+  const stages = promptNeedsFreshInfo(prompt)
+    ? [
+        "Verificando se a pergunta depende de dados atuais...",
+        "Buscando sinais de informação que pode ter mudado...",
+        "Conferindo contexto antes de responder...",
+        "Organizando a resposta com cuidado...",
+      ]
+    : [
+        "Entendendo sua mensagem...",
+        "Raciocinando sobre o melhor caminho...",
+        "Organizando a resposta...",
+      ];
+  let index = 0;
+  updateMessage(message, stages[index]);
+  const timer = window.setInterval(() => {
+    index = Math.min(index + 1, stages.length - 1);
+    updateMessage(message, stages[index]);
+  }, 2200);
   return () => window.clearInterval(timer);
 }
 
@@ -2193,11 +2262,12 @@ function terminalResultMarkdown(result) {
 
 async function submitPrompt(prompt, selectedModel, attachments = []) {
   const sessionKey = activeChatSessionKey;
-  const current = account();
+  let current = account();
   if (!current || !current.active) {
     openAuthForIntent("chat", "clientSignupForm");
     throw new Error("Entre com uma conta ativa para usar o chat.");
   }
+  current = (await refreshCustomerAccount({ silent: true })) || current;
 
   const estimatedInput = ClaudeApp.estimateTokens(prompt);
   const reservedOutput = outputTokenLimitForAccount(current, estimatedInput);
@@ -2218,14 +2288,14 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
     attachments,
   );
   const assistantMessage = addMessage("assistant", "Pensando...");
-  const stopCodeProgress = startCodeProgressMessage(assistantMessage);
+  const stopChatProgress = startChatProgressMessage(assistantMessage, prompt);
 
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
-    stopCodeProgress();
-    updateMessage(assistantMessage, partialAnswer);
+    stopChatProgress();
+    animateMessageTo(assistantMessage, partialAnswer);
   }, reservedOutput);
-  stopCodeProgress();
+  stopChatProgress();
   if (activeChatMode === "code" && promptRequestsTerminal(prompt)) {
     const command = defaultWorkspaceTestCommand();
     if (command) {
@@ -2238,14 +2308,9 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
       }
     }
   }
-  updateMessage(assistantMessage, answer);
+  animateMessageTo(assistantMessage, answer, { step: 28, intervalMs: 10 });
 
-  const accounts = ClaudeApp.accounts();
-  const index = accounts.findIndex((item) => item.id === currentAccountId);
-  if (index >= 0) {
-    accounts[index].usedToday += reservedTotal;
-    ClaudeApp.saveAccounts(accounts);
-  }
+  await refreshCustomerAccount({ silent: true });
 
   if (!incognitoMode) {
     if (sessionKey !== activeChatSessionKey) return;
@@ -2879,6 +2944,7 @@ async function fileToBase64(file) {
 
 function supportStatusText(ticket) {
   if (!ticket) return "Nenhum atendimento aberto.";
+  if (ticket.status === "ai") return "Assistente respondendo agora. Se precisar, peça para falar com o Mano.";
   if (ticket.status === "waiting") return "Na fila. O suporte vai assumir assim que finalizar o atendimento atual.";
   if (ticket.status === "active") return "Em atendimento agora.";
   return "Atendimento finalizado.";
@@ -2890,7 +2956,7 @@ function renderSupport() {
   if (!status || !list) return;
   status.textContent = supportStatusText(activeSupportTicket);
   if (!activeSupportTicket?.messages?.length) {
-    list.innerHTML = `<div class="support-empty">Envie uma mensagem para entrar na fila.</div>`;
+    list.innerHTML = `<div class="support-empty">Envie uma mensagem. O assistente tenta resolver primeiro e chama o Mano se precisar.</div>`;
     return;
   }
 
@@ -4127,6 +4193,9 @@ if (currentAccountId && !account()) {
 }
 
 renderAccount();
+if (currentAccountId && account()?.active && customerApiToken()) {
+  refreshCustomerAccount({ silent: true });
+}
 if (sessionStatusMessage) showChatNotice(sessionStatusMessage);
 confirmPaymentReturn();
 startPaymentStatusPolling();

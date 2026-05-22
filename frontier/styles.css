@@ -1268,6 +1268,24 @@ code {
   min-width: 0;
 }
 
+.message.assistant[data-typing="true"] .message-body::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 72%, #fff);
+  vertical-align: -0.16em;
+  animation: typingCursorBlink 0.78s steps(1) infinite;
+}
+
+@keyframes typingCursorBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .message-actions {
   display: flex;
   justify-content: flex-end;

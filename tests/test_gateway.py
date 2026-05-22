@@ -484,12 +484,12 @@ class GatewayTestCase(unittest.TestCase):
             ticket_one = client.post(
                 "/v1/support/tickets",
                 headers=customer_one_headers,
-                json={"message": "Preciso de ajuda"},
+                json={"message": "Quero falar com o Mano"},
             ).json()["ticket"]
             ticket_two = client.post(
                 "/v1/support/tickets",
                 headers=customer_two_headers,
-                json={"message": "Estou na fila"},
+                json={"message": "Quero falar com atendente humano"},
             ).json()["ticket"]
 
             queue = client.get("/v1/admin/support/tickets", headers=self.headers).json()
@@ -514,6 +514,50 @@ class GatewayTestCase(unittest.TestCase):
 
             response = client.post(f"/v1/admin/support/tickets/{ticket_two['id']}/claim", headers=self.headers)
             self.assertEqual(response.status_code, 200)
+
+    def test_support_ai_answers_before_escalating_to_human(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Suporte",
+                    "login": "suporte@example.com",
+                    "password": "secret-support",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            response = client.post(
+                "/v1/support/tickets",
+                headers=customer_headers,
+                json={"message": "Como conecto o GitHub?"},
+            )
+            self.assertEqual(response.status_code, 200)
+            ticket = response.json()["ticket"]
+            self.assertEqual(ticket["status"], "ai")
+            self.assertEqual(ticket["messages"][-1]["author"], "Assistente")
+            self.assertIn("GitHub", ticket["messages"][-1]["body"])
+
+            queue = client.get("/v1/admin/support/tickets", headers=self.headers).json()
+            self.assertEqual(queue["waiting"], [])
+
+            response = client.post(
+                f"/v1/support/tickets/{ticket['id']}/messages",
+                headers=customer_headers,
+                json={"message": "Agora quero falar com o Mano"},
+            )
+            self.assertEqual(response.status_code, 200)
+            escalated = response.json()["ticket"]
+            self.assertEqual(escalated["status"], "waiting")
+
+            queue = client.get("/v1/admin/support/tickets", headers=self.headers).json()
+            self.assertEqual([ticket["id"] for ticket in queue["waiting"]], [ticket["id"]])
 
     def test_signup_without_gift_card_creates_free_economy_account(self) -> None:
         with TemporaryDirectory() as directory:
@@ -551,6 +595,40 @@ class GatewayTestCase(unittest.TestCase):
             )
             self.assertEqual(message.status_code, 200)
             self.assertEqual(message.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+
+            usage = client.get(
+                "/v1/auth/me",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+            )
+            self.assertEqual(usage.status_code, 200)
+            self.assertGreater(usage.json()["account"]["usedToday"], 0)
+            self.assertEqual(usage.json()["account"]["usageDay"], _today())
+
+            blocked = client.post(
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "Oi de novo"}],
+                },
+            )
+            self.assertEqual(blocked.status_code, 429)
+
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    "UPDATE accounts SET used_today = 50, usage_day = '2000-01-01' WHERE id = ?",
+                    (account["id"],),
+                )
+                db.commit()
+
+            reset = client.get(
+                "/v1/auth/me",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+            )
+            self.assertEqual(reset.status_code, 200)
+            self.assertEqual(reset.json()["account"]["usedToday"], 0)
+            self.assertEqual(reset.json()["account"]["usageDay"], _today())
 
     def test_existing_unpaid_signup_account_is_migrated_to_free_limit(self) -> None:
         with TemporaryDirectory() as directory:
@@ -621,22 +699,22 @@ class GatewayTestCase(unittest.TestCase):
                 purchase = client.post(
                     "/v1/billing/purchases",
                     headers=customer_headers,
-                    json={"planId": "pro", "payerDocument": "123.456.789-09"},
+                    json={
+                        "planId": "pro",
+                        "paymentMethod": "card_subscription",
+                        "payerDocument": "123.456.789-09",
+                    },
                 )
             self.assertEqual(purchase.status_code, 200)
             purchase_id = purchase.json()["purchase"]["id"]
             self.assertEqual(purchase.json()["purchase"]["status"], "pending")
             self.assertEqual(purchase.json()["purchase"]["mercadoPagoPreferenceId"], "pref_test")
             self.assertIn("mercadopago.com.br", purchase.json()["purchase"]["checkoutUrl"])
-            preference_payload = FakeMercadoPagoClient.last_post_json or {}
-            self.assertEqual(preference_payload["payer"]["name"], "Cliente")
-            self.assertEqual(preference_payload["payer"]["surname"], "Upgrade")
-            self.assertEqual(
-                preference_payload["payer"]["identification"],
-                {"type": "CPF", "number": "12345678909"},
-            )
-            self.assertEqual(preference_payload["payment_methods"]["installments"], 1)
-            self.assertFalse(preference_payload["binary_mode"])
+            subscription_payload = FakeMercadoPagoClient.last_post_json or {}
+            self.assertEqual(subscription_payload["external_reference"], purchase_id)
+            self.assertEqual(subscription_payload["payer_email"], "upgrade@example.com")
+            self.assertEqual(subscription_payload["auto_recurring"]["frequency_type"], "months")
+            self.assertEqual(subscription_payload["auto_recurring"]["transaction_amount"], 125)
 
             admin_purchases = client.get("/v1/admin/purchases", headers=self.headers)
             self.assertEqual(admin_purchases.status_code, 200)
@@ -1530,7 +1608,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Claude Opus 4.7", payload["system"])
         self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
-        self.assertIn("Automatic skill routing is active", payload["system"])
+        self.assertIn("Automatic senior skill routing is active", payload["system"])
 
     def test_payload_selects_relevant_automatic_skills(self) -> None:
         response = self.client.post(
@@ -1602,6 +1680,8 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertIn("Current date for user-facing and factual work:", payload["system"])
         self.assertIn("America/Recife", payload["system"])
+        self.assertIn("Whenever the answer depends on information that can change over time", payload["system"])
+        self.assertIn("If no browsing/search tool is available", payload["system"])
 
     def test_model_identity_question_returns_selected_public_model(self) -> None:
         response = self.client.post(

@@ -25,7 +25,7 @@ class SupportStore:
             row = db.execute(
                 """
                 SELECT * FROM support_tickets
-                 WHERE account_id = ? AND status IN ('waiting', 'active')
+                 WHERE account_id = ? AND status IN ('ai', 'waiting', 'active')
                  ORDER BY created_at DESC
                  LIMIT 1
                 """,
@@ -47,7 +47,7 @@ class SupportStore:
             existing = db.execute(
                 """
                 SELECT * FROM support_tickets
-                 WHERE account_id = ? AND status IN ('waiting', 'active')
+                 WHERE account_id = ? AND status IN ('ai', 'waiting', 'active')
                  ORDER BY created_at DESC
                  LIMIT 1
                 """,
@@ -65,7 +65,7 @@ class SupportStore:
                 "accountId": account["id"],
                 "customerName": account["name"],
                 "customerLogin": account["login"],
-                "status": "waiting",
+                "status": "ai",
                 "subject": message[:90],
                 "createdAt": now,
                 "updatedAt": now,
@@ -97,6 +97,33 @@ class SupportStore:
                 raise HTTPException(status_code=409, detail="Ticket is closed.")
             self._add_message(db, ticket_id, "customer", account["name"], message)
             self._touch_ticket(db, ticket_id)
+            db.commit()
+            return self._ticket_with_messages(db, self._find_ticket(db, ticket_id))
+
+    def ai_message(self, ticket_id: str, message: str) -> dict[str, Any]:
+        message = message.strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Message is required.")
+        with self._lock, self._connect() as db:
+            ticket = self._find_ticket(db, ticket_id)
+            if ticket["status"] == "closed":
+                raise HTTPException(status_code=409, detail="Ticket is closed.")
+            self._add_message(db, ticket_id, "support", "Assistente", message[:4000])
+            self._touch_ticket(db, ticket_id)
+            db.commit()
+            return self._ticket_with_messages(db, self._find_ticket(db, ticket_id))
+
+    def escalate_to_human(self, ticket_id: str, message: str = "") -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            ticket = self._find_ticket(db, ticket_id)
+            if ticket["status"] == "closed":
+                raise HTTPException(status_code=409, detail="Ticket is closed.")
+            if message.strip():
+                self._add_message(db, ticket_id, "support", "Assistente", message.strip()[:4000])
+            db.execute(
+                "UPDATE support_tickets SET status = 'waiting', updated_at = ? WHERE id = ?",
+                (_now(), ticket_id),
+            )
             db.commit()
             return self._ticket_with_messages(db, self._find_ticket(db, ticket_id))
 

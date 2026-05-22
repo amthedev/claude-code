@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .accounts import AccountStore
+from .accounts import AccountStore, AccountUsageReservation
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
 from .anthropic import build_text_message, clean_model_text
@@ -63,6 +63,13 @@ GEMINI_CODE_HELPER_PROMPT = """You are a concise internal coding helper for an A
 Return implementation guidance that helps write better code: file structure, APIs, component boundaries, edge cases,
 small pitfalls, and verification. Prefer concrete decisions over options. Keep it short. Do not mention Gemini,
 internal routing, providers, or hidden helpers."""
+
+SUPPORT_ASSISTANT_PROMPT = """Você é o primeiro atendimento de suporte do app Claude Code em português do Brasil.
+Resolva dúvidas simples sobre login, planos, Pix, GitHub, ZIP/pastas, limite de tokens, chat, histórico, suporte e uso geral.
+Se a mensagem pedir pessoa humana, "mano", atendente, dono/admin, reembolso/estorno, cobrança indevida, conta invadida,
+pagamento aprovado sem liberar plano, dado sensível exposto, ameaça jurídica, ou algo que exija ação manual no banco,
+comece a resposta exatamente com "ESCALATE:" e explique em uma frase por que precisa de humano.
+Caso contrário, responda diretamente em até 5 frases, com tom calmo e prático. Não invente acesso a dados internos."""
 
 
 def create_app(
@@ -295,10 +302,10 @@ def create_app(
                         allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
                     )
                 except OpenRouterError as exc:
-                    app.state.customer_usage.rollback(reservation)
+                    _rollback_customer_budget(app, reservation)
                     raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
                 except Exception:
-                    app.state.customer_usage.rollback(reservation)
+                    _rollback_customer_budget(app, reservation)
                     raise
 
                 return StreamingResponse(
@@ -307,7 +314,7 @@ def create_app(
                 )
 
             if not app.state.settings.openrouter_api_key:
-                app.state.customer_usage.rollback(reservation)
+                _rollback_customer_budget(app, reservation)
                 raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
             app.state.usage.record_request(decision)
             return StreamingResponse(
@@ -324,10 +331,10 @@ def create_app(
                 allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
             )
         except OpenRouterError as exc:
-            app.state.customer_usage.rollback(reservation)
+            _rollback_customer_budget(app, reservation)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception:
-            app.state.customer_usage.rollback(reservation)
+            _rollback_customer_budget(app, reservation)
             raise
 
         return JSONResponse(response)
@@ -589,7 +596,9 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"ticket": app.state.support_store.open_ticket(auth.token, payload)})
+        ticket = app.state.support_store.open_ticket(auth.token, payload)
+        ticket = await _auto_support_reply(app, ticket, str(payload.get("message") or ""))
+        return JSONResponse({"ticket": ticket})
 
     @app.post("/v1/support/tickets/{ticket_id}/messages")
     async def customer_support_message(
@@ -601,7 +610,10 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"ticket": app.state.support_store.customer_message(auth.token, ticket_id, payload)})
+        ticket = app.state.support_store.customer_message(auth.token, ticket_id, payload)
+        if ticket.get("status") == "ai":
+            ticket = await _auto_support_reply(app, ticket, str(payload.get("message") or ""))
+        return JSONResponse({"ticket": ticket})
 
     @app.get("/v1/admin/support/tickets")
     async def list_support_tickets(request: Request) -> dict[str, Any]:
@@ -809,7 +821,7 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         if auth.customer:
-            return app.state.customer_usage.snapshot_for(auth.customer)
+            return _customer_usage_snapshot(app, auth)
         return app.state.usage.snapshot()
 
     @app.post("/v1/router/debug")
@@ -846,10 +858,10 @@ def create_app(
                 allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
             )
         except OpenRouterError as exc:
-            app.state.customer_usage.rollback(reservation)
+            _rollback_customer_budget(app, reservation)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception:
-            app.state.customer_usage.rollback(reservation)
+            _rollback_customer_budget(app, reservation)
             raise
 
         return JSONResponse({"decision": decision.to_dict(), "response": response})
@@ -1225,6 +1237,114 @@ def _subscription_payment_payload(subscription: dict[str, Any]) -> dict[str, Any
     }
 
 
+async def _auto_support_reply(app: FastAPI, ticket: dict[str, Any], message: str) -> dict[str, Any]:
+    text = message.strip()
+    if not text:
+        return ticket
+    if _support_needs_human(text):
+        return app.state.support_store.escalate_to_human(
+            ticket["id"],
+            "Vou encaminhar sua conversa para o atendimento humano. Assim que o Mano puder assumir, ele continua por aqui.",
+        )
+
+    reply = await _generate_support_reply(app, ticket, text)
+    if reply.startswith("ESCALATE:"):
+        reason = reply.removeprefix("ESCALATE:").strip()
+        message_to_customer = "Vou encaminhar sua conversa para o atendimento humano."
+        if reason:
+            message_to_customer = f"{message_to_customer} Motivo: {reason[:220]}"
+        return app.state.support_store.escalate_to_human(ticket["id"], message_to_customer)
+    return app.state.support_store.ai_message(ticket["id"], reply)
+
+
+async def _generate_support_reply(app: FastAPI, ticket: dict[str, Any], message: str) -> str:
+    fallback = _fallback_support_reply(message)
+    if not app.state.openai_helper:
+        return fallback
+
+    history = "\n".join(
+        f"{item.get('author')}: {item.get('body')}"
+        for item in (ticket.get("messages") or [])[-8:]
+        if isinstance(item, dict)
+    )
+    try:
+        reply = await app.state.openai_helper.generate_text(
+            instructions=SUPPORT_ASSISTANT_PROMPT,
+            input_text=(
+                f"Cliente: {ticket.get('customerName')} <{ticket.get('customerLogin')}>\n"
+                f"Status atual: {ticket.get('status')}\n"
+                f"Histórico recente:\n{history}\n\n"
+                f"Nova mensagem do cliente:\n{message}"
+            )[:6000],
+            max_output_tokens=260,
+        )
+    except Exception:
+        return fallback
+    cleaned = " ".join(reply.strip().split())
+    return cleaned[:1200] or fallback
+
+
+def _support_needs_human(message: str) -> bool:
+    text = _normalize_text(message)
+    human_phrases = (
+        "falar com humano",
+        "falar com atendente",
+        "falar com o mano",
+        "chama o mano",
+        "quero humano",
+        "quero atendente",
+        "pessoa real",
+        "suporte humano",
+        "admin",
+        "dono",
+    )
+    manual_risk_terms = (
+        "reembolso",
+        "estorno",
+        "cobranca indevida",
+        "cobranca duplicada",
+        "pagamento aprovado",
+        "pagamento nao liberou",
+        "plano nao liberou",
+        "conta invadida",
+        "hackearam",
+        "vazou",
+        "processo",
+        "juridico",
+        "ameaca",
+    )
+    return any(phrase in text for phrase in human_phrases + manual_risk_terms)
+
+
+def _fallback_support_reply(message: str) -> str:
+    text = _normalize_text(message)
+    if "github" in text or "repo" in text or "repositorio" in text:
+        return (
+            "Para conectar GitHub, entre no Hub, informe seu perfil ou organização, a branch padrão e sua chave GitHub. "
+            "Depois o sistema lista seus repositórios para você escolher sem colar URL manual. "
+            "Se o repo não aparecer, confira se a chave tem permissão de leitura no repositório."
+        )
+    if "zip" in text or "pasta" in text or "arquivo" in text:
+        return (
+            "Você pode subir um ZIP ou selecionar uma pasta. O projeto fica extraído em um workspace, "
+            "as edições salvam nesse workspace e o botão de download gera um ZIP atualizado."
+        )
+    if "pix" in text or "pagamento" in text or "plano" in text:
+        return (
+            "Para planos pagos, o Pix abre no checkout e a tela atualiza quando o pagamento é confirmado. "
+            "Se o pagamento já foi aprovado e o plano não liberou, eu encaminho para atendimento humano."
+        )
+    if "senha" in text or "login" in text or "entrar" in text:
+        return (
+            "Confira se está usando o mesmo e-mail do cadastro e tente entrar novamente. "
+            "Se a conta estiver pausada ou você perdeu acesso ao e-mail, peça atendimento humano por aqui."
+        )
+    return (
+        "Posso te ajudar por aqui. Me diga o que aconteceu, qual tela você estava usando e, se aparecer erro, "
+        "mande o texto exato da mensagem. Se for algo que precise de ação manual, eu encaminho para o Mano."
+    )
+
+
 def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "items": [
@@ -1408,10 +1528,10 @@ async def _complete_gateway_message(
             allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
         )
     except OpenRouterError as exc:
-        app.state.customer_usage.rollback(reservation)
+        _rollback_customer_budget(app, reservation)
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception:
-        app.state.customer_usage.rollback(reservation)
+        _rollback_customer_budget(app, reservation)
         raise
     return response, decision.public_model
 
@@ -1456,7 +1576,7 @@ def _with_customer_power_tier(
     if _is_explicit_low_power_model(requested_lower, settings):
         return payload
 
-    snapshot = app.state.customer_usage.snapshot_for(auth.customer)
+    snapshot = _customer_usage_snapshot(app, auth)
     remaining = snapshot["today"].get("remaining_tokens")
     limit = auth.customer.daily_token_limit
     ratio = 1.0
@@ -1519,7 +1639,11 @@ def _with_public_model_identity(
         f"For frontend/UI tasks, build production-quality interfaces: polished hierarchy, responsive "
         f"layout, reusable components, tasteful motion, accurate copy, and visual choices that do not "
         f"look generic or AI-generated. For factual/current people, brands, products, dates, or places, "
-        f"verify with available tools before writing confident details. "
+        f"verify with available tools before writing confident details. Whenever the answer depends on "
+        f"information that can change over time, including latest news, current prices, schedules, laws, "
+        f"software versions, company data, sports, weather, or public figures, search or otherwise verify "
+        f"fresh information before answering. If no browsing/search tool is available in the current "
+        f"environment, say that you cannot verify live data instead of guessing. "
         f"If the user asks what model you are or what model is being used, answer with {label}. "
         f"Do not mention internal routing providers or gateway implementation details such as "
         f"DeepSeek, Kimi, StepFun, Tencent, Qwen, OpenRouter, OpenAI helper, or hidden agents "
@@ -1987,10 +2111,30 @@ def _reserve_customer_budget(
     auth: AuthContext,
     payload: dict[str, Any],
     decision: Any,
-) -> CustomerReservation | None:
+) -> CustomerReservation | AccountUsageReservation | None:
     if not auth.customer:
         return None
+    account_reservation = app.state.account_store.reserve_usage_for_token(auth.token, payload)
+    if account_reservation:
+        return account_reservation
     return app.state.customer_usage.reserve(auth.customer, payload, decision)
+
+
+def _rollback_customer_budget(
+    app: FastAPI,
+    reservation: CustomerReservation | AccountUsageReservation | None,
+) -> None:
+    if isinstance(reservation, AccountUsageReservation):
+        app.state.account_store.rollback_usage(reservation)
+        return
+    app.state.customer_usage.rollback(reservation)
+
+
+def _customer_usage_snapshot(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
+    account_snapshot = app.state.account_store.usage_snapshot_for_token(auth.token)
+    if account_snapshot:
+        return account_snapshot
+    return app.state.customer_usage.snapshot_for(auth.customer)
 
 
 def _allow_openai_helper(auth: AuthContext, settings: Settings) -> bool:

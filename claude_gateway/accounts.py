@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import secrets
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
@@ -11,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Settings
-from .customers import CustomerPlan
+from .customers import CustomerPlan, estimate_request_tokens
 from .security import hash_password, verify_password
 
 
@@ -75,6 +76,13 @@ MODEL_TOKEN_PRICES = {
 PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
 
 
+@dataclass(frozen=True, slots=True)
+class AccountUsageReservation:
+    token: str
+    usage_day: str
+    estimated_tokens: int
+
+
 class AccountStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -89,6 +97,7 @@ class AccountStore:
 
     def list_accounts(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
             rows = db.execute("SELECT * FROM accounts ORDER BY created_at DESC").fetchall()
         return [_public_account(_account_from_row(row)) for row in rows]
 
@@ -113,6 +122,7 @@ class AccountStore:
 
     def account_for_token(self, token: str) -> dict[str, Any]:
         with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Account not found.")
@@ -188,9 +198,9 @@ class AccountStore:
                 """
                 INSERT INTO accounts (
                     id, api_token, name, display_name, login, password_hash, plan, price,
-                    model_key, manual_limit, active, gift_card_code, used_today, daily_limit,
-                    computed_daily_tokens, max_cost_usd, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_key, manual_limit, active, gift_card_code, used_today, usage_day,
+                    daily_limit, computed_daily_tokens, max_cost_usd, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _account_values(account),
             )
@@ -210,6 +220,7 @@ class AccountStore:
         login = str(values.get("login") or "").strip().lower()
         password = str(values.get("password") or "")
         with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
             row = db.execute("SELECT * FROM accounts WHERE login = ?", (login,)).fetchone()
             account = _account_from_row(row) if row else None
             if not account:
@@ -303,9 +314,10 @@ class AccountStore:
                 account["active"] = bool(values["active"])
             if values.get("resetUsage"):
                 account["usedToday"] = 0
+                account["usageDay"] = _today()
             db.execute(
-                "UPDATE accounts SET active = ?, used_today = ? WHERE id = ?",
-                (int(account["active"]), int(account["usedToday"]), account_id),
+                "UPDATE accounts SET active = ?, used_today = ?, usage_day = ? WHERE id = ?",
+                (int(account["active"]), int(account["usedToday"]), account["usageDay"], account_id),
             )
             db.commit()
         return _public_account(account)
@@ -545,6 +557,7 @@ class AccountStore:
 
     def customer_plan_for_token(self, token: str) -> CustomerPlan | None:
         with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
         if not row:
             return None
@@ -557,6 +570,93 @@ class AccountStore:
             allowed_model=PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
             active=bool(account.get("active")),
         )
+
+    def reserve_usage_for_token(
+        self,
+        token: str,
+        payload: dict[str, Any],
+    ) -> AccountUsageReservation | None:
+        estimated_tokens = estimate_request_tokens(payload, self.settings)
+        today = _today()
+        with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not row:
+                return None
+            account = _account_from_row(row)
+            if not account.get("active"):
+                raise HTTPException(status_code=403, detail="Account is paused.")
+
+            daily_limit = int(account.get("dailyLimit") or 0)
+            used_today = int(account.get("usedToday") or 0)
+            if daily_limit <= 0:
+                raise HTTPException(status_code=402, detail="Account has no daily token limit configured.")
+            if used_today + estimated_tokens > daily_limit:
+                remaining = max(0, daily_limit - used_today)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Limite diário insuficiente. Restam {remaining} tokens.",
+                )
+
+            db.execute(
+                """
+                UPDATE accounts
+                   SET used_today = used_today + ?,
+                       usage_day = ?
+                 WHERE id = ?
+                """,
+                (estimated_tokens, today, account["id"]),
+            )
+            db.commit()
+        return AccountUsageReservation(token=token, usage_day=today, estimated_tokens=estimated_tokens)
+
+    def rollback_usage(self, reservation: AccountUsageReservation | None) -> None:
+        if reservation is None:
+            return
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (reservation.token,)).fetchone()
+            if not row:
+                return
+            account = _account_from_row(row)
+            if account.get("usageDay") != reservation.usage_day:
+                return
+            db.execute(
+                """
+                UPDATE accounts
+                   SET used_today = ?
+                 WHERE id = ?
+                """,
+                (max(0, int(account.get("usedToday") or 0) - reservation.estimated_tokens), account["id"]),
+            )
+            db.commit()
+
+    def usage_snapshot_for_token(self, token: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            self._reset_stale_usage(db)
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+        if not row:
+            return None
+        account = _account_from_row(row)
+        daily_limit = int(account.get("dailyLimit") or 0)
+        used_today = int(account.get("usedToday") or 0)
+        return {
+            "customer": {
+                "name": account["name"],
+                "allowed_model": PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
+                "monthly_price_brl": float(account.get("price") or 0),
+                "daily_token_limit": daily_limit,
+                "active": bool(account.get("active")),
+            },
+            "today": {
+                "date": account.get("usageDay") or _today(),
+                "requests": None,
+                "reserved_cost_usd": None,
+                "daily_cost_budget_usd": round(float(account.get("maxCostUsd") or 0) / 30, 8),
+                "reserved_tokens": used_today,
+                "remaining_cost_usd": None,
+                "remaining_tokens": max(0, daily_limit - used_today),
+            },
+        }
 
     def _init_db(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -599,6 +699,7 @@ class AccountStore:
                     active INTEGER NOT NULL,
                     gift_card_code TEXT NOT NULL,
                     used_today INTEGER NOT NULL DEFAULT 0,
+                    usage_day TEXT NOT NULL DEFAULT '',
                     daily_limit INTEGER NOT NULL,
                     computed_daily_tokens INTEGER NOT NULL,
                     max_cost_usd REAL NOT NULL,
@@ -606,6 +707,9 @@ class AccountStore:
                 )
                 """
             )
+            if not _column_exists(db, "accounts", "usage_day"):
+                db.execute("ALTER TABLE accounts ADD COLUMN usage_day TEXT NOT NULL DEFAULT ''")
+            db.execute("UPDATE accounts SET usage_day = ? WHERE usage_day = ''", (_today(),))
             db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS admin_settings (
@@ -691,6 +795,18 @@ class AccountStore:
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         db.row_factory = sqlite3.Row
         return db
+
+    def _reset_stale_usage(self, db: sqlite3.Connection) -> None:
+        today = _today()
+        db.execute(
+            """
+            UPDATE accounts
+               SET used_today = 0,
+                   usage_day = ?
+             WHERE usage_day <> ?
+            """,
+            (today, today),
+        )
 
     def _gift_code_exists(self, db: sqlite3.Connection, code: str) -> bool:
         row = db.execute("SELECT 1 FROM gift_cards WHERE code = ?", (code,)).fetchone()
@@ -787,6 +903,7 @@ def _account_from_gift_card(
         "active": True,
         "giftCardCode": gift_card["code"],
         "usedToday": 0,
+        "usageDay": _today(),
         "dailyLimit": gift_card["dailyLimit"],
         "computedDailyTokens": gift_card["computedDailyTokens"],
         "maxCostUsd": gift_card["maxCostUsd"],
@@ -811,6 +928,7 @@ def _free_account(name: str, login: str, password: str, settings: Settings) -> d
         "active": True,
         "giftCardCode": "",
         "usedToday": 0,
+        "usageDay": _today(),
         "dailyLimit": limit["dailyLimit"],
         "computedDailyTokens": limit["computedDailyTokens"],
         "maxCostUsd": limit["maxCostUsd"],
@@ -946,6 +1064,7 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "active": bool(row["active"]),
         "giftCardCode": row["gift_card_code"],
         "usedToday": row["used_today"],
+        "usageDay": row["usage_day"],
         "dailyLimit": row["daily_limit"],
         "computedDailyTokens": row["computed_daily_tokens"],
         "maxCostUsd": row["max_cost_usd"],
@@ -1011,6 +1130,7 @@ def _account_values(account: dict[str, Any]) -> tuple[Any, ...]:
         int(account["active"]),
         account["giftCardCode"],
         account["usedToday"],
+        account["usageDay"],
         account["dailyLimit"],
         account["computedDailyTokens"],
         account["maxCostUsd"],
@@ -1098,3 +1218,7 @@ def _generate_api_token() -> str:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _today() -> str:
+    return datetime.now(UTC).date().isoformat()
