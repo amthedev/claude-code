@@ -331,7 +331,9 @@ function renderBenchmark() {
   const summary = document.querySelector("#benchmarkSummary");
   const table = document.querySelector("#benchmarkTable");
   const advice = document.querySelector("#benchmarkAdvice");
+  const status = document.querySelector("#benchmarkStatus");
   if (!summary || !table || !advice) return;
+  if (status) status.textContent = "";
 
   if (!benchmarkState) {
     summary.innerHTML = `
@@ -343,6 +345,22 @@ function renderBenchmark() {
     table.innerHTML = `<tr><td colspan="5" class="muted">Clique em Rodar benchmark para testar setup, rotas, custo e pesquisa web.</td></tr>`;
     advice.innerHTML = "";
     return;
+  }
+
+  if (benchmarkState.running) {
+    summary.innerHTML = `
+      <article>
+        <span>Status</span>
+        <strong>Rodando...</strong>
+      </article>
+    `;
+    table.innerHTML = `<tr><td colspan="5" class="muted">Testando setup, rotas, custo e pesquisa web.</td></tr>`;
+    advice.innerHTML = "";
+    return;
+  }
+
+  if (benchmarkState.errorMessage && status) {
+    status.textContent = benchmarkState.errorMessage;
   }
 
   const data = benchmarkState.summary || {};
@@ -685,13 +703,17 @@ document.querySelector("#runBenchmark").addEventListener("click", async () => {
   const button = document.querySelector("#runBenchmark");
   button.disabled = true;
   button.textContent = "Rodando...";
+  benchmarkState = { running: true };
+  renderBenchmark();
   try {
     benchmarkState = await adminRequest("/v1/admin/benchmark", {
       method: "POST",
       body: JSON.stringify({}),
     });
   } catch (error) {
+    const errorMessage = error.fallback ? "API admin indisponível." : error.message;
     benchmarkState = {
+      errorMessage,
       summary: { status: "fail", passed: 0, failed: 1, warnings: 0, route_median_ms: 0 },
       results: [
         {
@@ -700,7 +722,7 @@ document.querySelector("#runBenchmark").addEventListener("click", async () => {
           label: "Benchmark indisponível",
           status: "FAIL",
           severity: "required",
-          detail: error.fallback ? "API admin indisponível." : error.message,
+          detail: errorMessage,
         },
       ],
       advice: ["Confira a URL da API e o token admin antes de rodar novamente."],
