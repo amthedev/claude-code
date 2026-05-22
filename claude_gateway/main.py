@@ -856,13 +856,6 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
         "auto_return": "approved",
         "binary_mode": False,
         "payment_methods": {
-            "default_payment_method_id": "pix",
-            "excluded_payment_types": [
-                {"id": "credit_card"},
-                {"id": "debit_card"},
-                {"id": "ticket"},
-                {"id": "atm"},
-            ],
             "installments": 1,
             "default_installments": 1,
         },

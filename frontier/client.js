@@ -968,10 +968,10 @@ function renderPlanCards() {
         highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
       ].join("");
       const buyLabel = !current
-        ? `Entrar para comprar ${plan.name}`
+        ? `Entrar para assinar ${plan.name}`
         : currentPlan
-          ? `Criar Pix para ${plan.name}`
-          : `Criar Pix para ${plan.name}`;
+          ? `${plan.name} ativo`
+          : `Assinar ${plan.name}`;
       const focusAttribute = highlightedPlanId === plan.id ? `tabindex="-1"` : "";
       return `
         <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}" data-plan-card="${ClaudeApp.escapeHtml(plan.id)}" ${focusAttribute}>
@@ -984,8 +984,8 @@ function renderPlanCards() {
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
-          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}">
-            ${!current ? "Entrar para comprar" : "Criar Pix"}
+          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}" ${currentPlan ? "disabled" : ""}>
+            ${!current ? "Entrar para assinar" : currentPlan ? "Plano ativo" : "Assinar plano"}
           </button>
         </article>
       `;
@@ -1133,7 +1133,7 @@ async function requestPlanPurchase(planId, button = null) {
   const original = button?.textContent || "";
   if (!account()?.active || !customerApiToken()) {
     openAuthForIntent("plan", "clientLoginForm", planId);
-    showChatNotice("Entre novamente para criar o Pix.");
+    showChatNotice("Entre novamente para assinar o plano.");
     return;
   }
   const payerDocument = promptPaymentDocument();
@@ -1142,9 +1142,9 @@ async function requestPlanPurchase(planId, button = null) {
   }
   if (button) {
     button.disabled = true;
-    button.textContent = "Criando Pix...";
+    button.textContent = "Abrindo pagamento...";
   } else {
-    showChatNotice(`Criando Pix do plano ${plan.name}...`);
+    showChatNotice(`Abrindo pagamento do plano ${plan.name}...`);
   }
   const checkoutWindow = window.open("about:blank", "_blank");
   if (checkoutWindow) {
