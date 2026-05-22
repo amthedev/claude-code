@@ -968,8 +968,8 @@ function renderPlanCards() {
       const buyLabel = !current
         ? `Entrar para comprar ${plan.name}`
         : currentPlan
-          ? `Plano atual: ${plan.name}`
-          : `Solicitar upgrade para ${plan.name}`;
+          ? `Criar Pix para ${plan.name}`
+          : `Criar Pix para ${plan.name}`;
       const focusAttribute = highlightedPlanId === plan.id ? `tabindex="-1"` : "";
       return `
         <article class="plan-card ${currentPlan ? "current" : ""} ${highlighted ? "highlighted" : ""}" data-plan-card="${ClaudeApp.escapeHtml(plan.id)}" ${focusAttribute}>
@@ -982,8 +982,8 @@ function renderPlanCards() {
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
-          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}" ${currentPlan ? "disabled" : ""}>
-            ${!current ? "Entre para comprar" : currentPlan ? "Plano atual" : "Solicitar upgrade"}
+          <button class="primary" type="button" data-buy-plan="${ClaudeApp.escapeHtml(plan.id)}" aria-label="${ClaudeApp.escapeHtml(buyLabel)}">
+            ${!current ? "Entrar para comprar" : "Criar Pix"}
           </button>
         </article>
       `;
@@ -1063,19 +1063,20 @@ async function requestPlanPurchase(planId, button = null) {
     return;
   }
   const original = button?.textContent || "";
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Registrando...";
-  } else {
-    showChatNotice(`Criando pedido do plano ${plan.name}...`);
+  if (!account()?.active || !customerApiToken()) {
+    openAuthForIntent("plan", "clientLoginForm", planId);
+    showChatNotice("Entre novamente para criar o Pix.");
+    return;
   }
   const payerDocument = promptPaymentDocument();
   if (!payerDocument) {
-    if (button) {
-      button.disabled = false;
-      button.textContent = original;
-    }
     return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Criando Pix...";
+  } else {
+    showChatNotice(`Criando Pix do plano ${plan.name}...`);
   }
   const checkoutWindow = window.open("about:blank", "_blank");
   if (checkoutWindow) {
@@ -3127,8 +3128,8 @@ document.querySelector("#planCards").addEventListener("click", async (event) => 
   const button = event.target.closest("[data-buy-plan]");
   if (!button || button.disabled) return;
   const planId = button.dataset.buyPlan;
-  if (!account()?.active) {
-    openAuthForIntent("plan", "clientSignupForm", planId);
+  if (!account()?.active || !customerApiToken()) {
+    openAuthForIntent("plan", account()?.active ? "clientLoginForm" : "clientSignupForm", planId);
     return;
   }
   await requestPlanPurchase(planId, button);
