@@ -342,6 +342,12 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"account": app.state.account_store.login(payload)})
 
+    @app.get("/v1/auth/me")
+    async def current_customer(request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        return JSONResponse({"account": app.state.account_store.account_for_token(auth.token)})
+
     @app.post("/v1/billing/purchases")
     async def create_purchase(
         request: Request,
@@ -366,6 +372,37 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_customer(request, app.state.settings)
         return {"data": app.state.account_store.list_purchases_for_token(auth.token)}
+
+    @app.post("/v1/billing/mercadopago/confirm")
+    async def confirm_mercado_pago_payment(
+        request: Request,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        payload = payload or {}
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        payment_id = str(
+            payload.get("paymentId")
+            or payload.get("payment_id")
+            or payload.get("collection_id")
+            or payload.get("collectionId")
+            or ""
+        ).strip()
+        if not payment_id:
+            raise HTTPException(status_code=400, detail="Payment id is required.")
+        payment = await _fetch_mercado_pago_payment(app, payment_id)
+        purchase_id = str(payment.get("external_reference") or "")
+        if not purchase_id:
+            raise HTTPException(status_code=400, detail="Payment is missing external reference.")
+        result = app.state.account_store.approve_purchase_from_payment_for_token(
+            auth.token,
+            purchase_id,
+            payment_id=str(payment.get("id") or payment_id),
+            status=str(payment.get("status") or ""),
+        )
+        return JSONResponse(result)
 
     @app.post("/v1/billing/mercadopago/webhook")
     async def mercado_pago_webhook(request: Request) -> dict[str, str]:
@@ -819,6 +856,13 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
         "auto_return": "approved",
         "binary_mode": False,
         "payment_methods": {
+            "default_payment_method_id": "pix",
+            "excluded_payment_types": [
+                {"id": "credit_card"},
+                {"id": "debit_card"},
+                {"id": "ticket"},
+                {"id": "atm"},
+            ],
             "installments": 1,
             "default_installments": 1,
         },

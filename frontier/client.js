@@ -24,8 +24,10 @@ let highlightedPlanId = "";
 let sessionStatusMessage = "";
 let pendingPlanId = "";
 let pendingAuthIntent = "";
+let paymentPollTimer = null;
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
+const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
 
 function newChatSessionKey() {
   return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -992,29 +994,8 @@ function renderPlanCards() {
 }
 
 function renderPurchases() {
-  const purchases = ClaudeApp.purchases().filter((item) => !account() || item.accountId === account()?.id);
   const target = document.querySelector("#purchaseList");
-  if (!target) return;
-  if (!purchases.length) {
-    target.innerHTML = `<div class="empty-workspace"><p>Nenhum pedido de plano nesta conta.</p></div>`;
-    return;
-  }
-  target.innerHTML = purchases
-    .map(
-      (purchase) => `
-        <article class="purchase-row">
-          <div>
-            <strong>${ClaudeApp.escapeHtml(purchase.plan)}</strong>
-            <span>${new Date(purchase.createdAt).toLocaleString("pt-BR")}</span>
-          </div>
-          <span>${ClaudeApp.brl.format(purchase.price)}</span>
-          <span class="badge ${purchase.status === "paid" ? "ok" : purchase.status === "canceled" ? "bad" : ""}">
-            ${purchase.status === "paid" ? "Pago" : purchase.status === "canceled" ? "Cancelado" : "Pendente"}
-          </span>
-        </article>
-      `,
-    )
-    .join("");
+  if (target) target.innerHTML = "";
 }
 
 function renderBilling() {
@@ -1048,11 +1029,98 @@ function promptPaymentDocument() {
 async function loadPurchases() {
   if (!account()?.apiToken) return;
   try {
-    const data = await customerRequest("/v1/billing/purchases");
-    ClaudeApp.savePurchases(data.data || []);
+    await refreshCustomerAccount({ silent: true });
     renderBilling();
   } catch {
     renderBilling();
+  }
+}
+
+async function refreshCustomerAccount({ silent = false } = {}) {
+  if (!customerApiToken()) return null;
+  try {
+    const data = await customerRequest("/v1/auth/me");
+    const refreshed = saveServerAccount(data.account);
+    currentAccountId = refreshed.id;
+    localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, refreshed.id);
+    fillModelSelects();
+    renderAccount();
+    renderBilling();
+    return refreshed;
+  } catch (error) {
+    if (!silent) showChatNotice(error.message);
+    return null;
+  }
+}
+
+function stopPaymentStatusPolling() {
+  if (paymentPollTimer) window.clearInterval(paymentPollTimer);
+  paymentPollTimer = null;
+}
+
+function startPaymentStatusPolling(planId = "") {
+  const targetPlanId = planId || sessionStorage.getItem(PENDING_PAYMENT_SESSION_KEY) || "";
+  if (!targetPlanId || !customerApiToken()) return;
+  sessionStorage.setItem(PENDING_PAYMENT_SESSION_KEY, targetPlanId);
+  stopPaymentStatusPolling();
+  let attempts = 0;
+  paymentPollTimer = window.setInterval(async () => {
+    attempts += 1;
+    const refreshed = await refreshCustomerAccount({ silent: true });
+    if (refreshed && isCurrentPaidPlan(refreshed, planById(targetPlanId))) {
+      stopPaymentStatusPolling();
+      sessionStorage.removeItem(PENDING_PAYMENT_SESSION_KEY);
+      showChatNotice("Pagamento confirmado. Plano atualizado.");
+      return;
+    }
+    if (attempts >= 60) stopPaymentStatusPolling();
+  }, 5000);
+}
+
+async function confirmPaymentReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const paymentId =
+    params.get("payment_id") ||
+    params.get("collection_id") ||
+    params.get("collectionId") ||
+    params.get("data.id") ||
+    "";
+  const paymentState = params.get("payment") || params.get("status") || "";
+  if (!paymentId && !paymentState) return;
+
+  if (!customerApiToken()) {
+    showChatNotice("Entre novamente para confirmar o pagamento.");
+    return;
+  }
+
+  if (!paymentId) {
+    startPaymentStatusPolling();
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return;
+  }
+
+  showChatNotice("Confirmando pagamento...");
+  try {
+    const data = await customerRequest("/v1/billing/mercadopago/confirm", {
+      method: "POST",
+      body: JSON.stringify({ paymentId }),
+    });
+    if (data.account) {
+      const refreshed = saveServerAccount(data.account);
+      currentAccountId = refreshed.id;
+      localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, refreshed.id);
+      sessionStorage.removeItem(PENDING_PAYMENT_SESSION_KEY);
+      stopPaymentStatusPolling();
+      fillModelSelects();
+      renderAccount();
+      renderBilling();
+    }
+    showChatNotice(data.purchase?.status === "paid" ? "Pagamento confirmado. Plano atualizado." : "Pagamento em confirmação.");
+  } catch (error) {
+    showChatNotice(error.message);
+    startPaymentStatusPolling();
+  } finally {
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
 
@@ -1090,12 +1158,10 @@ async function requestPlanPurchase(planId, button = null) {
       method: "POST",
       body: JSON.stringify({ planId, payerDocument }),
     });
-    const purchases = ClaudeApp.purchases();
-    purchases.unshift(data.purchase);
-    ClaudeApp.savePurchases(purchases);
     pendingPlanId = "";
     pendingAuthIntent = "";
     renderBilling();
+    startPaymentStatusPolling(planId);
     const checkoutUrl = data.purchase.checkoutUrl || data.purchase.sandboxCheckoutUrl || "";
     if (checkoutUrl) {
       showChatNotice("Abrindo Mercado Pago...");
@@ -1103,6 +1169,10 @@ async function requestPlanPurchase(planId, button = null) {
         checkoutWindow.location.href = checkoutUrl;
       } else {
         window.location.assign(checkoutUrl);
+      }
+      if (button) {
+        button.disabled = false;
+        button.textContent = original;
       }
       return;
     }
@@ -3600,5 +3670,7 @@ if (currentAccountId && !account()) {
 
 renderAccount();
 if (sessionStatusMessage) showChatNotice(sessionStatusMessage);
+confirmPaymentReturn();
+startPaymentStatusPolling();
 loadServerHistory();
 loadCodeWorkspaces();

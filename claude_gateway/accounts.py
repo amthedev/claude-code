@@ -111,6 +111,13 @@ class AccountStore:
             ).fetchall()
         return [_purchase_from_row(row) for row in rows]
 
+    def account_for_token(self, token: str) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Account not found.")
+            return _public_account(_account_from_row(row))
+
     def create_gift_card(self, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
             code = _normalize_gift_code(values.get("code")) or _generate_gift_code()
@@ -388,6 +395,69 @@ class AccountStore:
             db.commit()
         purchase["mercadoPagoPaymentId"] = payment_id
         return purchase
+
+    def approve_purchase_from_payment_for_token(
+        self,
+        token: str,
+        purchase_id: str,
+        *,
+        payment_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            account_row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not account_row:
+                raise HTTPException(status_code=404, detail="Account not found.")
+            account = _account_from_row(account_row)
+            purchase = self._find_purchase(db, purchase_id)
+            if purchase["accountId"] != account["id"]:
+                raise HTTPException(status_code=404, detail="Purchase not found.")
+
+            status_value = str(status or "").lower()
+            normalized_status = _purchase_status_from_payment(status_value)
+            if status_value == "approved" and purchase["status"] != "paid":
+                upgraded = _apply_plan_to_account(account, purchase)
+                paid_at = _now()
+                db.execute(
+                    """
+                    UPDATE accounts
+                       SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
+                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        upgraded["plan"],
+                        upgraded["price"],
+                        upgraded["modelKey"],
+                        upgraded["manualLimit"],
+                        upgraded["dailyLimit"],
+                        upgraded["computedDailyTokens"],
+                        upgraded["maxCostUsd"],
+                        upgraded["id"],
+                    ),
+                )
+                db.execute(
+                    """
+                    UPDATE purchases
+                       SET mercado_pago_payment_id = ?, status = 'paid', paid_at = ?
+                     WHERE id = ?
+                    """,
+                    (payment_id, paid_at, purchase_id),
+                )
+                db.commit()
+                account = upgraded
+                purchase["status"] = "paid"
+                purchase["paidAt"] = paid_at
+            else:
+                db.execute(
+                    "UPDATE purchases SET mercado_pago_payment_id = ?, status = ? WHERE id = ?",
+                    (payment_id, normalized_status, purchase_id),
+                )
+                db.commit()
+                purchase["status"] = normalized_status
+
+            purchase["mercadoPagoPaymentId"] = payment_id
+            return {"account": _public_account(account), "purchase": purchase}
 
     def approve_purchase(self, purchase_id: str) -> dict[str, Any]:
         with self._lock, self._connect() as db:
