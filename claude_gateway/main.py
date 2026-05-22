@@ -811,6 +811,46 @@ def _public_base_url(request: Request, settings: Settings) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _mercado_pago_notification_url(base_url: str) -> str:
+    if not base_url.lower().startswith("https://"):
+        return ""
+    return f"{base_url}/v1/billing/mercadopago/webhook"
+
+
+def _mercado_pago_app_url(base_url: str) -> str:
+    if not base_url.lower().startswith("https://"):
+        return ""
+    return f"{base_url}/app"
+
+
+def _mercado_pago_error_detail(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except Exception:
+        text = response.text.strip()
+        return text[:500] or f"HTTP {response.status_code}"
+
+    parts: list[str] = []
+    for key in ("message", "error", "status", "status_detail"):
+        value = data.get(key)
+        if value:
+            parts.append(str(value))
+
+    cause = data.get("cause")
+    if isinstance(cause, list):
+        for item in cause[:3]:
+            if isinstance(item, dict):
+                detail = item.get("description") or item.get("message") or item.get("code")
+                if detail:
+                    parts.append(str(detail))
+            elif item:
+                parts.append(str(item))
+    elif cause:
+        parts.append(str(cause))
+
+    return " · ".join(dict.fromkeys(parts))[:500] or f"HTTP {response.status_code}"
+
+
 async def _download_github_zip(repo_url: str, ref: str, github_token: str) -> tuple[bytes, str]:
     owner, repo = github_repo_parts(repo_url)
     headers = {
@@ -857,12 +897,10 @@ async def _create_mercado_pago_preference(
         )
 
     if response.status_code >= 400:
-        detail = response.text
-        try:
-            detail = response.json().get("message") or detail
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=f"Mercado Pago preference failed: {detail}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mercado Pago recusou o checkout: {_mercado_pago_error_detail(response)}",
+        )
 
     data = response.json()
     if not data.get("id") or not data.get("init_point"):
@@ -885,7 +923,6 @@ async def _create_mercado_pago_pix_payment(
         "description": f"Claude {purchase['plan']}",
         "payment_method_id": "pix",
         "external_reference": purchase["id"],
-        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
         "payer": _mercado_pago_payer(purchase),
         "metadata": {
             "account_id": purchase["accountId"],
@@ -893,6 +930,9 @@ async def _create_mercado_pago_pix_payment(
             "purchase_id": purchase["id"],
         },
     }
+    notification_url = _mercado_pago_notification_url(base_url)
+    if notification_url:
+        payload["notification_url"] = notification_url
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
             "https://api.mercadopago.com/v1/payments",
@@ -903,12 +943,10 @@ async def _create_mercado_pago_pix_payment(
             json=payload,
         )
     if response.status_code >= 400:
-        detail = response.text
-        try:
-            detail = response.json().get("message") or detail
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=f"Mercado Pago Pix failed: {detail}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mercado Pago recusou o Pix: {_mercado_pago_error_detail(response)}",
+        )
     return response.json()
 
 
@@ -926,7 +964,6 @@ async def _create_mercado_pago_subscription(
         "reason": f"Assinatura Claude {purchase['plan']}",
         "external_reference": purchase["id"],
         "payer_email": purchase["login"],
-        "back_url": f"{base_url}/app?payment=success",
         "auto_recurring": {
             "frequency": 1,
             "frequency_type": "months",
@@ -935,6 +972,9 @@ async def _create_mercado_pago_subscription(
         },
         "status": "pending",
     }
+    app_url = _mercado_pago_app_url(base_url)
+    if app_url:
+        payload["back_url"] = f"{app_url}?payment=success"
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
             "https://api.mercadopago.com/preapproval",
@@ -942,12 +982,10 @@ async def _create_mercado_pago_subscription(
             json=payload,
         )
     if response.status_code >= 400:
-        detail = response.text
-        try:
-            detail = response.json().get("message") or detail
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=f"Mercado Pago subscription failed: {detail}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mercado Pago recusou a assinatura: {_mercado_pago_error_detail(response)}",
+        )
     data = response.json()
     if not data.get("id") or not data.get("init_point"):
         raise HTTPException(status_code=502, detail="Mercado Pago did not return a subscription URL.")
@@ -990,13 +1028,6 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
         ],
         "payer": _mercado_pago_payer(purchase),
         "external_reference": purchase["id"],
-        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
-        "back_urls": {
-            "success": f"{base_url}/app?payment=success",
-            "failure": f"{base_url}/app?payment=failure",
-            "pending": f"{base_url}/app?payment=pending",
-        },
-        "auto_return": "approved",
         "binary_mode": False,
         "payment_methods": {
             "installments": 1,
@@ -1009,6 +1040,17 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
             "purchase_id": purchase["id"],
         },
     }
+    notification_url = _mercado_pago_notification_url(base_url)
+    if notification_url:
+        payload["notification_url"] = notification_url
+    app_url = _mercado_pago_app_url(base_url)
+    if app_url:
+        payload["back_urls"] = {
+            "success": f"{app_url}?payment=success",
+            "failure": f"{app_url}?payment=failure",
+            "pending": f"{app_url}?payment=pending",
+        }
+        payload["auto_return"] = "approved"
     return payload
 
 

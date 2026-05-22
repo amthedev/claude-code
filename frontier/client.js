@@ -449,6 +449,22 @@ function ensureCodeCustomerSession() {
   return false;
 }
 
+async function responseErrorDetail(response, fallback) {
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    return fallback;
+  }
+  if (!text.trim()) return fallback;
+  try {
+    const data = JSON.parse(text);
+    return data.detail || data.message || fallback;
+  } catch {
+    return `${fallback}: ${text.trim().slice(0, 240)}`;
+  }
+}
+
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
@@ -864,13 +880,7 @@ async function supportRequest(path, options = {}) {
   });
 
   if (!response.ok) {
-    let detail = `API respondeu ${response.status}`;
-    try {
-      const data = await response.json();
-      detail = data.detail || detail;
-    } catch {
-      // Keep status text.
-    }
+    const detail = await responseErrorDetail(response, `API respondeu ${response.status}`);
     throw new Error(detail);
   }
 
@@ -892,13 +902,7 @@ async function customerRequest(path, options = {}) {
   });
 
   if (!response.ok) {
-    let detail = `API respondeu ${response.status}`;
-    try {
-      const data = await response.json();
-      detail = data.detail || detail;
-    } catch {
-      // Keep status text.
-    }
+    const detail = await responseErrorDetail(response, `API respondeu ${response.status}`);
     throw new Error(detail);
   }
 
