@@ -133,17 +133,44 @@ Accepted request control:
 
 Use `auto` for the default, `required` to force search, and `off` to prevent search. Search results are injected as internal context and the final answer should cite sources as Markdown links when it uses current web data.
 
-## MCP / ChatGPT App Bridge
+## MCP / Claude Desktop Bridge
 
 The project also includes a small MCP server that exposes coding tools over the
-Model Context Protocol. This is the bridge you need for ChatGPT Apps, MCP hosts,
-or Claude Code MCP integrations to inspect a project, apply patches, run allowed
-tests, and ask this gateway for extra reasoning.
+Model Context Protocol. This is the bridge you need for Claude Desktop, ChatGPT
+Apps, MCP hosts, or Claude Code MCP integrations to inspect a project, apply
+patches, run allowed tests, and ask this gateway for extra reasoning.
+
+The Square Cloud hosted API for this project is:
+
+```text
+https://claude-code-api.squareweb.app
+```
+
+For Claude Desktop on this machine, install the local stdio MCP bridge:
+
+```bash
+python3 scripts/install_claude_desktop_mcp.py \
+  --gateway-url "https://claude-code-api.squareweb.app" \
+  --gateway-token "replace-with-a-real-gateway-or-account-token"
+```
+
+Restart Claude Desktop after installing. The installer merges a `claude-code-api`
+entry into `~/Library/Application Support/Claude/claude_desktop_config.json`
+without deleting existing preferences.
+
+MCP does not replace Claude Desktop's built-in model. It gives Claude Desktop
+tools that call this project's API, especially `ask_claude_api`,
+`think_with_gateway`, `coworking`, `list_gateway_models`, and `gateway_status`.
+The `coworking` MCP tool provides a coworking-style coding session through your
+own hosted API, without depending on Claude Desktop's native paid Cowork feature.
+
+For Claude Code or another HTTP MCP host, you can run the same server as a local
+Streamable HTTP endpoint:
 
 ```bash
 export MCP_WORKSPACE_ROOT="$PWD"
-export MCP_GATEWAY_BASE_URL="http://127.0.0.1:8787"
-export MCP_GATEWAY_TOKEN="local-dev-token"
+export MCP_GATEWAY_BASE_URL="https://claude-code-api.squareweb.app"
+export MCP_GATEWAY_TOKEN="replace-with-a-real-gateway-or-account-token"
 export MCP_TRANSPORT="streamable-http"
 export MCP_HOST="127.0.0.1"
 export MCP_PORT="8000"
@@ -165,7 +192,10 @@ Tools exposed:
 - `list_files` and `read_file`: inspect project files under `MCP_WORKSPACE_ROOT`.
 - `write_file` and `apply_patch`: edit files inside the workspace.
 - `run_tests`: run only exact commands allowed by `MCP_ALLOWED_COMMANDS`.
-- `gateway_status` and `think_with_gateway`: use the backing gateway/OpenRouter API.
+- `gateway_status`, `list_gateway_models`, `think_with_gateway`, and
+  `ask_claude_api`: use the backing gateway/OpenRouter API.
+- `coworking`: run a pair-programming, review, debug, or planning coworking
+  session through the hosted API.
 
 For production, keep `MCP_ENABLE_WRITE_TOOLS=false` and `MCP_ENABLE_COMMANDS=false`
 unless the MCP endpoint is private, authenticated, and behind HTTPS.

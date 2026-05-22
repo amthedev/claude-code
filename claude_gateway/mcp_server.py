@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ DEFAULT_ALLOWED_COMMANDS = (
     "npm test",
     "npm run test",
 )
+HOSTED_GATEWAY_BASE_URL = "https://claude-code-api.squareweb.app"
+LOCAL_DEV_TOKENS = {"", "local-dev-token"}
 
 
 def workspace_root() -> Path:
@@ -41,10 +44,79 @@ def gateway_base_url() -> str:
 
 
 def gateway_token() -> str:
-    return os.getenv(
-        "MCP_GATEWAY_TOKEN",
-        os.getenv("ANTHROPIC_AUTH_TOKEN", os.getenv("GATEWAY_API_KEY", "local-dev-token")),
+    return (
+        os.getenv("MCP_GATEWAY_TOKEN")
+        or os.getenv("GATEWAY_API_KEY")
+        or _first_csv_value(os.getenv("GATEWAY_API_KEYS", ""))
+        or os.getenv("ANTHROPIC_AUTH_TOKEN")
+        or "local-dev-token"
     )
+
+
+def _first_csv_value(value: str) -> str:
+    return next((part.strip() for part in value.split(",") if part.strip()), "")
+
+
+def claude_desktop_config_path() -> Path:
+    override = os.getenv("CLAUDE_DESKTOP_CONFIG")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/Claude/claude_desktop_config.json"
+    if sys.platform.startswith("win"):
+        return Path(os.getenv("APPDATA", str(Path.home()))) / "Claude/claude_desktop_config.json"
+    return Path.home() / ".config/Claude/claude_desktop_config.json"
+
+
+def claude_desktop_server_config(
+    *,
+    repo_root: str | None = None,
+    gateway_url: str | None = None,
+    token: str | None = None,
+    python_executable: str | None = None,
+    enable_write_tools: bool = False,
+    enable_commands: bool = False,
+) -> dict[str, Any]:
+    root = Path(repo_root or os.getcwd()).resolve()
+    venv_python = root / ".venv/bin/python"
+    command = python_executable or (str(venv_python) if venv_python.exists() else sys.executable)
+    resolved_token = token
+    if resolved_token is None:
+        resolved_token = (
+            os.getenv("MCP_GATEWAY_TOKEN")
+            or os.getenv("GATEWAY_API_KEY")
+            or _first_csv_value(os.getenv("GATEWAY_API_KEYS", ""))
+        )
+    resolved_url = (gateway_url or HOSTED_GATEWAY_BASE_URL).rstrip("/")
+    if resolved_url == HOSTED_GATEWAY_BASE_URL and (resolved_token or "") in LOCAL_DEV_TOKENS:
+        resolved_token = ""
+    env = {
+        "PYTHONPATH": str(root),
+        "MCP_TRANSPORT": "stdio",
+        "MCP_WORKSPACE_ROOT": str(root),
+        "MCP_GATEWAY_BASE_URL": resolved_url,
+        "MCP_ENABLE_WRITE_TOOLS": "true" if enable_write_tools else "false",
+        "MCP_ENABLE_COMMANDS": "true" if enable_commands else "false",
+    }
+    if resolved_token:
+        env["MCP_GATEWAY_TOKEN"] = resolved_token
+    return {
+        "command": command,
+        "args": ["-m", "claude_gateway.mcp_server"],
+        "env": env,
+    }
+
+
+def merge_claude_desktop_config(
+    existing: dict[str, Any],
+    server_name: str,
+    server_config: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(existing)
+    servers = dict(merged.get("mcpServers") or {})
+    servers[server_name] = server_config
+    merged["mcpServers"] = servers
+    return merged
 
 
 def resolve_workspace_path(path: str | None = None) -> Path:
@@ -203,6 +275,57 @@ async def ask_gateway(
     return {"status_code": response.status_code, "response": data}
 
 
+def build_cowork_prompt(
+    task: str,
+    project_context: str = "",
+    mode: str = "pair_programming",
+) -> str:
+    mode_label = {
+        "pair_programming": "pair-programming partner",
+        "review": "senior code reviewer",
+        "debug": "debugging partner",
+        "plan": "technical planning partner",
+    }.get(mode, "pair-programming partner")
+    context = project_context.strip()
+    parts = [
+        f"Act as a {mode_label} inside a coworking session.",
+        "Use practical engineering judgment, be concise, and give concrete next steps.",
+        "When code changes are needed, mention exact files and patches conceptually.",
+    ]
+    if context:
+        parts.append(f"Project context:\n{context}")
+    parts.append(f"Task:\n{task.strip()}")
+    return "\n\n".join(parts)
+
+
+async def cowork_gateway(
+    task: str,
+    project_context: str = "",
+    mode: str = "pair_programming",
+    model: str = "claude-code-auto",
+    max_tokens: int = 1600,
+) -> dict[str, Any]:
+    return await ask_gateway(
+        prompt=build_cowork_prompt(task=task, project_context=project_context, mode=mode),
+        model=model,
+        max_tokens=max_tokens,
+    )
+
+
+async def gateway_models() -> dict[str, Any]:
+    headers = {
+        "Authorization": f"Bearer {gateway_token()}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.get(f"{gateway_base_url()}/v1/models", headers=headers)
+    try:
+        data: Any = response.json()
+    except json.JSONDecodeError:
+        data = {"text": response.text}
+    return {"status_code": response.status_code, "response": data}
+
+
 async def gateway_health() -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(f"{gateway_base_url()}/health")
@@ -265,6 +388,11 @@ def build_mcp_server() -> Any:
         return await gateway_health()
 
     @mcp.tool()
+    async def list_gateway_models() -> dict[str, Any]:
+        """List the models available through the configured gateway API token."""
+        return await gateway_models()
+
+    @mcp.tool()
     async def think_with_gateway(
         prompt: str,
         model: str = "claude-code-pro",
@@ -272,6 +400,32 @@ def build_mcp_server() -> Any:
     ) -> dict[str, Any]:
         """Ask the backing gateway for coding reasoning using OpenRouter routing."""
         return await ask_gateway(prompt=prompt, model=model, max_tokens=max_tokens)
+
+    @mcp.tool()
+    async def ask_claude_api(
+        prompt: str,
+        model: str = "claude-code-pro",
+        max_tokens: int = 1200,
+    ) -> dict[str, Any]:
+        """Ask the hosted Claude Code API and return its raw Anthropic-compatible response."""
+        return await ask_gateway(prompt=prompt, model=model, max_tokens=max_tokens)
+
+    @mcp.tool()
+    async def coworking(
+        task: str,
+        project_context: str = "",
+        mode: str = "pair_programming",
+        model: str = "claude-code-auto",
+        max_tokens: int = 1600,
+    ) -> dict[str, Any]:
+        """Run a coworking-style coding session through this project's API."""
+        return await cowork_gateway(
+            task=task,
+            project_context=project_context,
+            mode=mode,
+            model=model,
+            max_tokens=max_tokens,
+        )
 
     return mcp
 
@@ -283,7 +437,19 @@ def run() -> None:
 
 async def _run(transport: str) -> None:
     mcp = build_mcp_server()
-    await mcp.run_async(transport=transport)
+    if hasattr(mcp, "run_async"):
+        await mcp.run_async(transport=transport)
+        return
+    if transport == "stdio":
+        await mcp.run_stdio_async()
+        return
+    if transport == "sse":
+        await mcp.run_sse_async()
+        return
+    if transport == "streamable-http":
+        await mcp.run_streamable_http_async()
+        return
+    raise ValueError(f"Unsupported MCP transport: {transport}")
 
 
 if __name__ == "__main__":
