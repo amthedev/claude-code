@@ -25,6 +25,7 @@ let sessionStatusMessage = "";
 let pendingPlanId = "";
 let pendingAuthIntent = "";
 let paymentPollTimer = null;
+let pendingPaymentPlanId = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
@@ -1015,15 +1016,80 @@ function focusHighlightedPlan() {
   });
 }
 
-function promptPaymentDocument() {
-  const value = window.prompt("Digite o CPF ou CNPJ do pagador para continuar no Mercado Pago:");
-  if (value === null) return null;
-  const digits = String(value || "").replace(/\D+/g, "");
-  if (![11, 14].includes(digits.length)) {
-    showChatNotice("Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.");
-    return null;
+function paymentDocumentDigits(value) {
+  return String(value || "").replace(/\D+/g, "");
+}
+
+function validPaymentDocument(value) {
+  return [11, 14].includes(paymentDocumentDigits(value).length);
+}
+
+function openPaymentModal(planId) {
+  const plan = planById(planId);
+  if (!plan) {
+    showChatNotice("Plano não encontrado.");
+    return;
   }
-  return digits;
+  if (!account()?.active || !customerApiToken()) {
+    openAuthForIntent("plan", account()?.active ? "clientLoginForm" : "clientSignupForm", planId);
+    showChatNotice("Entre para assinar o plano.");
+    return;
+  }
+  pendingPaymentPlanId = planId;
+  const modal = document.querySelector("#paymentModal");
+  const form = document.querySelector("#paymentForm");
+  form.reset();
+  form.elements.paymentMethod.value = "pix";
+  document.querySelector("#paymentError").textContent = "";
+  document.querySelector("#paymentResult").classList.add("hidden");
+  document.querySelector("#paymentResult").innerHTML = "";
+  renderPaymentMethods();
+  renderPaymentSummary(plan);
+  modal.classList.remove("hidden");
+  window.setTimeout(() => form.elements.payerDocument.focus(), 0);
+}
+
+function closePaymentModal() {
+  pendingPaymentPlanId = "";
+  document.querySelector("#paymentModal").classList.add("hidden");
+}
+
+function renderPaymentSummary(plan) {
+  const current = account();
+  document.querySelector("#paymentSummary").innerHTML = `
+    <div>
+      <span>${ClaudeApp.escapeHtml(current?.login || "")}</span>
+      <h3>${ClaudeApp.escapeHtml(plan.name)}</h3>
+      <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens por dia</span>
+    </div>
+    <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
+  `;
+}
+
+function renderPaymentMethods() {
+  document.querySelectorAll(".payment-method").forEach((label) => {
+    const input = label.querySelector("input");
+    label.classList.toggle("active", Boolean(input?.checked));
+  });
+}
+
+function renderPixPayment(payment) {
+  const target = document.querySelector("#paymentResult");
+  const qrImage = payment.qrCodeBase64
+    ? `<img alt="QR Code Pix" src="data:image/png;base64,${ClaudeApp.escapeHtml(payment.qrCodeBase64)}" />`
+    : "";
+  const qrCode = payment.qrCode || "";
+  target.innerHTML = `
+    <strong>Pix gerado com segurança</strong>
+    <span>Escaneie o QR Code ou copie o código Pix. O plano atualiza automaticamente após a confirmação.</span>
+    ${qrImage}
+    <div class="payment-copy-row">
+      <code>${ClaudeApp.escapeHtml(qrCode || "Código Pix indisponível")}</code>
+      <button type="button" data-copy-pix ${qrCode ? "" : "disabled"}>Copiar</button>
+    </div>
+    ${payment.ticketUrl ? `<a class="secondary" href="${ClaudeApp.escapeHtml(payment.ticketUrl)}" target="_blank" rel="noreferrer">Abrir comprovante do Mercado Pago</a>` : ""}
+  `;
+  target.classList.remove("hidden");
 }
 
 async function loadPurchases() {
@@ -1085,15 +1151,16 @@ async function confirmPaymentReturn() {
     params.get("collectionId") ||
     params.get("data.id") ||
     "";
+  const preapprovalId = params.get("preapproval_id") || params.get("preapprovalId") || "";
   const paymentState = params.get("payment") || params.get("status") || "";
-  if (!paymentId && !paymentState) return;
+  if (!paymentId && !preapprovalId && !paymentState) return;
 
   if (!customerApiToken()) {
     showChatNotice("Entre novamente para confirmar o pagamento.");
     return;
   }
 
-  if (!paymentId) {
+  if (!paymentId && !preapprovalId) {
     startPaymentStatusPolling();
     window.history.replaceState({}, document.title, window.location.pathname);
     return;
@@ -1103,7 +1170,7 @@ async function confirmPaymentReturn() {
   try {
     const data = await customerRequest("/v1/billing/mercadopago/confirm", {
       method: "POST",
-      body: JSON.stringify({ paymentId }),
+      body: JSON.stringify(preapprovalId ? { preapprovalId } : { paymentId }),
     });
     if (data.account) {
       const refreshed = saveServerAccount(data.account);
@@ -1124,7 +1191,7 @@ async function confirmPaymentReturn() {
   }
 }
 
-async function requestPlanPurchase(planId, button = null) {
+async function requestPlanPurchase(planId, values = {}, button = null) {
   const plan = planById(planId);
   if (!plan) {
     showChatNotice("Plano não encontrado.");
@@ -1136,17 +1203,19 @@ async function requestPlanPurchase(planId, button = null) {
     showChatNotice("Entre novamente para assinar o plano.");
     return;
   }
-  const payerDocument = promptPaymentDocument();
-  if (!payerDocument) {
+  const payerDocument = paymentDocumentDigits(values.payerDocument);
+  const paymentMethod = values.paymentMethod === "card_subscription" ? "card_subscription" : "pix";
+  if (!validPaymentDocument(payerDocument)) {
+    document.querySelector("#paymentError").textContent = "Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.";
     return;
   }
   if (button) {
     button.disabled = true;
-    button.textContent = "Abrindo pagamento...";
+    button.textContent = paymentMethod === "pix" ? "Gerando Pix..." : "Abrindo assinatura...";
   } else {
-    showChatNotice(`Abrindo pagamento do plano ${plan.name}...`);
+    showChatNotice(paymentMethod === "pix" ? `Gerando Pix do plano ${plan.name}...` : `Abrindo assinatura do plano ${plan.name}...`);
   }
-  const checkoutWindow = window.open("about:blank", "_blank");
+  const checkoutWindow = paymentMethod === "card_subscription" ? window.open("about:blank", "_blank") : null;
   if (checkoutWindow) {
     checkoutWindow.opener = null;
     checkoutWindow.document.title = "Mercado Pago";
@@ -1156,15 +1225,29 @@ async function requestPlanPurchase(planId, button = null) {
   try {
     const data = await customerRequest("/v1/billing/purchases", {
       method: "POST",
-      body: JSON.stringify({ planId, payerDocument }),
+      body: JSON.stringify({ planId, payerDocument, paymentMethod }),
     });
     pendingPlanId = "";
     pendingAuthIntent = "";
     renderBilling();
     startPaymentStatusPolling(planId);
-    const checkoutUrl = data.purchase.checkoutUrl || data.purchase.sandboxCheckoutUrl || "";
+    if (data.payment?.type === "pix") {
+      renderPixPayment(data.payment);
+      showChatNotice("Pix gerado.");
+      if (button) {
+        button.disabled = false;
+        button.textContent = original;
+      }
+      return;
+    }
+    const checkoutUrl =
+      data.payment?.checkoutUrl ||
+      data.payment?.sandboxCheckoutUrl ||
+      data.purchase.checkoutUrl ||
+      data.purchase.sandboxCheckoutUrl ||
+      "";
     if (checkoutUrl) {
-      showChatNotice("Abrindo Mercado Pago...");
+      showChatNotice("Abrindo assinatura no Mercado Pago...");
       if (checkoutWindow) {
         checkoutWindow.location.href = checkoutUrl;
       } else {
@@ -1177,9 +1260,10 @@ async function requestPlanPurchase(planId, button = null) {
       return;
     }
     if (checkoutWindow) checkoutWindow.close();
-    showChatNotice("Pedido criado, mas o Mercado Pago não retornou link de pagamento.");
+    showChatNotice("Pedido criado, mas o Mercado Pago não retornou os dados de pagamento.");
   } catch (error) {
     if (checkoutWindow) checkoutWindow.close();
+    document.querySelector("#paymentError").textContent = error.message;
     showChatNotice(error.message);
     if (button) {
       button.disabled = false;
@@ -1191,7 +1275,7 @@ async function requestPlanPurchase(planId, button = null) {
 async function continuePendingAuthFlow() {
   if (!pendingPlanId || !account()?.active) return;
   const planId = pendingPlanId;
-  await requestPlanPurchase(planId);
+  openPaymentModal(planId);
 }
 
 function renderAccount() {
@@ -3198,11 +3282,38 @@ document.querySelector("#planCards").addEventListener("click", async (event) => 
   const button = event.target.closest("[data-buy-plan]");
   if (!button || button.disabled) return;
   const planId = button.dataset.buyPlan;
-  if (!account()?.active || !customerApiToken()) {
-    openAuthForIntent("plan", account()?.active ? "clientLoginForm" : "clientSignupForm", planId);
-    return;
-  }
-  await requestPlanPurchase(planId, button);
+  openPaymentModal(planId);
+});
+
+document.querySelector("#paymentModalClose").addEventListener("click", closePaymentModal);
+document.querySelector("#paymentModalCancel").addEventListener("click", closePaymentModal);
+document.querySelector("#paymentModal").addEventListener("click", (event) => {
+  if (event.target.id === "paymentModal") closePaymentModal();
+});
+
+document.querySelector("#paymentForm").addEventListener("change", (event) => {
+  if (event.target.name === "paymentMethod") renderPaymentMethods();
+});
+
+document.querySelector("#paymentForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type='submit']");
+  const values = Object.fromEntries(new FormData(form).entries());
+  document.querySelector("#paymentError").textContent = "";
+  await requestPlanPurchase(pendingPaymentPlanId, values, button);
+});
+
+document.querySelector("#paymentResult").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy-pix]");
+  if (!button) return;
+  const code = document.querySelector("#paymentResult code")?.textContent || "";
+  if (!code || button.disabled) return;
+  await navigator.clipboard.writeText(code);
+  button.textContent = "Copiado";
+  window.setTimeout(() => {
+    button.textContent = "Copiar";
+  }, 1400);
 });
 
 document.querySelector("#attachmentInput").addEventListener("change", async (event) => {
@@ -3648,6 +3759,7 @@ document.addEventListener("keydown", (event) => {
     closeFloatingMenus();
     if (document.querySelector("#searchPanel").classList.contains("active")) setPanel("chatPanel");
     closeProjectModal();
+    closePaymentModal();
     document.querySelector("#artifactStartModal").classList.add("hidden");
   }
 });

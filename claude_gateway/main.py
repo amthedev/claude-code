@@ -358,14 +358,25 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         purchase = app.state.account_store.create_purchase(auth.token, payload)
-        checkout = await _create_mercado_pago_preference(request, app, purchase)
-        purchase = app.state.account_store.update_purchase_checkout(
+        if purchase["paymentMethod"] == "card_subscription":
+            subscription = await _create_mercado_pago_subscription(request, app, purchase)
+            purchase = app.state.account_store.update_purchase_checkout(
+                purchase["id"],
+                preference_id=subscription["id"],
+                checkout_url=subscription["init_point"],
+                sandbox_checkout_url=subscription.get("sandbox_init_point") or "",
+                payment_method="card_subscription",
+            )
+            return JSONResponse({"purchase": purchase, "payment": _subscription_payment_payload(subscription)})
+
+        pix = await _create_mercado_pago_pix_payment(request, app, purchase)
+        purchase = app.state.account_store.update_purchase_payment(
             purchase["id"],
-            preference_id=checkout["id"],
-            checkout_url=checkout["init_point"],
-            sandbox_checkout_url=checkout.get("sandbox_init_point") or "",
+            payment_id=str(pix.get("id") or ""),
+            payment_method="pix",
+            status=str(pix.get("status") or "pending"),
         )
-        return JSONResponse({"purchase": purchase})
+        return JSONResponse({"purchase": purchase, "payment": _pix_payment_payload(pix)})
 
     @app.get("/v1/billing/purchases")
     async def list_customer_purchases(request: Request) -> dict[str, Any]:
@@ -390,6 +401,20 @@ def create_app(
             or payload.get("collectionId")
             or ""
         ).strip()
+        preapproval_id = str(payload.get("preapprovalId") or payload.get("preapproval_id") or "").strip()
+        if preapproval_id:
+            preapproval = await _fetch_mercado_pago_preapproval(app, preapproval_id)
+            purchase_id = str(preapproval.get("external_reference") or "")
+            if not purchase_id:
+                raise HTTPException(status_code=400, detail="Subscription is missing external reference.")
+            result = app.state.account_store.approve_purchase_from_payment_for_token(
+                auth.token,
+                purchase_id,
+                payment_id=str(preapproval.get("id") or preapproval_id),
+                status=_preapproval_purchase_status(preapproval),
+            )
+            return JSONResponse(result)
+
         if not payment_id:
             raise HTTPException(status_code=400, detail="Payment id is required.")
         payment = await _fetch_mercado_pago_payment(app, payment_id)
@@ -416,7 +441,19 @@ def create_app(
 
         payment_id = _mercado_pago_payment_id(request, payload)
         if not payment_id:
-            return {"status": "ignored"}
+            preapproval_id = _mercado_pago_preapproval_id(request, payload)
+            if not preapproval_id:
+                return {"status": "ignored"}
+            preapproval = await _fetch_mercado_pago_preapproval(app, preapproval_id)
+            purchase_id = str(preapproval.get("external_reference") or "")
+            if not purchase_id:
+                return {"status": "ignored"}
+            app.state.account_store.approve_purchase_from_payment(
+                purchase_id,
+                payment_id=str(preapproval.get("id") or preapproval_id),
+                status=_preapproval_purchase_status(preapproval),
+            )
+            return {"status": "ok"}
 
         payment = await _fetch_mercado_pago_payment(app, payment_id)
         purchase_id = str(payment.get("external_reference") or "")
@@ -833,6 +870,112 @@ async def _create_mercado_pago_preference(
     return data
 
 
+async def _create_mercado_pago_pix_payment(
+    request: Request,
+    app: FastAPI,
+    purchase: dict[str, Any],
+) -> dict[str, Any]:
+    token = app.state.settings.mercado_pago_access_token
+    if not token:
+        raise HTTPException(status_code=503, detail="Configure MERCADO_PAGO_ACCESS_TOKEN to sell plans.")
+
+    base_url = _public_base_url(request, app.state.settings)
+    payload = {
+        "transaction_amount": float(purchase["price"]),
+        "description": f"Claude {purchase['plan']}",
+        "payment_method_id": "pix",
+        "external_reference": purchase["id"],
+        "notification_url": f"{base_url}/v1/billing/mercadopago/webhook",
+        "payer": _mercado_pago_payer(purchase),
+        "metadata": {
+            "account_id": purchase["accountId"],
+            "plan_id": purchase["planId"],
+            "purchase_id": purchase["id"],
+        },
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            "https://api.mercadopago.com/v1/payments",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-Idempotency-Key": purchase["id"],
+            },
+            json=payload,
+        )
+    if response.status_code >= 400:
+        detail = response.text
+        try:
+            detail = response.json().get("message") or detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"Mercado Pago Pix failed: {detail}")
+    return response.json()
+
+
+async def _create_mercado_pago_subscription(
+    request: Request,
+    app: FastAPI,
+    purchase: dict[str, Any],
+) -> dict[str, Any]:
+    token = app.state.settings.mercado_pago_access_token
+    if not token:
+        raise HTTPException(status_code=503, detail="Configure MERCADO_PAGO_ACCESS_TOKEN to sell plans.")
+
+    base_url = _public_base_url(request, app.state.settings)
+    payload = {
+        "reason": f"Assinatura Claude {purchase['plan']}",
+        "external_reference": purchase["id"],
+        "payer_email": purchase["login"],
+        "back_url": f"{base_url}/app?payment=success",
+        "auto_recurring": {
+            "frequency": 1,
+            "frequency_type": "months",
+            "transaction_amount": float(purchase["price"]),
+            "currency_id": "BRL",
+        },
+        "status": "pending",
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            "https://api.mercadopago.com/preapproval",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+    if response.status_code >= 400:
+        detail = response.text
+        try:
+            detail = response.json().get("message") or detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"Mercado Pago subscription failed: {detail}")
+    data = response.json()
+    if not data.get("id") or not data.get("init_point"):
+        raise HTTPException(status_code=502, detail="Mercado Pago did not return a subscription URL.")
+    return data
+
+
+def _pix_payment_payload(payment: dict[str, Any]) -> dict[str, Any]:
+    transaction = (payment.get("point_of_interaction") or {}).get("transaction_data") or {}
+    return {
+        "type": "pix",
+        "id": str(payment.get("id") or ""),
+        "status": str(payment.get("status") or ""),
+        "qrCode": str(transaction.get("qr_code") or ""),
+        "qrCodeBase64": str(transaction.get("qr_code_base64") or ""),
+        "ticketUrl": str(transaction.get("ticket_url") or ""),
+    }
+
+
+def _subscription_payment_payload(subscription: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "card_subscription",
+        "id": str(subscription.get("id") or ""),
+        "checkoutUrl": str(subscription.get("init_point") or ""),
+        "sandboxCheckoutUrl": str(subscription.get("sandbox_init_point") or ""),
+        "status": str(subscription.get("status") or ""),
+    }
+
+
 def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "items": [
@@ -901,6 +1044,10 @@ def _payer_document(value: Any) -> dict[str, str] | None:
 
 
 def _mercado_pago_payment_id(request: Request, payload: dict[str, Any]) -> str:
+    topic = str(request.query_params.get("topic") or payload.get("type") or payload.get("topic") or "").lower()
+    resource = str(payload.get("resource") or "")
+    if "preapproval" in topic or "preapproval" in resource:
+        return ""
     query_id = request.query_params.get("data.id") or request.query_params.get("id")
     if query_id:
         return query_id
@@ -909,6 +1056,21 @@ def _mercado_pago_payment_id(request: Request, payload: dict[str, Any]) -> str:
         return str(data["id"])
     if isinstance(payload, dict) and payload.get("resource"):
         return str(payload["resource"]).rstrip("/").rsplit("/", 1)[-1]
+    return ""
+
+
+def _mercado_pago_preapproval_id(request: Request, payload: dict[str, Any]) -> str:
+    topic = str(request.query_params.get("topic") or payload.get("type") or payload.get("topic") or "").lower()
+    resource = str(payload.get("resource") or "")
+    if "preapproval" in topic:
+        query_id = request.query_params.get("data.id") or request.query_params.get("id")
+        if query_id:
+            return query_id
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        if isinstance(data, dict) and data.get("id"):
+            return str(data["id"])
+    if "preapproval" in resource:
+        return resource.rstrip("/").rsplit("/", 1)[-1]
     return ""
 
 
@@ -921,6 +1083,26 @@ async def _fetch_mercado_pago_payment(app: FastAPI, payment_id: str) -> dict[str
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="Could not verify Mercado Pago payment.")
     return response.json()
+
+
+async def _fetch_mercado_pago_preapproval(app: FastAPI, preapproval_id: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            f"https://api.mercadopago.com/preapproval/{preapproval_id}",
+            headers={"Authorization": f"Bearer {app.state.settings.mercado_pago_access_token}"},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Could not verify Mercado Pago subscription.")
+    return response.json()
+
+
+def _preapproval_purchase_status(preapproval: dict[str, Any]) -> str:
+    status = str(preapproval.get("status") or "").lower()
+    if status in {"authorized", "active"}:
+        return "approved"
+    if status in {"cancelled", "canceled", "paused"}:
+        return "canceled"
+    return status or "pending"
 
 
 async def _complete_gateway_message(

@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521g" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521h" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell sidebar-open">
@@ -529,6 +529,47 @@
       </div>
     </section>
 
+    <section id="paymentModal" class="auth-modal hidden" aria-modal="true" role="dialog" aria-label="Pagamento do plano">
+      <form id="paymentForm" class="payment-dialog dark-card" novalidate>
+        <div class="modal-header">
+          <div>
+            <span class="overline">Checkout seguro</span>
+            <h2>Assinar plano</h2>
+          </div>
+          <button id="paymentModalClose" type="button">Fechar</button>
+        </div>
+
+        <div id="paymentSummary" class="payment-summary"></div>
+
+        <fieldset class="payment-methods">
+          <legend>Forma de pagamento</legend>
+          <label class="payment-method active">
+            <input type="radio" name="paymentMethod" value="pix" checked />
+            <span>Pix</span>
+            <small>QR Code e copia-e-cola nesta tela</small>
+          </label>
+          <label class="payment-method">
+            <input type="radio" name="paymentMethod" value="card_subscription" />
+            <span>Cartão de crédito</span>
+            <small>Assinatura mensal recorrente</small>
+          </label>
+        </fieldset>
+
+        <label class="payment-field">
+          CPF ou CNPJ do pagador
+          <input name="payerDocument" inputmode="numeric" autocomplete="off" placeholder="Somente números" />
+        </label>
+
+        <div id="paymentError" class="form-error"></div>
+        <div id="paymentResult" class="payment-result hidden"></div>
+
+        <div class="modal-actions payment-actions">
+          <button id="paymentModalCancel" type="button">Cancelar</button>
+          <button class="primary" type="submit">Continuar com segurança</button>
+        </div>
+      </form>
+    </section>
+
     <section id="authModal" class="auth-modal hidden" aria-modal="true" role="dialog">
       <div class="auth-dialog dark-card">
         <div class="modal-header">
@@ -588,7 +629,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=codex-code-chat-20260521g"></script>
-    <script src="/frontier/client.js?v=codex-code-chat-20260521g"></script>
+    <script src="/frontier/shared.js?v=codex-code-chat-20260521h"></script>
+    <script src="/frontier/client.js?v=codex-code-chat-20260521h"></script>
   </body>
 </html>

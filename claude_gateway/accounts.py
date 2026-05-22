@@ -322,6 +322,7 @@ class AccountStore:
                 raise HTTPException(status_code=404, detail="Account not found.")
             account = _account_from_row(row)
             purchase = _purchase_for_plan(account, plan, self.settings)
+            purchase["paymentMethod"] = _normalize_payment_method(values.get("paymentMethod") or values.get("payment_method"))
             payer_document = _normalize_document(
                 values.get("payerDocument") or values.get("payer_document") or values.get("cpf")
             )
@@ -348,23 +349,54 @@ class AccountStore:
         preference_id: str,
         checkout_url: str,
         sandbox_checkout_url: str = "",
+        payment_method: str | None = None,
     ) -> dict[str, Any]:
         with self._lock, self._connect() as db:
             purchase = self._find_purchase(db, purchase_id)
+            next_payment_method = payment_method or purchase["paymentMethod"]
             db.execute(
                 """
                 UPDATE purchases
                    SET mercado_pago_preference_id = ?,
                        checkout_url = ?,
-                       sandbox_checkout_url = ?
+                       sandbox_checkout_url = ?,
+                       payment_method = ?
                  WHERE id = ?
                 """,
-                (preference_id, checkout_url, sandbox_checkout_url, purchase_id),
+                (preference_id, checkout_url, sandbox_checkout_url, next_payment_method, purchase_id),
             )
             db.commit()
             purchase["mercadoPagoPreferenceId"] = preference_id
             purchase["checkoutUrl"] = checkout_url
             purchase["sandboxCheckoutUrl"] = sandbox_checkout_url
+            purchase["paymentMethod"] = next_payment_method
+        return purchase
+
+    def update_purchase_payment(
+        self,
+        purchase_id: str,
+        *,
+        payment_id: str,
+        payment_method: str,
+        status: str = "pending",
+    ) -> dict[str, Any]:
+        with self._lock, self._connect() as db:
+            purchase = self._find_purchase(db, purchase_id)
+            normalized_status = _purchase_status_from_payment(str(status or "").lower())
+            db.execute(
+                """
+                UPDATE purchases
+                   SET mercado_pago_payment_id = ?,
+                       payment_method = ?,
+                       status = ?
+                 WHERE id = ?
+                """,
+                (payment_id, payment_method, normalized_status, purchase_id),
+            )
+            db.commit()
+            purchase["mercadoPagoPaymentId"] = payment_id
+            purchase["paymentMethod"] = payment_method
+            purchase["status"] = normalized_status
         return purchase
 
     def approve_purchase_from_payment(
@@ -1024,6 +1056,13 @@ def _normalize_document(value: Any) -> str:
     if len(digits) in {11, 14}:
         return digits
     return ""
+
+
+def _normalize_payment_method(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"card", "credit_card", "cartao", "cartão", "subscription", "card_subscription"}:
+        return "card_subscription"
+    return "pix"
 
 
 def _purchase_status_from_payment(status: str) -> str:
