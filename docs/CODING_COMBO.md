@@ -28,6 +28,11 @@ OPENAI_HELPER_MAX_OUTPUT_TOKENS=900
 OPENAI_HELPER_FOR_CUSTOMERS=true
 ENABLE_OPENAI_DESIGN_DIRECTOR=true
 ENABLE_OPENAI_DECISION_DIRECTOR=true
+ENABLE_WEB_SEARCH=true
+WEB_SEARCH_MODEL=gpt-5.5
+WEB_SEARCH_CONTEXT_SIZE=low
+WEB_SEARCH_FOR_CUSTOMERS=true
+WEB_SEARCH_MAX_OUTPUT_TOKENS=900
 
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
@@ -57,14 +62,15 @@ ENABLE_AGENT_ORCHESTRATION=true
 - `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e só sobe para DeepSeek R1 em tarefas críticas.
 - `claude-code-ui`: usa Qwen3 Coder Next para construir frontend, DeepSeek Flash para correções simples e Hy3 para raciocínio de UI.
 - `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
+- Pesquisa web: por padrão fica em `auto`; usa OpenAI Responses API `web_search` somente quando o pedido exige informação atual ou quando `gateway_web_search="required"`.
 
 Para compatibilidade com Claude Code, chamadas com `tools`, `tool_choice`, `tool_use` ou `tool_result` continuam indo direto para um único modelo. Isso é proposital: o ganho de inteligência vem do roteamento e do pipeline quando o pedido é texto puro; a edição real de arquivos precisa preservar o contrato de ferramentas.
 
 ## Compatibilidade de resposta Anthropic
 
-O gateway injeta um perfil público em cada chamada para aproximar o comportamento dos modelos Anthropic:
+O gateway injeta um perfil público do Frontier AI em cada chamada, mantendo compatibilidade Anthropic:
 
-- responde usando a identidade pública selecionada (`Claude Haiku 4.5`, `Claude Sonnet 4.6` ou `Claude Opus 4.7`);
+- responde usando a identidade pública selecionada (`Frontier AI Economy`, `Frontier AI Pro`, `Frontier AI Ultra`, `Frontier AI UI` ou `Frontier AI Auto`);
 - preserva compatibilidade com Anthropic Messages API, streaming e tool calls;
 - mantém tom de Claude Code: direto, cuidadoso com código, orientado a arquivos/comandos/testes;
 - evita mencionar provedores internos, roteamento e agentes escondidos, salvo quando o usuário pedir detalhes técnicos.

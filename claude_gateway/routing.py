@@ -155,33 +155,33 @@ def model_profiles(settings: Settings) -> list[ModelProfile]:
     return [
         ModelProfile(
             id=settings.economy_public_model,
-            display_name="Claude Code Economy",
+            display_name="Frontier AI Economy",
             mode="economy",
-            description="Cheap coding path for simple tasks.",
+            description="Caminho econômico para conversas e tarefas simples.",
         ),
         ModelProfile(
             id=settings.pro_public_model,
-            display_name="Claude Code Pro",
+            display_name="Frontier AI Pro",
             mode="pro",
-            description="Stronger coding and reasoning path.",
+            description="Mais força para código, análise e trabalho diário.",
         ),
         ModelProfile(
             id=settings.ultra_public_model,
-            display_name="Claude Code Ultra",
+            display_name="Frontier AI Ultra",
             mode="ultra",
-            description="Critical path with premium fallback available.",
+            description="Rota reforçada para tarefas críticas e projetos maiores.",
         ),
         ModelProfile(
             id=settings.ui_public_model,
-            display_name="Claude Code UI",
+            display_name="Frontier AI UI",
             mode="ui",
-            description="Frontend and visual application path.",
+            description="Especialista em frontend, layout e experiência visual.",
         ),
         ModelProfile(
             id=settings.auto_public_model,
-            display_name="Claude Code Auto",
+            display_name="Frontier AI Auto",
             mode="auto",
-            description="Heuristic router across economy, pro, ultra, and UI.",
+            description="Escolhe automaticamente entre Economy, Pro, Ultra e UI.",
         ),
     ]
 

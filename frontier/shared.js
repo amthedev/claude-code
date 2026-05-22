@@ -16,17 +16,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-economy",
-      label: "Haiku 4.5",
+      label: "Frontier Economy",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Sonnet 4.6",
+      label: "Frontier Pro",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-ultra",
-      label: "Opus 4.7",
+      label: "Frontier Ultra",
       usdPerToken: 0.00000087,
     },
   };
@@ -44,7 +44,7 @@ const ClaudeApp = (() => {
     {
       id: "starter",
       name: "Básico",
-      description: "Como o Claude comum, para conversas e tarefas leves.",
+      description: "Para conversas, estudos e tarefas leves do dia a dia.",
       price: 65,
       modelKey: "haiku",
       manualLimit: 16000,
@@ -53,7 +53,7 @@ const ClaudeApp = (() => {
     {
       id: "pro",
       name: "Pro 5X",
-      description: "Mais limite e Sonnet para trabalho diário.",
+      description: "Mais limite e força para trabalho diário.",
       price: 125,
       modelKey: "sonnet",
       manualLimit: 50000,

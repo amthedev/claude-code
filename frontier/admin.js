@@ -6,6 +6,26 @@ let activeSupportTicket = null;
 let supportPollTimer = null;
 let adminSetupConfigured = true;
 let purchaseState = [];
+let gatewayHealthState = null;
+
+const adminTabTitles = {
+  accountsPanel: "Gift cards e clientes",
+  purchasesPanel: "Compras e upgrades",
+  supportPanel: "Atendimento",
+  financePanel: "Financeiro",
+  gatewayPanel: "Gateway e produção",
+};
+
+function setAdminTab(tabId) {
+  document.querySelectorAll("[data-admin-tab]").forEach((item) => {
+    item.classList.toggle("active", item.dataset.adminTab === tabId);
+  });
+  document.querySelectorAll(".admin-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === tabId);
+  });
+  document.querySelector(".admin-topbar h1").textContent = adminTabTitles[tabId] || "Painel";
+  document.querySelector("#seedDemo").classList.toggle("hidden", tabId !== "accountsPanel");
+}
 
 function showAdminApp() {
   adminLogin.classList.add("hidden");
@@ -134,14 +154,16 @@ async function adminAuthRequest(path, payload) {
 }
 
 async function refreshFromServer() {
-  const [giftCards, accounts, purchases] = await Promise.all([
+  const [giftCards, accounts, purchases, health] = await Promise.all([
     adminRequest("/v1/admin/gift-cards"),
     adminRequest("/v1/admin/accounts"),
     adminRequest("/v1/admin/purchases"),
+    adminRequest("/v1/admin/health"),
   ]);
   ClaudeApp.saveGiftCards(giftCards.data || []);
   ClaudeApp.saveAccounts(accounts.data || []);
   purchaseState = purchases.data || [];
+  gatewayHealthState = health;
   ClaudeApp.savePurchases(purchaseState);
 }
 
@@ -266,6 +288,36 @@ function renderGatewaySnippet(accounts) {
       ].join("|"),
     )
     .join(";");
+}
+
+function renderProductionChecklist() {
+  const target = document.querySelector("#productionChecklist");
+  if (!target) return;
+  if (!gatewayHealthState) {
+    target.innerHTML = `<article><span class="badge bad">Pendente</span><strong>Health indisponível</strong><p>Entre novamente ou confira a URL da API.</p></article>`;
+    return;
+  }
+  const readiness = gatewayHealthState.production_readiness || {};
+  const webSearch = gatewayHealthState.web_search || {};
+  const items = [
+    ["OpenRouter", readiness.openrouter, "Chave principal para respostas do modelo."],
+    ["Pesquisa web", readiness.web_search, `${webSearch.model || "gpt-5.5"} / ${webSearch.context_size || "low"}`],
+    ["Mercado Pago", readiness.mercado_pago, "Checkout e webhook para upgrades."],
+    ["Senha admin", readiness.admin_password, "Login protegido por senha/hash no backend."],
+    ["CORS restrito", readiness.cors_restricted, "Origens liberadas para o navegador."],
+    ["OpenAPI privado", readiness.openapi_private, "Docs públicas fechadas por padrão."],
+    ["Banco persistente", readiness.persistent_storage, readiness.account_data_file || "SQLite configurado"],
+    ["Hosts restritos", readiness.trusted_hosts_restricted, "Use domínio explícito em produção."],
+  ];
+  target.innerHTML = items
+    .map(([label, ok, detail]) => `
+      <article>
+        <span class="badge ${ok ? "ok" : "bad"}">${ok ? "OK" : "Ação"}</span>
+        <strong>${ClaudeApp.escapeHtml(label)}</strong>
+        <p>${ClaudeApp.escapeHtml(detail)}</p>
+      </article>
+    `)
+    .join("");
 }
 
 function giftCardStatus(card) {
@@ -445,6 +497,7 @@ function renderAll() {
   renderAccounts();
   renderPurchases();
   renderSupportAdmin();
+  renderProductionChecklist();
 }
 
 function uniqueGiftCard(values) {
@@ -460,7 +513,7 @@ function seedDemo() {
   const cards = ClaudeApp.giftCards();
   cards.unshift(
     uniqueGiftCard({
-      code: "CLAUDE-DEMO-PRO",
+      code: "FRONTIER-DEMO-PRO",
       plan: "Pro 5X",
       price: 125,
       model: "sonnet",
@@ -468,7 +521,7 @@ function seedDemo() {
       active: "true",
     }),
     uniqueGiftCard({
-      code: "CLAUDE-DEMO-ULTRA",
+      code: "FRONTIER-DEMO-ULTRA",
       plan: "Max 30X",
       price: 280,
       model: "opus",
@@ -542,10 +595,7 @@ document.querySelector("#adminApiTargetForm").addEventListener("submit", async (
 
 document.querySelectorAll("[data-admin-tab]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll("[data-admin-tab]").forEach((item) => item.classList.remove("active"));
-    document.querySelectorAll(".admin-panel").forEach((panel) => panel.classList.remove("active"));
-    button.classList.add("active");
-    document.querySelector(`#${button.dataset.adminTab}`).classList.add("active");
+    setAdminTab(button.dataset.adminTab);
   });
 });
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import time
+import uuid
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -117,6 +119,44 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         response.headers.setdefault("Content-Security-Policy", _content_security_policy())
         return response
+
+
+class OperationalLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        start = time.perf_counter()
+        request_id = request.headers.get("x-request-id") or f"req_{uuid.uuid4().hex[:16]}"
+        response: Response | None = None
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+            status_code = response.status_code if response else 500
+            if response:
+                response.headers.setdefault("X-Request-ID", request_id)
+            logging.getLogger("claude_gateway.requests").info(
+                "request_id=%s method=%s path=%s status=%s latency_ms=%s auth=%s",
+                request_id,
+                request.method,
+                request.url.path,
+                status_code,
+                elapsed_ms,
+                _auth_kind(request),
+            )
+
+
+def _auth_kind(request: Request) -> str:
+    if request.headers.get("authorization"):
+        return "bearer"
+    if request.headers.get("x-api-key"):
+        return "x-api-key"
+    if request.headers.get("anthropic-auth-token"):
+        return "anthropic-auth-token"
+    return "anonymous"
 
 
 def _content_security_policy() -> str:

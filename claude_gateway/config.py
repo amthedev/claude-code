@@ -52,6 +52,13 @@ class Settings:
     openai_helper_for_customers: bool = True
     enable_openai_design_director: bool = True
     enable_openai_decision_director: bool = True
+    enable_web_search: bool = True
+    web_search_model: str = "gpt-5.5"
+    web_search_context_size: str = "low"
+    web_search_for_customers: bool = True
+    web_search_max_output_tokens: int = 900
+    web_search_allowed_domains: tuple[str, ...] = ()
+    web_search_blocked_domains: tuple[str, ...] = ()
     request_timeout_seconds: float = 120.0
     enable_agent_orchestration: bool = True
     max_cost_ratio_vs_claude: float = 0.50
@@ -109,7 +116,7 @@ class Settings:
     enable_gemini_code_helper: bool = True
 
     openrouter_site_url: str = "http://localhost:8787"
-    openrouter_app_name: str = "Claude Code"
+    openrouter_app_name: str = "Frontier AI"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -127,6 +134,13 @@ class Settings:
             openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", True),
             enable_openai_design_director=_bool_env("ENABLE_OPENAI_DESIGN_DIRECTOR", True),
             enable_openai_decision_director=_bool_env("ENABLE_OPENAI_DECISION_DIRECTOR", True),
+            enable_web_search=_bool_env("ENABLE_WEB_SEARCH", True),
+            web_search_model=os.getenv("WEB_SEARCH_MODEL", "gpt-5.5"),
+            web_search_context_size=os.getenv("WEB_SEARCH_CONTEXT_SIZE", "low"),
+            web_search_for_customers=_bool_env("WEB_SEARCH_FOR_CUSTOMERS", True),
+            web_search_max_output_tokens=int(os.getenv("WEB_SEARCH_MAX_OUTPUT_TOKENS", "900")),
+            web_search_allowed_domains=_csv_env("WEB_SEARCH_ALLOWED_DOMAINS", ""),
+            web_search_blocked_domains=_csv_env("WEB_SEARCH_BLOCKED_DOMAINS", ""),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),
@@ -188,7 +202,7 @@ class Settings:
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",
-                "Claude Code",
+                "Frontier AI",
             ),
         )
 

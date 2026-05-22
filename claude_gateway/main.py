@@ -38,8 +38,22 @@ from .openai_compat import (
 )
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
+from .research import (
+    WebSearchClient,
+    WebSearchDecision,
+    decide_web_search,
+    normalize_web_search_policy,
+    web_search_context,
+    web_search_unavailable_context,
+)
 from .routing import RouteDecision, RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
-from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
+from .security import (
+    InMemoryRateLimiter,
+    OperationalLoggingMiddleware,
+    SecurityHeadersMiddleware,
+    rate_limit_key,
+    verify_admin_login,
+)
 from .skills import render_skill_prompt, select_skills
 from .support import SupportStore
 from .usage import UsageStore
@@ -64,7 +78,7 @@ Return implementation guidance that helps write better code: file structure, API
 small pitfalls, and verification. Prefer concrete decisions over options. Keep it short. Do not mention Gemini,
 internal routing, providers, or hidden helpers."""
 
-SUPPORT_ASSISTANT_PROMPT = """Você é o primeiro atendimento de suporte do app Claude Code em português do Brasil.
+SUPPORT_ASSISTANT_PROMPT = """Você é o primeiro atendimento de suporte do app Frontier AI em português do Brasil.
 Resolva dúvidas simples sobre login, planos, Pix, GitHub, ZIP/pastas, limite de tokens, chat, histórico, suporte e uso geral.
 Se a mensagem pedir pessoa humana, "mano", atendente, dono/admin, reembolso/estorno, cobrança indevida, conta invadida,
 pagamento aprovado sem liberar plano, dado sensível exposto, ameaça jurídica, ou algo que exija ação manual no banco,
@@ -76,11 +90,12 @@ def create_app(
     settings: Settings | None = None,
     client_factory: Callable[[Settings], OpenRouterClient] | None = None,
     openai_helper_factory: Callable[[Settings], OpenAIHelperClient] | None = None,
+    web_search_factory: Callable[[Settings], WebSearchClient] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     openapi_url = "/openapi.json" if resolved_settings.expose_openapi else None
     app = FastAPI(
-        title="Claude Code",
+        title="Frontier AI",
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
@@ -99,6 +114,12 @@ def create_app(
     app.state.openrouter = factory(resolved_settings)
     helper_factory = openai_helper_factory or OpenAIHelperClient
     app.state.openai_helper = helper_factory(resolved_settings) if resolved_settings.openai_api_key else None
+    search_factory = web_search_factory or WebSearchClient
+    app.state.web_search = (
+        search_factory(resolved_settings)
+        if resolved_settings.enable_web_search and resolved_settings.openai_api_key
+        else None
+    )
     app.state.orchestrator = MessageOrchestrator(
         app.state.openrouter,
         app.state.planner,
@@ -106,6 +127,7 @@ def create_app(
         app.state.openai_helper,
     )
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(OperationalLoggingMiddleware)
     if resolved_settings.trusted_hosts and resolved_settings.trusted_hosts != ("*",):
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(resolved_settings.trusted_hosts))
     if resolved_settings.cors_allowed_origins:
@@ -134,7 +156,9 @@ def create_app(
             "status": "ok",
             "openrouter_configured": bool(app.state.settings.openrouter_api_key),
             "openai_helper_configured": bool(app.state.settings.openai_api_key),
+            "web_search": _web_search_status(app.state.settings),
             "orchestration_enabled": app.state.settings.enable_agent_orchestration,
+            "production_readiness": _production_readiness(app),
             "cost_target": {
                 "baseline_model": CLAUDE_BASELINE_MODEL,
                 "max_cost_ratio_vs_claude": app.state.settings.max_cost_ratio_vs_claude,
@@ -185,6 +209,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
         anthropic_payload = responses_to_anthropic(payload)
+        if "gateway_web_search" in payload:
+            anthropic_payload["gateway_web_search"] = payload.get("gateway_web_search")
         stream = bool(payload.get("stream"))
         anthropic_payload["stream"] = False
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
@@ -207,6 +233,8 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
         anthropic_payload = chat_to_anthropic(payload)
+        if "gateway_web_search" in payload:
+            anthropic_payload["gateway_web_search"] = payload.get("gateway_web_search")
         stream = bool(payload.get("stream"))
         anthropic_payload["stream"] = False
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
@@ -252,6 +280,7 @@ def create_app(
                 "model": app.state.settings.openai_helper_model,
                 "for_customers": app.state.settings.openai_helper_for_customers,
             },
+            "web_search": _web_search_status(app.state.settings),
             "max_request_output_tokens": app.state.settings.max_request_output_tokens,
             "models": {
                 role: cost_policy.estimate(model).to_dict() for role, model in models.items()
@@ -272,6 +301,7 @@ def create_app(
         reservation = None
         if not identity_answer:
             reservation = _reserve_customer_budget(app, auth, payload, decision)
+            payload = await _with_web_research(app, auth, payload)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         payload = _with_automatic_skills(payload, decision)
@@ -833,7 +863,15 @@ def create_app(
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth)
         payload = _with_customer_power_tier(payload, app, auth)
-        return app.state.planner.plan(payload).to_dict()
+        decision = app.state.planner.plan(payload).to_dict()
+        web_search = _web_search_debug(payload, app.state.settings, auth)
+        return {
+            **decision,
+            "web_search_policy": web_search["policy"],
+            "web_search_reason": web_search["reason"],
+            "web_search_enabled": web_search["enabled"],
+            "web_search_should_search": web_search["should_search"],
+        }
 
     @app.post("/v1/agent/run")
     async def agent_run(
@@ -849,6 +887,7 @@ def create_app(
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
+        payload = await _with_web_research(app, auth, payload)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         payload = await _with_openai_execution_guidance(app, auth, payload, decision)
         try:
@@ -886,6 +925,10 @@ def _mount_frontend(app: FastAPI) -> None:
     @app.get("/admin", include_in_schema=False)
     async def admin_page() -> FileResponse:
         return FileResponse(FRONTEND_DIR / "admin.html")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "claude-mark.svg", media_type="image/svg+xml")
 
 
 def _public_base_url(request: Request, settings: Settings) -> str:
@@ -1143,7 +1186,7 @@ async def _create_mercado_pago_pix_payment(
     base_url = _public_base_url(request, app.state.settings)
     payload = {
         "transaction_amount": float(purchase["price"]),
-        "description": f"Claude {purchase['plan']}",
+        "description": f"Frontier AI {purchase['plan']}",
         "payment_method_id": "pix",
         "external_reference": purchase["id"],
         "payer": _mercado_pago_payment_payer(purchase),
@@ -1184,7 +1227,7 @@ async def _create_mercado_pago_subscription(
 
     base_url = _public_base_url(request, app.state.settings)
     payload = {
-        "reason": f"Assinatura Claude {purchase['plan']}",
+        "reason": f"Assinatura Frontier AI {purchase['plan']}",
         "external_reference": purchase["id"],
         "payer_email": purchase["login"],
         "auto_recurring": {
@@ -1350,8 +1393,8 @@ def _mercado_pago_preference_payload(base_url: str, purchase: dict[str, Any]) ->
         "items": [
             {
                 "id": purchase["planId"],
-                "title": f"Claude {purchase['plan']}",
-                "description": f"Plano {purchase['plan']} do Claude",
+                "title": f"Frontier AI {purchase['plan']}",
+                "description": f"Plano {purchase['plan']} do Frontier AI",
                 "quantity": 1,
                 "currency_id": "BRL",
                 "unit_price": float(purchase["price"]),
@@ -1414,9 +1457,9 @@ def _mercado_pago_payment_payer(purchase: dict[str, Any]) -> dict[str, Any]:
 def _split_payer_name(name: Any) -> tuple[str, str]:
     parts = [part for part in str(name or "").strip().split() if part]
     if not parts:
-        return "Cliente", "Claude"
+        return "Cliente", "Frontier"
     if len(parts) == 1:
-        return parts[0][:40], "Claude"
+        return parts[0][:40], "Frontier"
     return parts[0][:40], " ".join(parts[1:])[:80]
 
 
@@ -1504,6 +1547,7 @@ async def _complete_gateway_message(
     reservation = None
     if not identity_answer:
         reservation = _reserve_customer_budget(app, auth, payload, decision)
+        payload = await _with_web_research(app, auth, payload)
     payload = _with_gateway_reasoning(payload, decision)
     payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
     payload["__gateway_route_decision"] = decision
@@ -1549,6 +1593,12 @@ def _prepare_payload(
         )
 
     limited = dict(payload)
+    policy_value = limited.pop("gateway_web_search", None)
+    if policy_value is None:
+        policy_value = limited.pop("web_search", "auto")
+    else:
+        limited.pop("web_search", None)
+    limited["__gateway_web_search_policy"] = normalize_web_search_policy(policy_value)
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
     if payload_has_tool_contract(limited):
         limited["max_tokens"] = max(
@@ -1620,9 +1670,9 @@ def _with_public_model_identity(
     label = _public_model_label(public_model, settings)
     today = datetime.now(ZoneInfo("America/Recife")).strftime("%Y-%m-%d")
     prompt = (
-        f"Public compatibility profile: the user selected {label} for this chat. "
+        f"Public Frontier AI profile: the user selected {label} for this chat. "
         f"Current date for user-facing and factual work: {today}, timezone America/Recife. "
-        f"Match Anthropic Claude Code response behavior as closely as possible: be helpful, "
+        f"Keep Anthropic-compatible Claude Code API behavior while presenting Frontier AI clearly: be helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
         f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
@@ -1781,6 +1831,74 @@ def _extract_text_blocks(response: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
+async def _with_web_research(
+    app: FastAPI,
+    auth: AuthContext,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    decision = decide_web_search(payload, app.state.settings, auth)
+    outgoing = dict(payload)
+    outgoing["__gateway_web_search"] = decision.to_dict()
+    if not decision.should_search:
+        return outgoing
+
+    if not decision.enabled or not app.state.web_search:
+        return _append_system_prompt(outgoing, web_search_unavailable_context(decision))
+
+    prompt_text = extract_prompt_text(payload)
+    try:
+        result = await app.state.web_search.search(prompt_text, required=True)
+    except Exception:
+        return _append_system_prompt(outgoing, web_search_unavailable_context(decision))
+
+    outgoing["__gateway_web_search_result"] = result.to_dict()
+    if not result.summary and not result.sources:
+        unavailable = WebSearchDecision(
+            policy=decision.policy,
+            enabled=decision.enabled,
+            should_search=decision.should_search,
+            reason="empty_result",
+        )
+        return _append_system_prompt(outgoing, web_search_unavailable_context(unavailable))
+    return _append_system_prompt(outgoing, web_search_context(result))
+
+
+def _web_search_debug(payload: dict[str, Any], settings: Settings, auth: AuthContext) -> dict[str, Any]:
+    return decide_web_search(payload, settings, auth).to_dict()
+
+
+def _web_search_status(settings: Settings) -> dict[str, Any]:
+    return {
+        "enabled": settings.enable_web_search,
+        "configured": bool(settings.openai_api_key),
+        "model": settings.web_search_model,
+        "context_size": settings.web_search_context_size,
+        "for_customers": settings.web_search_for_customers,
+        "max_output_tokens": settings.web_search_max_output_tokens,
+        "allowed_domains": list(settings.web_search_allowed_domains),
+        "blocked_domains": list(settings.web_search_blocked_domains),
+    }
+
+
+def _production_readiness(app: FastAPI) -> dict[str, Any]:
+    settings = app.state.settings
+    return {
+        "openrouter": bool(settings.openrouter_api_key),
+        "web_search": bool(settings.enable_web_search and settings.openai_api_key),
+        "openai_helper": bool(settings.openai_api_key),
+        "mercado_pago": bool(settings.mercado_pago_access_token),
+        "admin_password": bool(
+            settings.admin_password or settings.admin_password_hash or app.state.account_store.admin_configured()
+        ),
+        "cors_restricted": settings.cors_allowed_origins != ("*",),
+        "trusted_hosts_restricted": settings.trusted_hosts != ("*",),
+        "openapi_private": not settings.expose_openapi,
+        "persistent_storage": settings.account_data_file == settings.quota_data_file,
+        "account_data_file": settings.account_data_file,
+        "quota_data_file": settings.quota_data_file,
+    }
+
+
 async def _generate_conversation_title(app: FastAPI, payload: dict[str, Any]) -> str:
     messages = payload.get("messages")
     if not isinstance(messages, list):
@@ -1891,7 +2009,7 @@ def _selected_model_identity_answer(
         return None
 
     label = _public_model_label(public_model, settings)
-    return f"Eu sou o {label}, o modelo selecionado neste chat."
+    return f"Eu sou o {label}, o modo selecionado neste chat."
 
 
 def _normalize_text(value: str) -> str:
@@ -2101,11 +2219,11 @@ def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any
 
 def _public_model_label(public_model: str, settings: Settings) -> str:
     labels = {
-        settings.economy_public_model: "Claude Haiku 4.5",
-        settings.pro_public_model: "Claude Sonnet 4.6",
-        settings.ultra_public_model: "Claude Opus 4.7",
-        settings.ui_public_model: "Claude Code UI",
-        settings.auto_public_model: "Claude Code Auto",
+        settings.economy_public_model: "Frontier AI Economy",
+        settings.pro_public_model: "Frontier AI Pro",
+        settings.ultra_public_model: "Frontier AI Ultra",
+        settings.ui_public_model: "Frontier AI UI",
+        settings.auto_public_model: "Frontier AI Auto",
     }
     return labels.get(public_model, public_model)
 

@@ -17,6 +17,7 @@ from claude_gateway.config import Settings
 from claude_gateway.customers import _today, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.openrouter import OpenRouterClient
+from claude_gateway.research import WebSearchResult, WebSource, parse_web_search_response
 from claude_gateway.skills import SKILL_CATALOG, select_skills
 
 
@@ -64,6 +65,19 @@ class FakeOpenAIHelper:
             }
         )
         return "Use stricter validation and explain edge cases."
+
+
+class FakeWebSearchClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.calls: list[dict[str, Any]] = []
+
+    async def search(self, query: str, *, required: bool = True) -> WebSearchResult:
+        self.calls.append({"query": query, "required": required})
+        return WebSearchResult(
+            summary="Resultado atual confirmado por fontes.",
+            sources=(WebSource(title="Fonte oficial", url="https://example.com/source"),),
+        )
 
 
 class FakeHttpResponse:
@@ -985,9 +999,167 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["max_cost_ratio_vs_claude"], 0.5)
         self.assertFalse(data["allow_premium_fallback"])
+        self.assertIn("web_search", data)
+        self.assertEqual(data["web_search"]["model"], "gpt-5.5")
         for model in data["models"].values():
             self.assertTrue(model["within_budget"], model)
             self.assertLessEqual(model["cost_ratio_vs_claude"], 0.5)
+
+    def test_router_debug_reports_web_search_decision(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Explique uma função Python simples"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        stable = response.json()
+        self.assertEqual(stable["web_search_policy"], "auto")
+        self.assertFalse(stable["web_search_should_search"])
+        self.assertEqual(stable["web_search_reason"], "stable_request")
+
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "gateway_web_search": "required",
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        required = response.json()
+        self.assertEqual(required["web_search_policy"], "required")
+        self.assertTrue(required["web_search_should_search"])
+        self.assertEqual(required["web_search_reason"], "explicit")
+
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "gateway_web_search": "off",
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        off = response.json()
+        self.assertEqual(off["web_search_policy"], "off")
+        self.assertFalse(off["web_search_should_search"])
+
+    def test_web_search_context_is_injected_when_required(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            web_search_factory=FakeWebSearchClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "gateway_web_search": "required",
+                "messages": [{"role": "user", "content": "Pesquise o status atual do projeto"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.web_search.calls), 1)
+        payload = app.state.openrouter.calls[-1][1]
+        self.assertIn("Internal web research context", payload["system"])
+        self.assertIn("https://example.com/source", payload["system"])
+        self.assertNotIn("gateway_web_search", payload)
+
+    def test_web_search_does_not_run_for_stable_or_off_requests(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            web_search_factory=FakeWebSearchClient,
+        )
+        client = TestClient(app)
+
+        stable = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Explique uma função Python local"}],
+            },
+        )
+        self.assertEqual(stable.status_code, 200)
+
+        off = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "gateway_web_search": "off",
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+        self.assertEqual(off.status_code, 200)
+        self.assertEqual(app.state.web_search.calls, [])
+
+    def test_required_web_search_without_openai_key_falls_back_safely(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "gateway_web_search": "required",
+                "messages": [{"role": "user", "content": "Pesquise o preço atual"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertIn("web search was needed", payload["system"])
+
+    def test_web_search_response_extracts_citations_and_sources(self) -> None:
+        result = parse_web_search_response(
+            {
+                "output_text": "Resumo atual.",
+                "sources": [{"title": "Fonte completa", "url": "https://example.com/all"}],
+                "output": [
+                    {"type": "web_search_call", "status": "completed"},
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "Resumo atual.",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "url": "https://example.com/cited",
+                                        "title": "Fonte citada",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+
+        self.assertTrue(result.searched)
+        self.assertEqual(result.summary, "Resumo atual.")
+        self.assertEqual({source.url for source in result.sources}, {"https://example.com/cited", "https://example.com/all"})
 
     def test_over_budget_internal_model_is_replaced(self) -> None:
         settings = make_settings()
@@ -1623,8 +1795,8 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
-        self.assertIn("Claude Opus 4.7", payload["system"])
-        self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
+        self.assertIn("Frontier AI Ultra", payload["system"])
+        self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
         self.assertIn("Automatic senior skill routing is active", payload["system"])
 
@@ -1679,8 +1851,8 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("Claude Sonnet 4.6", payload["system"])
-        self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
+        self.assertIn("Frontier AI Pro", payload["system"])
+        self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 16000)
 
     def test_public_identity_prompt_includes_current_date_context(self) -> None:
@@ -1714,7 +1886,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["model"], "claude-code-ultra")
-        self.assertIn("Claude Opus 4.7", response.json()["content"][0]["text"])
+        self.assertIn("Frontier AI Ultra", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_streaming_model_identity_question_returns_selected_public_model(self) -> None:
@@ -1732,7 +1904,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"Claude Sonnet 4.6", body)
+        self.assertIn(b"Frontier AI Pro", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

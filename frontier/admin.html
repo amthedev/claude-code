@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Claude Admin</title>
+    <title>Frontier AI Admin</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="stylesheet" href="/frontier/styles.css?v=plans-20260520" />
@@ -16,7 +16,7 @@
             <img src="/frontier/claude-mark.svg?v=claude-symbol-20260520c" alt="" />
           </div>
           <div>
-            <strong>Claude</strong>
+            <strong>Frontier AI</strong>
             <span>Admin</span>
           </div>
         </div>
@@ -43,7 +43,7 @@
             <img src="/frontier/claude-mark.svg?v=claude-symbol-20260520c" alt="" />
           </div>
           <div>
-            <strong>Claude</strong>
+            <strong>Frontier AI</strong>
             <span>Admin Console</span>
           </div>
         </div>
@@ -264,7 +264,7 @@
           <section class="panel">
             <div class="panel-heading">
               <span class="overline">Projeto atual</span>
-              <h2>Claude Code API usada pelo app</h2>
+              <h2>API compatível usada pelo app</h2>
             </div>
             <form id="adminApiTargetForm" class="settings-form">
               <label>
@@ -280,13 +280,20 @@
               <code>GET /v1/budget</code>
               <code>POST /v1/router/debug</code>
             </div>
+            <section class="readiness-panel">
+              <div class="panel-heading">
+                <span class="overline">Produção</span>
+                <h2>Checklist operacional</h2>
+              </div>
+              <div id="productionChecklist" class="readiness-grid"></div>
+            </section>
             <label>
               CUSTOMER_ACCOUNTS para o backend
               <textarea id="customerEnvSnippet" readonly rows="5"></textarea>
             </label>
             <p class="muted">
-              A tela do cliente permite configurar URL, token e modelo. Se a Claude Code API
-              aceitar a origem do navegador, o chat do Claude chama a API real.
+              A tela do cliente permite configurar URL, token e modelo. Se a API compatível
+              aceitar a origem do navegador, o chat do Frontier AI chama a API real.
             </p>
           </section>
         </section>

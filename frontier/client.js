@@ -16,6 +16,7 @@ let activeCodeFiles = [];
 let activeChatMode = localStorage.getItem("claude_frontier_active_chat_mode") || "chat";
 let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "full";
 let codeOutputMode = localStorage.getItem("claude_frontier_code_output_mode") || "normal";
+let webSearchMode = localStorage.getItem("frontier_web_search_mode") || "auto";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -79,7 +80,7 @@ const promptSuggestions = {
     ],
   },
   choice: {
-    title: "Escolha do Claude",
+    title: "Escolha da Frontier",
     items: [
       "Escolha o melhor modelo para esta tarefa",
       "Transforme uma ideia solta em plano",
@@ -327,6 +328,10 @@ function closeSidebar() {
   setSidebarOpen(false);
 }
 
+function syncSidebarForViewport() {
+  setSidebarOpen(window.matchMedia("(min-width: 900px)").matches);
+}
+
 function closeFloatingMenus() {
   document.querySelectorAll(".floating-menu, #accountMenu").forEach((menu) => {
     menu.classList.add("hidden");
@@ -435,19 +440,33 @@ function fillModelSelects() {
   const apiModel = document.querySelector("#apiModel");
   if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptionsForAccount(current, selected);
   updateModelButtons();
+  renderWebSearchControls();
 }
 
 function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Sonnet 4.6";
+  return option?.textContent || "Frontier Pro";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Sonnet 4.6";
+    label.textContent = select ? modelLabel(select.value) : "Frontier Pro";
+  });
+}
+
+function renderWebSearchControls() {
+  const allowed = new Set(["auto", "required", "off"]);
+  if (!allowed.has(webSearchMode)) webSearchMode = "auto";
+  document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
+    const active = button.dataset.webSearchMode === webSearchMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    if (button.dataset.webSearchMode === "auto") button.title = "Pesquisar só quando a resposta precisar de dados atuais";
+    if (button.dataset.webSearchMode === "required") button.title = "Forçar pesquisa web nesta conversa";
+    if (button.dataset.webSearchMode === "off") button.title = "Responder sem pesquisa web";
   });
 }
 
@@ -559,7 +578,7 @@ def ask(question, default=True):
         return default
     return answer in {"s", "sim", "y", "yes"}
 
-print("Claude Code API")
+print("Frontier AI API para Claude Code")
 print(f"API: {base_url}")
 print(f"Modelo padrao: {selected_model}")
 print()
@@ -597,7 +616,7 @@ GATEWAY_KEYS = {{
 
 def wants_gateway():
     try:
-        answer = input(f"Usar Claude Code API hospedada ({{BASE_URL}})? [S/n] ").strip().lower()
+        answer = input(f"Usar Frontier AI API no Claude Code ({{BASE_URL}})? [S/n] ").strip().lower()
     except EOFError:
         answer = "s"
     return answer not in {{"n", "nao", "não", "no"}}
@@ -746,7 +765,7 @@ function codexConfigToml(config) {
 model_provider = "claude_gateway"
 
 [model_providers.claude_gateway]
-name = "Claude Gateway"
+name = "Frontier AI Gateway"
 base_url = ${JSON.stringify(openAiCompatBaseUrl(config.baseUrl))}
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"`;
@@ -1063,9 +1082,9 @@ function syncCustomerApiToken(current) {
 
 function modelKeyLabel(modelKey) {
   const key = ClaudeApp.normalizeModelKey(modelKey);
-  if (key === "haiku") return "Haiku 4.5";
-  if (key === "sonnet") return "Sonnet 4.6";
-  return "Opus 4.7";
+  if (key === "haiku") return "Frontier Economy";
+  if (key === "sonnet") return "Frontier Pro";
+  return "Frontier Ultra";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1088,7 +1107,7 @@ function renderPlanCards() {
     notice.classList.toggle("hidden", !highlightedPlanId);
     notice.textContent =
       highlightedPlanId === "ultra"
-        ? "Opus 4.7 está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
+        ? "Frontier Ultra está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
         : "";
   }
   target.innerHTML = ClaudeApp.paidPlans()
@@ -1098,7 +1117,7 @@ function renderPlanCards() {
       const badges = [
         currentPlan ? `<span class="plan-badge current">Seu plano atual</span>` : "",
         plan.id === "ultra" ? `<span class="plan-badge featured">Recomendado</span>` : "",
-        highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Opus</span>` : "",
+        highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Ultra</span>` : "",
       ].join("");
       const buyLabel = !current
         ? `Entrar para assinar ${plan.name}`
@@ -1113,7 +1132,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Opus 4.7 para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Sonnet 4.6 para trabalho diário." : "Inclui Haiku 4.5 para tarefas leves."}</p>
+            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Frontier Ultra para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Frontier Pro para trabalho diário." : "Inclui Frontier Economy para tarefas leves."}</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -1566,6 +1585,7 @@ function setPanel(panelId) {
 
 function renderInlineMarkdown(text) {
   return ClaudeApp.escapeHtml(text)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/__([^_]+)__/g, "<strong>$1</strong>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -2224,6 +2244,7 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200) {
       model: selectedModel,
       max_tokens: Math.max(1, Math.min(1200, Math.floor(Number(maxTokens) || 1))),
       stream: true,
+      gateway_web_search: webSearchMode,
       messages,
     }),
   });
@@ -3651,6 +3672,14 @@ document.querySelector("#codeOutputMenu").addEventListener("click", (event) => {
   renderCodeContextButtons();
 });
 
+document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    webSearchMode = button.dataset.webSearchMode || "auto";
+    localStorage.setItem("frontier_web_search_mode", webSearchMode);
+    renderWebSearchControls();
+  });
+});
+
 document.querySelectorAll("[data-model-trigger]").forEach((button) => {
   button.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -3675,7 +3704,7 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
     focusHighlightedPlan();
     showChatNotice(
       item.dataset.modelValue === "claude-code-ultra"
-        ? "Opus 4.7 está no plano Max 30X."
+        ? "Frontier Ultra está no plano Max 30X."
         : "Esse modelo exige upgrade de plano.",
     );
     return;
@@ -4212,6 +4241,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 fillModelSelects();
+syncSidebarForViewport();
 fillGithubForms();
 repairStoredDuplicateArtifacts();
 loadApiForm();
@@ -4237,3 +4267,5 @@ confirmPaymentReturn();
 startPaymentStatusPolling();
 loadServerHistory();
 loadCodeWorkspaces();
+
+window.addEventListener("resize", syncSidebarForViewport);

@@ -218,12 +218,12 @@ def build_mcp_server() -> Any:
         raise RuntimeError('Install the MCP SDK first: pip install "mcp[cli]"')
 
     mcp = FastMCP(
-        "Claude Gateway Coding Tools",
+        "Frontier AI Coding Tools",
         json_response=True,
         stateless_http=True,
         instructions=(
             "Use these tools to inspect and edit the configured workspace, run allowed "
-            "verification commands, and ask the Claude Gateway/OpenRouter API for coding help."
+            "verification commands, and ask the Frontier AI/OpenRouter API for coding help."
         ),
     )
     mcp.settings.host = os.getenv("MCP_HOST", mcp.settings.host)
@@ -261,7 +261,7 @@ def build_mcp_server() -> Any:
 
     @mcp.tool()
     async def gateway_status() -> dict[str, Any]:
-        """Check whether the backing Claude Gateway API is reachable."""
+        """Check whether the backing Frontier AI gateway API is reachable."""
         return await gateway_health()
 
     @mcp.tool()

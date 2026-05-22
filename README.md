@@ -1,6 +1,6 @@
-# Claude Code
+# Frontier AI Gateway
 
-FastAPI gateway compatible with the Anthropic Messages API shape used by Claude Code. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, and keeps Claude Code tool use safe by proxying tool and streaming calls directly upstream.
+FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, supports optional OpenAI web search, and keeps Claude Code tool use safe by proxying tool and streaming calls directly upstream.
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ The default model combo is tuned for Claude Code terminal work: direct tool call
 - `google/gemini-2.5-flash-lite`: cheap code helper for implementation structure, edge cases, and verification.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
-Every request also receives an Anthropic-compatible public response profile so the terminal experience keeps Claude-style identity, tone, tool-call behavior, and coding ergonomics while hiding internal routing details.
+Every request also receives a Frontier AI public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
 
 See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and terminal setup.
 
@@ -107,6 +107,30 @@ The default helper model is `gpt-5.4-mini`. You can switch it when needed:
 ```env
 OPENAI_HELPER_MODEL=gpt-5.5
 ```
+
+## Optional Web Search
+
+When `OPENAI_API_KEY` is configured, Frontier AI can run a lightweight OpenAI Responses API `web_search` pass before the main model only when fresh information is needed or when the request sets `gateway_web_search` to `required`.
+
+```env
+ENABLE_WEB_SEARCH=true
+WEB_SEARCH_MODEL=gpt-5.5
+WEB_SEARCH_CONTEXT_SIZE=low
+WEB_SEARCH_FOR_CUSTOMERS=true
+WEB_SEARCH_MAX_OUTPUT_TOKENS=900
+WEB_SEARCH_ALLOWED_DOMAINS=
+WEB_SEARCH_BLOCKED_DOMAINS=
+```
+
+Accepted request control:
+
+```json
+{
+  "gateway_web_search": "auto"
+}
+```
+
+Use `auto` for the default, `required` to force search, and `off` to prevent search. Search results are injected as internal context and the final answer should cite sources as Markdown links when it uses current web data.
 
 ## MCP / ChatGPT App Bridge
 
@@ -240,7 +264,7 @@ model = "claude-code-pro"
 model_provider = "claude_gateway"
 
 [model_providers.claude_gateway]
-name = "Claude Gateway"
+name = "Frontier AI Gateway"
 base_url = "https://your-subdomain.squareweb.app/v1"
 env_key = "OPENAI_API_KEY"
 wire_api = "responses"
@@ -272,15 +296,18 @@ Set these environment variables in Square Cloud:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
+OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
 OPENROUTER_SITE_URL=https://your-subdomain.squareweb.app
+OPENROUTER_APP_NAME=Frontier AI
+ENABLE_WEB_SEARCH=true
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
 CUSTOMER_ACCOUNTS=...
 ```
 
-See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) for the full architecture and operating notes.
+See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) for the full architecture and launch checklist.
 
 ## Compatibility Policy
 

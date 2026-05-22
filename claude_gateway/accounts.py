@@ -41,7 +41,7 @@ PLAN_CATALOG = (
     {
         "id": "starter",
         "name": "Básico",
-        "description": "Como o Claude comum, para conversas e tarefas leves.",
+        "description": "Para conversas, estudos e tarefas leves do dia a dia.",
         "price": 65.00,
         "modelKey": "haiku",
         "manualLimit": 16000,
@@ -50,7 +50,7 @@ PLAN_CATALOG = (
     {
         "id": "pro",
         "name": "Pro 5X",
-        "description": "Mais limite e Sonnet para trabalho diário.",
+        "description": "Mais limite e força para trabalho diário.",
         "price": 125.00,
         "modelKey": "sonnet",
         "manualLimit": 50000,

@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Claude</title>
+    <title>Frontier AI</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521l" />
   </head>
   <body class="client-page">
-    <main id="clientApp" class="cloud-shell sidebar-open">
+    <main id="clientApp" class="cloud-shell">
       <aside class="icon-rail">
         <button id="sidebarOpen" class="icon-button" title="Menu" type="button" aria-label="Abrir menu lateral" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M9 6v12" /></svg>
@@ -35,7 +35,7 @@
         <button class="icon-button" title="Planos" data-panel="plansPanel" aria-label="Abrir planos">
           <svg viewBox="0 0 24 24"><path d="M4 7h16v10H4V7Z" /><path d="M7 11h3M14 11h3M7 15h10" /></svg>
         </button>
-        <button class="icon-button auth-only hidden" title="Claude Code API" data-panel="apiPanel" aria-label="Claude Code API">
+        <button class="icon-button auth-only hidden" title="API compatível" data-panel="apiPanel" aria-label="API compatível com Claude Code">
           <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
         </button>
         <button class="icon-button auth-only hidden" title="Suporte" data-panel="supportPanel" aria-label="Suporte">
@@ -47,9 +47,9 @@
         <button id="clientLogout" class="icon-button rail-bottom avatar-button hidden" title="Sair" aria-label="Sair"></button>
       </aside>
 
-      <aside id="claudeSidebar" class="claude-sidebar" aria-label="Menu lateral do Claude">
+      <aside id="claudeSidebar" class="claude-sidebar" aria-label="Menu lateral do Frontier AI">
         <div class="sidebar-brand-row">
-          <strong>Claude</strong>
+          <strong>Frontier AI</strong>
           <button id="sidebarClose" class="sidebar-icon-button" type="button" aria-label="Fechar menu lateral">
             <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4V6Z" /><path d="M15 6v12" /></svg>
           </button>
@@ -76,9 +76,9 @@
             <svg viewBox="0 0 24 24"><path d="M12 3.5v4M12 16.5v4M4.6 7.6l2.8 2.8M16.6 16.6l2.8 2.8M3.5 12h4M16.5 12h4M4.6 16.4l2.8-2.8M16.6 7.4l2.8-2.8" /></svg>
             <span>Artefatos</span>
           </button>
-          <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="apiPanel" aria-label="Abrir Claude Code API">
+          <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="apiPanel" aria-label="Abrir API compatível">
             <svg viewBox="0 0 24 24"><path d="M6 8h12v11H6V8Z" /><path d="M9 8V5h6v3M8 12h8M8 16h5" /></svg>
-            <span>Claude Code API</span>
+            <span>API compatível</span>
           </button>
           <button class="sidebar-action auth-only hidden" type="button" data-sidebar-panel="supportPanel" aria-label="Abrir suporte">
             <svg viewBox="0 0 24 24"><path d="M5 18.5 3.8 22l3.8-1.3a9 9 0 1 0-2.6-2.2Z" /><path d="M8 10h8M8 14h5" /></svg>
@@ -162,9 +162,14 @@
                 <div class="composer-right">
                   <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
                   <button class="model-trigger" type="button" data-model-trigger="heroModel" aria-label="Modelo">
-                    <span data-model-label="heroModel">Sonnet 4.6</span>
+                    <span data-model-label="heroModel">Frontier Pro</span>
                     <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                   </button>
+                  <div class="web-search-toggle" role="group" aria-label="Pesquisa web">
+                    <button type="button" data-web-search-mode="auto">Auto</button>
+                    <button type="button" data-web-search-mode="required">Web</button>
+                    <button type="button" data-web-search-mode="off">Off</button>
+                  </div>
                   <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                     <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                   </button>
@@ -200,7 +205,7 @@
               </button>
               <button data-suggestion-category="choice" data-prompt="Escolha o melhor modelo para esta tarefa">
                 <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-3 11.2V17h6v-2.8A6 6 0 0 0 12 3ZM10 21h4" /></svg>
-                Escolha do Claude
+                Escolha da Frontier
               </button>
             </div>
             <div id="suggestionPanel" class="suggestion-panel hidden" aria-live="polite"></div>
@@ -215,7 +220,7 @@
           <div id="chatThread" class="chat-thread hidden"></div>
 
           <form id="bottomComposer" class="bottom-composer hidden">
-            <textarea name="prompt" placeholder="Responder ao Claude..."></textarea>
+            <textarea name="prompt" placeholder="Responder ao Frontier AI..."></textarea>
             <div class="composer-row">
               <div class="composer-menu-wrap">
                 <button class="composer-icon attach-button" type="button" aria-label="Adicionar arquivos e projetos">
@@ -239,9 +244,14 @@
               <div class="composer-right">
                 <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
                 <button class="model-trigger" type="button" data-model-trigger="bottomModel" aria-label="Modelo">
-                  <span data-model-label="bottomModel">Sonnet 4.6</span>
+                  <span data-model-label="bottomModel">Frontier Pro</span>
                   <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
                 </button>
+                <div class="web-search-toggle" role="group" aria-label="Pesquisa web">
+                  <button type="button" data-web-search-mode="auto">Auto</button>
+                  <button type="button" data-web-search-mode="required">Web</button>
+                  <button type="button" data-web-search-mode="off">Off</button>
+                </div>
                 <button class="composer-icon voice-button" type="button" aria-label="Gravar áudio">
                   <svg viewBox="0 0 24 24"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" /></svg>
                 </button>
@@ -375,7 +385,7 @@
         <section id="apiPanel" class="client-panel side-panel">
           <div class="panel-header">
             <span class="overline">API</span>
-            <h2>Claude Code API</h2>
+            <h2>API compatível com Claude Code</h2>
           </div>
           <form id="apiForm" class="settings-form">
             <label>
@@ -488,15 +498,15 @@
 
     <div id="modelMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Modelo">
       <button type="button" data-model-value="claude-code-ultra">
-        <strong>Opus 4.7</strong>
+        <strong>Frontier Ultra</strong>
         <span>Mais capaz para trabalhos ambiciosos</span>
       </button>
       <button type="button" data-model-value="claude-code-pro">
-        <strong>Sonnet 4.6</strong>
+        <strong>Frontier Pro</strong>
         <span>Rápido para o trabalho diário</span>
       </button>
       <button type="button" data-model-value="claude-code-economy">
-        <strong>Haiku 4.5</strong>
+        <strong>Frontier Economy</strong>
         <span>Mais rápido e econômico</span>
       </button>
     </div>
@@ -591,7 +601,7 @@
               <img src="/frontier/claude-mark.svg?v=claude-symbol-20260520c" alt="" />
             </div>
             <div>
-              <strong>Claude</strong>
+              <strong>Frontier AI</strong>
               <span>Entrar ou cadastrar</span>
             </div>
           </div>

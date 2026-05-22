@@ -1,6 +1,6 @@
 MAIN=claude_gateway/main.py
-DISPLAY_NAME=Claude Code
-DESCRIPTION=Claude Code API and chat with OpenRouter cost controls.
+DISPLAY_NAME=Frontier AI
+DESCRIPTION=Frontier AI API and chat with OpenRouter cost controls.
 MEMORY=1024
 VERSION=recommended
 SUBDOMAIN=claude-code-api

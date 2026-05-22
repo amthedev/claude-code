@@ -107,7 +107,11 @@ OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=um-token-emergencial-forte
 OPENROUTER_SITE_URL=https://SEU-SUBDOMINIO.squareweb.app
-OPENROUTER_APP_NAME=Claude Code
+OPENROUTER_APP_NAME=Frontier AI
+ENABLE_WEB_SEARCH=true
+WEB_SEARCH_MODEL=gpt-5.5
+WEB_SEARCH_CONTEXT_SIZE=low
+WEB_SEARCH_FOR_CUSTOMERS=true
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
@@ -121,6 +125,8 @@ Square Cloud. No primeiro acesso a `/admin`, crie o usuario e a senha; o backend
 salva apenas o hash Argon2 no SQLite.
 
 `OPENAI_API_KEY` e opcional. Use quando quiser que o ChatGPT ajude na qualidade das respostas admin. Para liberar tambem em contas de clientes, adicione `OPENAI_HELPER_FOR_CUSTOMERS=true`, sabendo que isso aumenta custo.
+
+Com `ENABLE_WEB_SEARCH=true`, a mesma chave OpenAI libera pesquisa web atual via Responses API. O gateway usa `auto` por padrão, força busca com `gateway_web_search=required` e bloqueia com `gateway_web_search=off`.
 
 Depois do deploy:
 
@@ -148,7 +154,7 @@ curl https://SEU-SUBDOMINIO.squareweb.app/v1/budget \
    Adicionar logs estruturados, alertas de orcamento e painel de uso por cliente.
 
 6. Marca.
-   A UI esta propositalmente parecida com Claude para prototipo, mas vender usando marca/nome muito parecido pode dar problema comercial. Para producao, o ideal e manter compatibilidade com Claude Code, mas ter marca propria.
+   A UI publica agora usa a marca Frontier AI. Para producao, mantenha a compatibilidade com Claude Code apenas nos aliases de API e materiais tecnicos, deixando a experiencia final com identidade propria.
 
 ## Verificacao feita
 
