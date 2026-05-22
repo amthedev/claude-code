@@ -306,6 +306,7 @@ function renderProductionChecklist() {
   }
   const readiness = gatewayHealthState.production_readiness || {};
   const webSearch = gatewayHealthState.web_search || {};
+  const publicTrial = gatewayHealthState.public_trial || {};
   const items = [
     ["OpenRouter", readiness.openrouter, "Chave principal para respostas do modelo."],
     ["Pesquisa web", readiness.web_search, `${webSearch.model || "gpt-5.5"} / ${webSearch.context_size || "low"}`],
@@ -316,6 +317,12 @@ function renderProductionChecklist() {
     ["Banco persistente", readiness.persistent_storage, readiness.account_data_file || "SQLite configurado"],
     ["Hosts restritos", readiness.trusted_hosts_restricted, "Use domínio explícito em produção."],
   ];
+  if (publicTrial.configured || publicTrial.enabled || publicTrial.active) {
+    const detail = publicTrial.active
+      ? `${publicTrial.label || "Teste grátis"} até ${new Date(publicTrial.endAt).toLocaleString("pt-BR")}`
+      : "Configurado, mas inativo ou expirado.";
+    items.push(["Teste público", publicTrial.active, detail]);
+  }
   target.innerHTML = items
     .map(([label, ok, detail]) => `
       <article>

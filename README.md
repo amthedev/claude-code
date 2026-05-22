@@ -251,6 +251,26 @@ free accounts use the economy model with a small daily limit. After signup or
 redemption, the account receives its own `sk-...` API token and can use the
 chat/API with server-side limits.
 
+## Temporary Public Trial
+
+For a controlled public QA window, enable a time-boxed trial instead of
+`ALLOW_UNAUTHENTICATED`. New signups without a gift card receive a customer token
+and a temporary Max-style account until the configured end time. Existing free
+accounts are promoted when they log in or use `/v1/auth/me` during the window.
+Paid and gift-card accounts are never downgraded or overwritten.
+
+```env
+PUBLIC_TRIAL_ENABLED=true
+PUBLIC_TRIAL_END_AT=2026-05-23T18:00:00Z
+PUBLIC_TRIAL_PLAN_ID=ultra
+PUBLIC_TRIAL_DAILY_LIMIT=150000
+PUBLIC_TRIAL_LABEL=Teste grátis 24h
+```
+
+When `PUBLIC_TRIAL_ENABLED=false` or `PUBLIC_TRIAL_END_AT` is in the past, trial
+accounts are automatically returned to the normal `Grátis` plan on the next
+account/API access.
+
 ## OpenAI / Codex Compatibility
 
 The gateway also exposes OpenAI-compatible entry points for tools that accept a custom base URL:

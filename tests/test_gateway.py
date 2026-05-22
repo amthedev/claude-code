@@ -6,6 +6,7 @@ import io
 import json
 import unittest
 import zipfile
+from datetime import UTC, datetime, timedelta
 from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
@@ -682,6 +683,109 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(reset.status_code, 200)
             self.assertEqual(reset.json()["account"]["usedToday"], 0)
             self.assertEqual(reset.json()["account"]["usageDay"], _today())
+
+    def test_public_trial_signup_creates_temporary_max_account(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            settings.public_trial_enabled = True
+            settings.public_trial_end_at = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+            settings.public_trial_plan_id = "ultra"
+            settings.public_trial_daily_limit = 150000
+            settings.public_trial_label = "Teste grátis 24h"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            plans = client.get("/v1/plans").json()
+            self.assertTrue(plans["public_trial"]["active"])
+            self.assertEqual(plans["public_trial"]["dailyLimit"], 150000)
+
+            response = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Trial",
+                    "login": "trial@example.com",
+                    "password": "secret-trial",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            account = response.json()["account"]
+            self.assertEqual(account["plan"], "Teste grátis 24h")
+            self.assertEqual(account["modelKey"], "opus")
+            self.assertEqual(account["price"], 0)
+            self.assertEqual(account["dailyLimit"], 150000)
+            self.assertTrue(account["publicTrialActive"])
+            self.assertTrue(account["trialExpiresAt"])
+
+            debug = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "Analise a arquitetura inteira"}],
+                },
+            )
+            self.assertEqual(debug.status_code, 200)
+            self.assertEqual(debug.json()["public_model"], "claude-code-ultra")
+
+    def test_public_trial_promotes_existing_free_accounts_and_expires_to_free(self) -> None:
+        with TemporaryDirectory() as directory:
+            base_settings = make_settings()
+            base_settings.account_data_file = f"{directory}/gateway.sqlite3"
+            base_settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            base_app = create_app(settings=base_settings, client_factory=FakeOpenRouterClient)
+            base_client = TestClient(base_app)
+
+            free = base_client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Free",
+                    "login": "free-trial@example.com",
+                    "password": "secret-free",
+                },
+            ).json()["account"]
+            self.assertEqual(free["dailyLimit"], 50)
+
+            trial_settings = make_settings()
+            trial_settings.account_data_file = f"{directory}/gateway.sqlite3"
+            trial_settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            trial_settings.public_trial_enabled = True
+            trial_settings.public_trial_end_at = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+            trial_app = create_app(settings=trial_settings, client_factory=FakeOpenRouterClient)
+            trial_client = TestClient(trial_app)
+
+            login = trial_client.post(
+                "/v1/auth/login",
+                json={"login": "free-trial@example.com", "password": "secret-free"},
+            )
+            self.assertEqual(login.status_code, 200)
+            promoted = login.json()["account"]
+            self.assertEqual(promoted["modelKey"], "opus")
+            self.assertEqual(promoted["dailyLimit"], 150000)
+            self.assertTrue(promoted["publicTrialActive"])
+
+            expired_settings = make_settings()
+            expired_settings.account_data_file = f"{directory}/gateway.sqlite3"
+            expired_settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            expired_settings.public_trial_enabled = False
+            expired_settings.public_trial_end_at = trial_settings.public_trial_end_at
+            expired_app = create_app(settings=expired_settings, client_factory=FakeOpenRouterClient)
+            expired_client = TestClient(expired_app)
+
+            expired = expired_client.get(
+                "/v1/auth/me",
+                headers={"Authorization": f"Bearer {promoted['apiToken']}"},
+            )
+            self.assertEqual(expired.status_code, 200)
+            account = expired.json()["account"]
+            self.assertEqual(account["plan"], "Grátis")
+            self.assertEqual(account["modelKey"], "haiku")
+            self.assertEqual(account["dailyLimit"], 50)
+            self.assertFalse(account["publicTrialActive"])
+            self.assertEqual(account["trialExpiresAt"], "")
 
     def test_existing_unpaid_signup_account_is_migrated_to_free_limit(self) -> None:
         with TemporaryDirectory() as directory:

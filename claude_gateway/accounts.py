@@ -126,7 +126,8 @@ class AccountStore:
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Account not found.")
-            return _public_account(_account_from_row(row))
+            account = self._maybe_promote_public_trial(db, _account_from_row(row))
+            return _public_account(account)
 
     def create_gift_card(self, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
@@ -193,14 +194,14 @@ class AccountStore:
                     raise HTTPException(status_code=400, detail="Gift card is invalid, paused, or already used.")
                 account = _account_from_gift_card(gift_card, name, login, password)
             else:
-                account = _free_account(name, login, password, self.settings)
+                account = _public_signup_account(name, login, password, self.settings)
             db.execute(
                 """
                 INSERT INTO accounts (
                     id, api_token, name, display_name, login, password_hash, plan, price,
                     model_key, manual_limit, active, gift_card_code, used_today, usage_day,
-                    daily_limit, computed_daily_tokens, max_cost_usd, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    daily_limit, computed_daily_tokens, max_cost_usd, created_at, trial_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _account_values(account),
             )
@@ -237,6 +238,7 @@ class AccountStore:
                     (account["passwordHash"], account["id"]),
                 )
                 db.commit()
+            account = self._maybe_promote_public_trial(db, account)
             return _public_account(account)
 
     def admin_configured(self) -> bool:
@@ -466,7 +468,8 @@ class AccountStore:
                     """
                     UPDATE accounts
                        SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
-                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?
+                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?,
+                           trial_expires_at = ''
                      WHERE id = ?
                     """,
                     (
@@ -514,7 +517,8 @@ class AccountStore:
                     """
                     UPDATE accounts
                        SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
-                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?
+                           daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?,
+                           trial_expires_at = ''
                      WHERE id = ?
                     """,
                     (
@@ -559,9 +563,10 @@ class AccountStore:
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if row:
+                account = self._maybe_promote_public_trial(db, _account_from_row(row))
         if not row:
             return None
-        account = _account_from_row(row)
         return CustomerPlan(
             token=token,
             name=account["name"],
@@ -583,7 +588,7 @@ class AccountStore:
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
             if not row:
                 return None
-            account = _account_from_row(row)
+            account = self._maybe_promote_public_trial(db, _account_from_row(row))
             if not account.get("active"):
                 raise HTTPException(status_code=403, detail="Account is paused.")
 
@@ -634,9 +639,10 @@ class AccountStore:
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)
             row = db.execute("SELECT * FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if row:
+                account = self._maybe_promote_public_trial(db, _account_from_row(row))
         if not row:
             return None
-        account = _account_from_row(row)
         daily_limit = int(account.get("dailyLimit") or 0)
         used_today = int(account.get("usedToday") or 0)
         return {
@@ -703,12 +709,15 @@ class AccountStore:
                     daily_limit INTEGER NOT NULL,
                     computed_daily_tokens INTEGER NOT NULL,
                     max_cost_usd REAL NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    trial_expires_at TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
             if not _column_exists(db, "accounts", "usage_day"):
                 db.execute("ALTER TABLE accounts ADD COLUMN usage_day TEXT NOT NULL DEFAULT ''")
+            if not _column_exists(db, "accounts", "trial_expires_at"):
+                db.execute("ALTER TABLE accounts ADD COLUMN trial_expires_at TEXT NOT NULL DEFAULT ''")
             db.execute("UPDATE accounts SET usage_day = ? WHERE usage_day = ''", (_today(),))
             db.execute(
                 """
@@ -779,6 +788,7 @@ class AccountStore:
                        max_cost_usd = ?
                  WHERE price <= 0
                    AND gift_card_code = ''
+                   AND trial_expires_at = ''
                 """,
                 (
                     free_plan["name"],
@@ -789,6 +799,7 @@ class AccountStore:
                     free_limit["maxCostUsd"],
                 ),
             )
+            self._sync_public_trials(db)
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -797,6 +808,7 @@ class AccountStore:
         return db
 
     def _reset_stale_usage(self, db: sqlite3.Connection) -> None:
+        self._sync_public_trials(db)
         today = _today()
         db.execute(
             """
@@ -807,6 +819,76 @@ class AccountStore:
             """,
             (today, today),
         )
+
+    def _sync_public_trials(self, db: sqlite3.Connection) -> None:
+        status = public_trial_status(self.settings)
+        rows = db.execute(
+            "SELECT * FROM accounts WHERE trial_expires_at <> '' AND gift_card_code = ''"
+        ).fetchall()
+        for row in rows:
+            expires_at = _parse_datetime(row["trial_expires_at"])
+            should_downgrade = (
+                not status["active"]
+                or expires_at is None
+                or expires_at <= _now_datetime()
+            )
+            if not should_downgrade:
+                continue
+            account = _account_from_row(row)
+            downgraded = _free_account_from_existing(account, self.settings)
+            db.execute(
+                """
+                UPDATE accounts
+                   SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
+                       daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?,
+                       trial_expires_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    downgraded["plan"],
+                    downgraded["price"],
+                    downgraded["modelKey"],
+                    downgraded["manualLimit"],
+                    downgraded["dailyLimit"],
+                    downgraded["computedDailyTokens"],
+                    downgraded["maxCostUsd"],
+                    "",
+                    downgraded["id"],
+                ),
+            )
+
+    def _maybe_promote_public_trial(
+        self,
+        db: sqlite3.Connection,
+        account: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not _free_signup_account_eligible_for_trial(account):
+            return account
+        promoted = _public_trial_account_from_existing(account, self.settings)
+        if promoted is account:
+            return account
+        db.execute(
+            """
+            UPDATE accounts
+               SET plan = ?, price = ?, model_key = ?, manual_limit = ?,
+                   daily_limit = ?, computed_daily_tokens = ?, max_cost_usd = ?,
+                   trial_expires_at = ?
+             WHERE id = ?
+            """,
+            (
+                promoted["plan"],
+                promoted["price"],
+                promoted["modelKey"],
+                promoted["manualLimit"],
+                promoted["dailyLimit"],
+                promoted["computedDailyTokens"],
+                promoted["maxCostUsd"],
+                promoted["trialExpiresAt"],
+                promoted["id"],
+            ),
+        )
+        db.commit()
+        return promoted
 
     def _gift_code_exists(self, db: sqlite3.Connection, code: str) -> bool:
         row = db.execute("SELECT 1 FROM gift_cards WHERE code = ?", (code,)).fetchone()
@@ -908,7 +990,15 @@ def _account_from_gift_card(
         "computedDailyTokens": gift_card["computedDailyTokens"],
         "maxCostUsd": gift_card["maxCostUsd"],
         "createdAt": _now(),
+        "trialExpiresAt": "",
     }
+
+
+def _public_signup_account(name: str, login: str, password: str, settings: Settings) -> dict[str, Any]:
+    status = public_trial_status(settings)
+    if status["active"]:
+        return _public_trial_account(name, login, password, settings, status)
+    return _free_account(name, login, password, settings)
 
 
 def _free_account(name: str, login: str, password: str, settings: Settings) -> dict[str, Any]:
@@ -933,7 +1023,95 @@ def _free_account(name: str, login: str, password: str, settings: Settings) -> d
         "computedDailyTokens": limit["computedDailyTokens"],
         "maxCostUsd": limit["maxCostUsd"],
         "createdAt": _now(),
+        "trialExpiresAt": "",
     }
+
+
+def _public_trial_account(
+    name: str,
+    login: str,
+    password: str,
+    settings: Settings,
+    status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    status = status or public_trial_status(settings)
+    plan = _plan_by_id(str(status.get("planId") or "ultra")) or _plan_by_id("ultra") or PLAN_CATALOG[-1]
+    manual_limit = int(status.get("dailyLimit") or plan["manualLimit"])
+    limit = _calculate_limit(0, plan["modelKey"], manual_limit, settings)
+    return {
+        "id": f"acct_{secrets.token_hex(12)}",
+        "apiToken": _generate_api_token(),
+        "name": name,
+        "displayName": name,
+        "login": login,
+        "passwordHash": hash_password(password),
+        "plan": str(status.get("label") or settings.public_trial_label or plan["name"]),
+        "price": 0.0,
+        "modelKey": plan["modelKey"],
+        "manualLimit": manual_limit,
+        "active": True,
+        "giftCardCode": "",
+        "usedToday": 0,
+        "usageDay": _today(),
+        "dailyLimit": limit["dailyLimit"],
+        "computedDailyTokens": limit["computedDailyTokens"],
+        "maxCostUsd": limit["maxCostUsd"],
+        "createdAt": _now(),
+        "trialExpiresAt": str(status.get("endAt") or ""),
+    }
+
+
+def _free_account_from_existing(account: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    plan = _plan_by_id("free") or PLAN_CATALOG[0]
+    limit = _calculate_limit(plan["price"], plan["modelKey"], plan["manualLimit"], settings)
+    downgraded = dict(account)
+    downgraded.update(
+        {
+            "plan": plan["name"],
+            "price": plan["price"],
+            "modelKey": plan["modelKey"],
+            "manualLimit": plan["manualLimit"],
+            "dailyLimit": limit["dailyLimit"],
+            "computedDailyTokens": limit["computedDailyTokens"],
+            "maxCostUsd": limit["maxCostUsd"],
+            "trialExpiresAt": "",
+        }
+    )
+    return downgraded
+
+
+def _public_trial_account_from_existing(
+    account: dict[str, Any],
+    settings: Settings,
+) -> dict[str, Any]:
+    status = public_trial_status(settings)
+    if not status["active"]:
+        return account
+    plan = _plan_by_id(str(status.get("planId") or "ultra")) or _plan_by_id("ultra") or PLAN_CATALOG[-1]
+    manual_limit = int(status.get("dailyLimit") or plan["manualLimit"])
+    limit = _calculate_limit(0, plan["modelKey"], manual_limit, settings)
+    promoted = dict(account)
+    promoted.update(
+        {
+            "plan": str(status.get("label") or settings.public_trial_label or plan["name"]),
+            "price": 0.0,
+            "modelKey": plan["modelKey"],
+            "manualLimit": manual_limit,
+            "dailyLimit": limit["dailyLimit"],
+            "computedDailyTokens": limit["computedDailyTokens"],
+            "maxCostUsd": limit["maxCostUsd"],
+            "trialExpiresAt": str(status.get("endAt") or ""),
+        }
+    )
+    return promoted
+
+
+def _free_signup_account_eligible_for_trial(account: dict[str, Any]) -> bool:
+    if account.get("giftCardCode"):
+        return False
+    if float(account.get("price") or 0) > 0:
+        return False
+    return not account.get("trialExpiresAt") and account.get("modelKey") == "haiku"
 
 
 def _plan_by_id(plan_id: str) -> dict[str, Any] | None:
@@ -941,6 +1119,29 @@ def _plan_by_id(plan_id: str) -> dict[str, Any] | None:
         if plan["id"] == plan_id:
             return dict(plan)
     return None
+
+
+def public_trial_status(settings: Settings) -> dict[str, Any]:
+    plan = _plan_by_id(str(settings.public_trial_plan_id or "ultra").strip().lower())
+    if not plan:
+        plan = _plan_by_id("ultra") or PLAN_CATALOG[-1]
+    end_at = _parse_datetime(settings.public_trial_end_at)
+    configured = bool(settings.public_trial_enabled and settings.public_trial_end_at.strip())
+    active = bool(settings.public_trial_enabled and end_at and end_at > _now_datetime())
+    daily_limit = int(settings.public_trial_daily_limit or plan["manualLimit"])
+    label = str(settings.public_trial_label or "Teste grátis 24h").strip() or "Teste grátis 24h"
+    return {
+        "configured": configured,
+        "enabled": bool(settings.public_trial_enabled),
+        "active": active,
+        "label": label,
+        "endAt": end_at.isoformat() if end_at else "",
+        "planId": plan["id"],
+        "planName": plan["name"],
+        "modelKey": plan["modelKey"],
+        "dailyLimit": max(0, daily_limit),
+        "allowedModel": PUBLIC_MODELS_BY_KEY.get(plan["modelKey"], settings.economy_public_model),
+    }
 
 
 def _public_plan(plan: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -990,6 +1191,7 @@ def _apply_plan_to_account(account: dict[str, Any], purchase: dict[str, Any]) ->
             "dailyLimit": purchase["dailyLimit"],
             "computedDailyTokens": purchase["dailyLimit"],
             "maxCostUsd": purchase["maxCostUsd"],
+            "trialExpiresAt": "",
         }
     )
     return upgraded
@@ -1028,6 +1230,8 @@ def _public_gift_card(card: dict[str, Any]) -> dict[str, Any]:
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     public = dict(account)
     public.pop("passwordHash", None)
+    expires_at = _parse_datetime(str(public.get("trialExpiresAt") or ""))
+    public["publicTrialActive"] = bool(expires_at and expires_at > _now_datetime())
     return public
 
 
@@ -1070,6 +1274,7 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "computedDailyTokens": row["computed_daily_tokens"],
         "maxCostUsd": row["max_cost_usd"],
         "createdAt": row["created_at"],
+        "trialExpiresAt": row["trial_expires_at"],
     }
 
 
@@ -1136,6 +1341,7 @@ def _account_values(account: dict[str, Any]) -> tuple[Any, ...]:
         account["computedDailyTokens"],
         account["maxCostUsd"],
         account["createdAt"],
+        account.get("trialExpiresAt") or "",
     )
 
 
@@ -1170,6 +1376,25 @@ def _normalize_model_key(value: Any) -> str:
     if "opus" in raw or "ultra" in raw:
         return "opus"
     return "sonnet"
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _now_datetime() -> datetime:
+    return datetime.now(UTC)
 
 
 def _normalize_document(value: Any) -> str:

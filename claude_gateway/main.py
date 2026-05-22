@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .accounts import AccountStore, AccountUsageReservation
+from .accounts import AccountStore, AccountUsageReservation, public_trial_status
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .auth import AuthContext, client_ip_for_debug, extract_bearer_token, require_gateway_auth
 from .anthropic import build_text_message, clean_model_text
@@ -172,6 +172,7 @@ def create_app(
             "web_search": _web_search_status(app.state.settings),
             "orchestration_enabled": app.state.settings.enable_agent_orchestration,
             "production_readiness": _production_readiness(app),
+            "public_trial": public_trial_status(app.state.settings),
             "cost_target": {
                 "baseline_model": CLAUDE_BASELINE_MODEL,
                 "max_cost_ratio_vs_claude": app.state.settings.max_cost_ratio_vs_claude,
@@ -209,7 +210,10 @@ def create_app(
 
     @app.get("/v1/plans")
     async def list_public_plans() -> dict[str, Any]:
-        return {"data": app.state.account_store.list_plans()}
+        return {
+            "data": app.state.account_store.list_plans(),
+            "public_trial": public_trial_status(app.state.settings),
+        }
 
     @app.post("/v1/responses")
     async def create_openai_response(

@@ -31,6 +31,7 @@ let pendingAuthIntent = "";
 let paymentPollTimer = null;
 let pendingPaymentPlanId = "";
 let pendingPaymentPlanForPolling = "";
+let publicTrialState = null;
 const messageTypewriterTimers = new WeakMap();
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
@@ -381,7 +382,43 @@ function planById(planId) {
   return ClaudeApp.paidPlans().find((plan) => plan.id === planId) || null;
 }
 
+function publicTrialActive() {
+  if (!publicTrialState?.active || !publicTrialState.endAt) return false;
+  return new Date(publicTrialState.endAt).getTime() > Date.now();
+}
+
+function accountTrialActive(current = account()) {
+  if (!current?.publicTrialActive || !current.trialExpiresAt) return false;
+  return new Date(current.trialExpiresAt).getTime() > Date.now();
+}
+
+function trialExpiryLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function publicTrialCopy() {
+  const label = publicTrialState?.label || "Teste grátis 24h";
+  const expiry = trialExpiryLabel(publicTrialState?.endAt);
+  return expiry
+    ? `${label}: Max 30X grátis até ${expiry}.`
+    : `${label}: Max 30X grátis por tempo limitado.`;
+}
+
 function defaultAuthCopy() {
+  if (publicTrialActive()) {
+    return {
+      login: "Entre para continuar usando seu teste grátis.",
+      signup: `${publicTrialCopy()} Crie sua conta; gift card continua opcional.`,
+    };
+  }
   return {
     login: "Use o e-mail e a senha criados no cadastro.",
     signup: "Crie uma conta grátis agora. Se tiver gift card, ele libera o plano comprado.",
@@ -423,6 +460,33 @@ function updateAuthContext() {
   const signupIntro = document.querySelector("#clientSignupIntro");
   if (loginIntro) loginIntro.textContent = copy.login;
   if (signupIntro) signupIntro.textContent = copy.signup;
+}
+
+function renderPublicTrialState() {
+  const banner = document.querySelector("#publicTrialBanner");
+  if (banner) {
+    if (publicTrialActive()) {
+      banner.textContent = `${publicTrialCopy()} Planos pagos continuam disponíveis, mas o teste não exige checkout.`;
+      banner.classList.remove("hidden");
+    } else {
+      banner.textContent = "";
+      banner.classList.add("hidden");
+    }
+  }
+
+  const notice = document.querySelector("#trialAccountNotice");
+  const current = account();
+  if (!notice) return;
+  if (accountTrialActive(current)) {
+    const expiry = trialExpiryLabel(current.trialExpiresAt);
+    notice.textContent = expiry
+      ? `Teste grátis Max 30X ativo até ${expiry}. Depois disso, a conta volta automaticamente ao plano Grátis.`
+      : "Teste grátis Max 30X ativo. Depois da janela, a conta volta automaticamente ao plano Grátis.";
+    notice.classList.remove("hidden");
+  } else {
+    notice.textContent = "";
+    notice.classList.add("hidden");
+  }
 }
 
 function openAuthForIntent(intent, tab = "clientSignupForm", planId = "") {
@@ -917,6 +981,23 @@ async function authRequest(path, payload) {
   return response.json();
 }
 
+async function loadPublicTrialState() {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${baseUrl}/v1/plans`);
+    if (!response.ok) return;
+    const data = await response.json();
+    publicTrialState = data.public_trial || null;
+    updateAuthContext();
+    renderPublicTrialState();
+    renderBilling();
+  } catch {
+    publicTrialState = null;
+    renderPublicTrialState();
+  }
+}
+
 async function supportRequest(path, options = {}) {
   const settings = ClaudeApp.apiSettings();
   const baseUrl = settings.baseUrl.replace(/\/$/, "");
@@ -1107,18 +1188,24 @@ function renderPlanCards() {
   if (!target) return;
   const notice = document.querySelector("#planUpgradeNotice");
   if (notice) {
-    notice.classList.toggle("hidden", !highlightedPlanId);
-    notice.textContent =
+    const trialText = publicTrialActive()
+      ? `${publicTrialCopy()} Você pode testar sem pagar agora; os planos pagos seguem disponíveis para depois.`
+      : "";
+    const upgradeText =
       highlightedPlanId === "ultra"
         ? "Claude Opus 4.7 está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
         : "";
+    notice.classList.toggle("hidden", !trialText && !highlightedPlanId);
+    notice.textContent = trialText || upgradeText;
   }
   target.innerHTML = ClaudeApp.paidPlans()
     .map((plan) => {
       const currentPlan = isCurrentPaidPlan(current, plan);
+      const trialCoversPlan = accountTrialActive(current) && plan.id === "ultra";
       const highlighted = highlightedPlanId === plan.id || (!highlightedPlanId && plan.id === "ultra");
       const badges = [
         currentPlan ? `<span class="plan-badge current">Seu plano atual</span>` : "",
+        trialCoversPlan ? `<span class="plan-badge current">Teste grátis ativo</span>` : "",
         plan.id === "ultra" ? `<span class="plan-badge featured">Recomendado</span>` : "",
         highlightedPlanId === plan.id ? `<span class="plan-badge upgrade">Recomendado para Ultra</span>` : "",
       ].join("");
@@ -1509,6 +1596,7 @@ function renderAccount() {
     logout.textContent = "";
     document.querySelector("#openProjectModal").textContent = "Entrar para criar projeto";
     document.querySelector("#newArtifact").textContent = "Entrar para criar artefato";
+    renderPublicTrialState();
     renderBilling();
     fillModelSelects();
     renderSidePanels();
@@ -1539,6 +1627,7 @@ function renderAccount() {
     <code>Login: ${ClaudeApp.escapeHtml(current.login)}</code>
     <code>Gift card: ${ClaudeApp.escapeHtml(current.giftCardCode || "-")}</code>
     <code>Plano: ${ClaudeApp.escapeHtml(ClaudeApp.planDisplayName(current.plan))}</code>
+    ${accountTrialActive(current) ? `<code>Teste grátis até: ${ClaudeApp.escapeHtml(trialExpiryLabel(current.trialExpiresAt) || current.trialExpiresAt)}</code>` : ""}
     <code>Modelo: escolha no seletor do chat</code>
     <code>Limite diario: ${ClaudeApp.integer.format(current.dailyLimit)} tokens</code>
   `;
@@ -1550,6 +1639,7 @@ function renderAccount() {
   logout.textContent = accountInitial(current);
   document.querySelector("#openProjectModal").textContent = "Novo projeto";
   document.querySelector("#newArtifact").textContent = "Novo artefato";
+  renderPublicTrialState();
   renderBilling();
   fillModelSelects();
   renderCodeContextButtons();
@@ -4240,6 +4330,7 @@ if (currentAccountId && !account()) {
 }
 
 renderAccount();
+loadPublicTrialState();
 if (currentAccountId && account()?.active && customerApiToken()) {
   refreshCustomerAccount({ silent: true });
 }

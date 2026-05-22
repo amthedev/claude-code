@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521l" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=public-trial-20260522a" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell">
@@ -130,6 +130,8 @@
             </button>
           </div>
         </header>
+
+        <div id="publicTrialBanner" class="trial-banner hidden" aria-live="polite"></div>
 
         <section id="chatPanel" class="client-panel active">
           <div id="emptyState" class="chat-empty">
@@ -424,6 +426,7 @@
             <div class="usage-bar"><div id="usageFill"></div></div>
             <p id="usageText">Limite diario do plano.</p>
           </div>
+          <div id="trialAccountNotice" class="trial-account-notice hidden"></div>
           <div class="settings-section">
             <label>
               Pesquisa web
@@ -652,7 +655,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept=".txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=codex-code-chat-20260521l"></script>
-    <script src="/frontier/client.js?v=codex-code-chat-20260521l"></script>
+    <script src="/frontier/shared.js?v=public-trial-20260522a"></script>
+    <script src="/frontier/client.js?v=public-trial-20260522a"></script>
   </body>
 </html>

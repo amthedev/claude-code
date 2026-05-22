@@ -91,6 +91,11 @@ class Settings:
     expose_detailed_health: bool = False
     mercado_pago_access_token: str = ""
     mercado_pago_public_url: str = ""
+    public_trial_enabled: bool = False
+    public_trial_end_at: str = ""
+    public_trial_plan_id: str = "ultra"
+    public_trial_daily_limit: int = 150_000
+    public_trial_label: str = "Teste grátis 24h"
 
     economy_public_model: str = "claude-code-economy"
     pro_public_model: str = "claude-code-pro"
@@ -172,6 +177,11 @@ class Settings:
             expose_detailed_health=_bool_env("EXPOSE_DETAILED_HEALTH", False),
             mercado_pago_access_token=os.getenv("MERCADO_PAGO_ACCESS_TOKEN", ""),
             mercado_pago_public_url=os.getenv("MERCADO_PAGO_PUBLIC_URL", ""),
+            public_trial_enabled=_bool_env("PUBLIC_TRIAL_ENABLED", False),
+            public_trial_end_at=os.getenv("PUBLIC_TRIAL_END_AT", ""),
+            public_trial_plan_id=os.getenv("PUBLIC_TRIAL_PLAN_ID", "ultra"),
+            public_trial_daily_limit=int(os.getenv("PUBLIC_TRIAL_DAILY_LIMIT", "150000")),
+            public_trial_label=os.getenv("PUBLIC_TRIAL_LABEL", "Teste grátis 24h"),
             economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "claude-code-economy"),
             pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "claude-code-pro"),
             ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-code-ultra"),

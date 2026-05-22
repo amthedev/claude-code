@@ -189,12 +189,20 @@ const ClaudeApp = (() => {
 
   function calculateLimit(priceBrl, modelKey, manualLimit) {
     const monthlyRevenue = Math.max(0, Number(priceBrl) || 0);
+    const manual = Number(manualLimit) || 0;
+    if (monthlyRevenue <= 0 && manual > 0) {
+      return {
+        dailyLimit: manual,
+        computedDailyTokens: manual,
+        maxCostUsd: 0,
+        protectedProfitBrl: 0,
+      };
+    }
     const protectedMargin = Math.max(0.5, MIN_PROFIT_MARGIN);
     const maxCostBrl = monthlyRevenue * (1 - protectedMargin);
     const maxCostUsd = maxCostBrl / USD_TO_BRL;
     const dailyCostUsd = maxCostUsd / 30;
     const computedDailyTokens = Math.floor(dailyCostUsd / PLAN_LIMIT_USD_PER_TOKEN);
-    const manual = Number(manualLimit) || 0;
     const dailyLimit = manual > 0 ? Math.min(manual, computedDailyTokens) : computedDailyTokens;
 
     return {
@@ -207,7 +215,9 @@ const ClaudeApp = (() => {
 
   function recalculateAccount(account) {
     const price = Number(account.price) || 0;
-    const isSignupFreeAccount = price <= 0 && !account.giftCardCode;
+    const trialExpiresAt = String(account.trialExpiresAt || "");
+    const trialActive = Boolean(trialExpiresAt && new Date(trialExpiresAt).getTime() > Date.now());
+    const isSignupFreeAccount = price <= 0 && !account.giftCardCode && !trialActive;
     const normalizedAccount = isSignupFreeAccount
       ? {
           ...account,
