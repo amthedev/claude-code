@@ -923,7 +923,7 @@ async def _create_mercado_pago_pix_payment(
         "description": f"Claude {purchase['plan']}",
         "payment_method_id": "pix",
         "external_reference": purchase["id"],
-        "payer": _mercado_pago_payer(purchase),
+        "payer": _mercado_pago_payment_payer(purchase),
         "metadata": {
             "account_id": purchase["accountId"],
             "plan_id": purchase["planId"],
@@ -1059,6 +1059,19 @@ def _mercado_pago_payer(purchase: dict[str, Any]) -> dict[str, Any]:
     payer = {
         "name": first_name,
         "surname": surname,
+        "email": purchase["login"],
+    }
+    document = _payer_document(purchase.get("payerDocument"))
+    if document:
+        payer["identification"] = document
+    return payer
+
+
+def _mercado_pago_payment_payer(purchase: dict[str, Any]) -> dict[str, Any]:
+    first_name, surname = _split_payer_name(purchase.get("name"))
+    payer = {
+        "first_name": first_name,
+        "last_name": surname,
         "email": purchase["login"],
     }
     document = _payer_document(purchase.get("payerDocument"))
