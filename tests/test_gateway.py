@@ -17,6 +17,7 @@ from claude_gateway.config import Settings
 from claude_gateway.customers import _today, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.openrouter import OpenRouterClient
+from claude_gateway.skills import SKILL_CATALOG, select_skills
 
 
 class FakeOpenRouterClient:
@@ -107,6 +108,46 @@ class FakeMercadoPagoClient:
         )
 
 
+class FakeGitHubClient:
+    put_calls: list[dict[str, Any]] = []
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "FakeGitHubClient":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+    async def get(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+        if url.endswith("/user/repos"):
+            return FakeHttpResponse(
+                [
+                    {
+                        "id": 1,
+                        "name": "app",
+                        "full_name": "amthedev/app",
+                        "owner": {"login": "amthedev"},
+                        "private": True,
+                        "default_branch": "main",
+                        "html_url": "https://github.com/amthedev/app",
+                        "description": "Projeto de teste",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                    }
+                ]
+            )
+        if "/contents/" in url:
+            return FakeHttpResponse({"message": "Not Found"}, status_code=404)
+        if "/repos/amthedev/app" in url:
+            return FakeHttpResponse({"default_branch": "main"})
+        return FakeHttpResponse({}, status_code=404)
+
+    async def put(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+        self.__class__.put_calls.append({"url": url, "json": kwargs.get("json")})
+        return FakeHttpResponse({"content": {"sha": "new-sha"}}, status_code=201)
+
+
 async def collect_stream_text(chunks: Any) -> str:
     text = ""
     async for chunk in _public_model_stream(chunks, "claude-code-pro"):
@@ -164,6 +205,26 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
         self.assertNotIn("localhost", response.headers["content-security-policy"])
         self.assertNotIn("127.0.0.1", response.headers["content-security-policy"])
+
+    def test_skill_catalog_has_many_automatic_situations(self) -> None:
+        self.assertGreaterEqual(len(SKILL_CATALOG), 40)
+        selected = select_skills(
+            "Conectar GitHub, listar repositorios, rodar testes e publicar alteracoes",
+            "testing",
+        )
+        selected_ids = {skill.id for skill in selected}
+        self.assertIn("github_connect", selected_ids)
+        self.assertIn("test_runner", selected_ids)
+
+    def test_skill_catalog_selects_senior_delivery_situations(self) -> None:
+        selected = select_skills(
+            "Faça uma entrega profissional senior para produção com rollback, logs e critérios de aceite",
+            "architecture",
+        )
+        selected_ids = {skill.id for skill in selected}
+        self.assertIn("senior_delivery", selected_ids)
+        self.assertIn("incident_response", selected_ids)
+        self.assertIn("observability", selected_ids)
 
     def test_public_health_is_minimal_and_admin_health_has_details(self) -> None:
         response = self.client.get("/health")
@@ -277,6 +338,9 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("semanas sem usar", cleaned)
         self.assertIn("medo de errar", cleaned)
         self.assertIn("Posso montar um plano com metas semanais", cleaned)
+
+    def test_clean_model_text_does_not_trim_legitimate_word_endings(self) -> None:
+        self.assertEqual(clean_model_text("Compre banana madura e teste a resposta."), "Compre banana madura e teste a resposta.")
 
     def test_openapi_is_not_public_by_default(self) -> None:
         response = self.client.get("/openapi.json")
@@ -1337,6 +1401,78 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertIn("chave", response.json()["detail"].lower())
 
+    def test_customer_can_list_github_repositories_by_profile(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente GitHub",
+                    "login": "github@example.com",
+                    "password": "secret-code",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            with patch("claude_gateway.main.httpx.AsyncClient", FakeGitHubClient):
+                response = client.post(
+                    "/v1/code/github/repositories",
+                    headers=customer_headers,
+                    json={"profile": "amthedev", "githubToken": "github_pat_test"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["data"][0]["fullName"], "amthedev/app")
+            self.assertTrue(response.json()["data"][0]["private"])
+
+    def test_customer_can_publish_github_workspace(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            FakeGitHubClient.put_calls = []
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/gateway.sqlite3"
+            settings.quota_data_file = f"{tmpdir}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente Publish",
+                    "login": "publish@example.com",
+                    "password": "secret-code",
+                },
+            ).json()["account"]
+            customer_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            archive_bytes = io.BytesIO()
+            with zipfile.ZipFile(archive_bytes, "w") as archive:
+                archive.writestr("repo/README.md", "# Publicar\n")
+            workspace = app.state.code_workspaces.create_from_zip(
+                account["apiToken"],
+                name="amthedev/app",
+                zip_bytes=archive_bytes.getvalue(),
+                source="github",
+                repo_url="https://github.com/amthedev/app",
+                ref="main",
+            )
+
+            with patch("claude_gateway.main.httpx.AsyncClient", FakeGitHubClient):
+                response = client.post(
+                    f"/v1/code/workspaces/{workspace['id']}/github/publish",
+                    headers=customer_headers,
+                    json={"githubToken": "github_pat_test", "message": "Atualiza README"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["publish"]["created"], 1)
+            self.assertEqual(len(FakeGitHubClient.put_calls), 1)
+            self.assertEqual(FakeGitHubClient.put_calls[0]["json"]["message"], "Atualiza README")
+
     def test_streaming_returns_sse(self) -> None:
         with self.client.stream(
             "POST",
@@ -1394,6 +1530,28 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Claude Opus 4.7", payload["system"])
         self.assertIn("Match Anthropic Claude Code response behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
+        self.assertIn("Automatic skill routing is active", payload["system"])
+
+    def test_payload_selects_relevant_automatic_skills(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 256,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Conectar GitHub pelo perfil, listar repositorios, rodar testes e publicar alteracoes",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertIn("Conectar GitHub", payload["system"])
+        self.assertIn("Testes e Terminal", payload["system"])
+        self.assertIn("Publicar Alterações no GitHub", payload["system"])
 
     def test_streaming_proxy_rewrites_message_start_to_public_model(self) -> None:
         with self.client.stream(

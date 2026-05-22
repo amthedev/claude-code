@@ -287,6 +287,25 @@ class CodeWorkspaceStore:
         filename = f"{_slug(workspace['name']) or 'projeto'}-{workspace_id}.zip"
         return filename, buffer.getvalue()
 
+    def files_for_publish(self, token: str, workspace_id: str) -> tuple[dict[str, Any], list[tuple[str, bytes]]]:
+        workspace, workspace_dir = self._workspace_for_token(token, workspace_id)
+        files: list[tuple[str, bytes]] = []
+        total_bytes = 0
+        for path in sorted(workspace_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(workspace_dir).as_posix()
+            if _ignored_path(relative):
+                continue
+            data = path.read_bytes()
+            total_bytes += len(data)
+            if total_bytes > MAX_ARCHIVE_BYTES * 4:
+                raise HTTPException(status_code=413, detail="Workspace grande demais para publicar.")
+            files.append((relative, data))
+            if len(files) > MAX_FILES:
+                raise HTTPException(status_code=413, detail=f"Workspace excede {MAX_FILES} arquivos.")
+        return workspace, files
+
     def _workspace_for_token(self, token: str, workspace_id: str) -> tuple[dict[str, Any], Path]:
         with self._connect() as db:
             account = self._account_by_token(db, token)

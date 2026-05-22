@@ -228,12 +228,18 @@ def _repair_word_once(word: str) -> str:
         if folded.startswith(folded[:size] * 2):
             return word[size:]
 
-    for size in range(len(word) // 2, 1, -1):
+    for size in range(len(word) // 2, 2, -1):
         stem = word[:-size]
         suffix = word[-size:]
         if len(stem) < max(4, size + 1):
             continue
         if stem.casefold().endswith(suffix.casefold()):
+            return stem
+
+    if len(word) >= 6:
+        stem = word[:-2]
+        suffix = word[-2:]
+        if suffix.casefold() in {"ar", "er", "ir", "ês"} and stem.casefold().endswith(suffix.casefold()):
             return stem
 
     if len(word) >= 6 and folded[-1:] == folded[-2:-1] and folded[-1:] in {"a", "e", "i", "o", "u"}:

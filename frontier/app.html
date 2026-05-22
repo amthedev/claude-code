@@ -6,7 +6,7 @@
     <title>Claude</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521k" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=codex-code-chat-20260521l" />
   </head>
   <body class="client-page">
     <main id="clientApp" class="cloud-shell sidebar-open">
@@ -323,18 +323,19 @@
             <form id="githubImportForm" class="code-import-card">
               <span class="overline">GitHub</span>
               <label>
-                URL do repositório
-                <input name="repoUrl" placeholder="https://github.com/usuario/repositorio" required />
+                Perfil GitHub
+                <input name="profile" placeholder="usuario ou organizacao" required />
               </label>
               <label>
-                Branch/tag opcional
+                Branch padrão
                 <input name="ref" placeholder="main" />
               </label>
               <label>
                 Chave GitHub
                 <input name="githubToken" type="password" autocomplete="off" placeholder="github_pat_..." required />
               </label>
-              <button class="primary" type="submit">Importar GitHub</button>
+              <button class="primary" type="submit">Conectar GitHub</button>
+              <div id="githubRepoChoices" class="github-repo-choices"></div>
             </form>
             <form id="zipUploadForm" class="code-import-card">
               <span class="overline">Pasta local</span>
@@ -362,6 +363,7 @@
                 <strong id="codeFileTitle">Selecione um arquivo</strong>
                 <div>
                   <button id="downloadCodeWorkspace" type="button">Baixar ZIP</button>
+                  <button id="publishCodeWorkspace" type="button">Enviar GitHub</button>
                   <button id="saveCodeFile" class="primary" type="button">Salvar arquivo</button>
                 </div>
               </div>
@@ -460,10 +462,11 @@
       <hr />
       <form id="codeGithubQuickForm" class="quick-menu-form" novalidate>
         <strong>Conectar Hub ou GitHub</strong>
-        <input name="repoUrl" placeholder="https://github.com/usuario/repositorio" required />
-        <input name="ref" placeholder="branch opcional" />
+        <input name="profile" placeholder="perfil ou organização" required />
+        <input name="ref" placeholder="branch padrão" />
         <input name="githubToken" type="password" autocomplete="off" placeholder="chave GitHub obrigatória" required />
-        <button class="primary" type="submit">Conectar</button>
+        <button class="primary" type="submit">Listar repos</button>
+        <div id="codeGithubQuickRepos" class="github-repo-choices compact"></div>
       </form>
       <button type="button" data-code-project-action="upload"><span>ZIP</span>Subir projeto</button>
       <button type="button" data-code-project-action="folder"><span>DIR</span>Subir pasta</button>
@@ -639,7 +642,7 @@
     </section>
 
     <input id="attachmentInput" class="hidden" type="file" accept="image/*,.txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
-    <script src="/frontier/shared.js?v=codex-code-chat-20260521k"></script>
-    <script src="/frontier/client.js?v=codex-code-chat-20260521k"></script>
+    <script src="/frontier/shared.js?v=codex-code-chat-20260521l"></script>
+    <script src="/frontier/client.js?v=codex-code-chat-20260521l"></script>
   </body>
 </html>

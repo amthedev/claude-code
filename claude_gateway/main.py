@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import io
+import base64
 import json
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 from unicodedata import normalize
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import uvicorn
@@ -38,6 +40,7 @@ from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .routing import RouteDecision, RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
 from .security import InMemoryRateLimiter, SecurityHeadersMiddleware, rate_limit_key, verify_admin_login
+from .skills import render_skill_prompt, select_skills
 from .support import SupportStore
 from .usage import UsageStore
 
@@ -264,6 +267,7 @@ def create_app(
             reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+        payload = _with_automatic_skills(payload, decision)
         payload["__gateway_route_decision"] = decision
         if identity_answer:
             app.state.usage.record_request(decision)
@@ -663,6 +667,22 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         return {"data": app.state.code_workspaces.list_for_customer(auth.token)}
 
+    @app.post("/v1/code/github/repositories")
+    async def list_github_repositories(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        github_token = str(payload.get("githubToken") or payload.get("github_token") or "").strip()
+        profile = str(payload.get("profile") or payload.get("owner") or "").strip()
+        if not github_token:
+            raise HTTPException(status_code=400, detail="Informe sua chave GitHub para listar repositórios.")
+        repos = await _list_github_repositories(github_token, profile)
+        return JSONResponse({"data": repos})
+
     @app.post("/v1/code/workspaces/upload")
     async def upload_code_workspace(
         request: Request,
@@ -745,6 +765,33 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         return JSONResponse({"result": app.state.code_workspaces.run_command(auth.token, workspace_id, payload)})
+
+    @app.post("/v1/code/workspaces/{workspace_id}/github/publish")
+    async def publish_code_workspace_to_github(
+        workspace_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        auth = _require_customer(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        github_token = str(payload.get("githubToken") or payload.get("github_token") or "").strip()
+        branch = str(payload.get("ref") or payload.get("branch") or "").strip()
+        message = str(payload.get("message") or "").strip() or "Atualiza projeto pelo Hub"
+        if not github_token:
+            raise HTTPException(status_code=400, detail="Informe sua chave GitHub para publicar alterações.")
+        workspace, files = app.state.code_workspaces.files_for_publish(auth.token, workspace_id)
+        if workspace.get("source") != "github" or not workspace.get("repoUrl"):
+            raise HTTPException(status_code=400, detail="Só workspaces importados do GitHub podem ser publicados.")
+        result = await _publish_workspace_to_github(
+            workspace["repoUrl"],
+            branch or workspace.get("ref") or "main",
+            github_token,
+            message,
+            files,
+        )
+        return JSONResponse({"publish": result})
 
     @app.get("/v1/code/workspaces/{workspace_id}/download")
     async def download_code_workspace(workspace_id: str, request: Request) -> StreamingResponse:
@@ -900,6 +947,145 @@ async def _download_github_zip(repo_url: str, ref: str, github_token: str) -> tu
         if archive.status_code >= 400:
             raise HTTPException(status_code=502, detail="Não consegui baixar o ZIP do GitHub.")
         return archive.content, resolved_ref
+
+
+async def _list_github_repositories(github_token: str, profile: str = "") -> list[dict[str, Any]]:
+    headers = _github_headers(github_token)
+    repos: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
+        for page in range(1, 6):
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                headers=headers,
+                params={
+                    "affiliation": "owner,collaborator,organization_member",
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": 100,
+                    "page": page,
+                },
+            )
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail="Não consegui listar seus repositórios no GitHub.")
+            items = response.json()
+            if not isinstance(items, list) or not items:
+                break
+            repos.extend(_public_github_repo(item) for item in items if isinstance(item, dict))
+            if len(items) < 100:
+                break
+
+    cleaned_profile = profile.strip().lower()
+    if cleaned_profile:
+        repos = [
+            repo
+            for repo in repos
+            if repo["owner"].lower() == cleaned_profile or cleaned_profile in repo["fullName"].lower()
+        ]
+    return repos[:300]
+
+
+async def _publish_workspace_to_github(
+    repo_url: str,
+    branch: str,
+    github_token: str,
+    message: str,
+    files: list[tuple[str, bytes]],
+) -> dict[str, Any]:
+    owner, repo = github_repo_parts(repo_url)
+    headers = _github_headers(github_token)
+    updated = 0
+    created = 0
+    skipped = 0
+    errors: list[dict[str, str]] = []
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        for path, content in files:
+            if len(content) > 950_000:
+                skipped += 1
+                continue
+            encoded_path = quote(path, safe="/")
+            existing_sha = ""
+            current = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}",
+                headers=headers,
+                params={"ref": branch},
+            )
+            if current.status_code == 200:
+                current_data = current.json()
+                if isinstance(current_data, dict):
+                    existing_sha = str(current_data.get("sha") or "")
+            elif current.status_code not in {404}:
+                errors.append({"path": path, "error": f"HTTP {current.status_code}"})
+                continue
+
+            body: dict[str, Any] = {
+                "message": message,
+                "content": base64.b64encode(content).decode("ascii"),
+                "branch": branch,
+            }
+            if existing_sha:
+                body["sha"] = existing_sha
+            response = await client.put(
+                f"https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}",
+                headers=headers,
+                json=body,
+            )
+            if response.status_code in {200, 201}:
+                if existing_sha:
+                    updated += 1
+                else:
+                    created += 1
+                continue
+            detail = _github_error_detail(response)
+            errors.append({"path": path, "error": detail})
+            if len(errors) >= 8:
+                break
+    if errors:
+        raise HTTPException(status_code=502, detail={"message": "Alguns arquivos não foram publicados.", "errors": errors})
+    return {
+        "repoUrl": repo_url,
+        "branch": branch,
+        "updated": updated,
+        "created": created,
+        "skipped": skipped,
+        "fileCount": len(files),
+    }
+
+
+def _github_headers(github_token: str) -> dict[str, str]:
+    return {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {github_token}",
+        "User-Agent": "claude-code-workspace",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def _public_github_repo(repo: dict[str, Any]) -> dict[str, Any]:
+    owner = repo.get("owner") if isinstance(repo.get("owner"), dict) else {}
+    full_name = str(repo.get("full_name") or "")
+    return {
+        "id": repo.get("id"),
+        "name": str(repo.get("name") or ""),
+        "fullName": full_name,
+        "owner": str(owner.get("login") or full_name.split("/", 1)[0]),
+        "private": bool(repo.get("private")),
+        "defaultBranch": str(repo.get("default_branch") or "main"),
+        "htmlUrl": str(repo.get("html_url") or ""),
+        "description": str(repo.get("description") or ""),
+        "updatedAt": str(repo.get("updated_at") or ""),
+    }
+
+
+def _github_error_detail(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        return f"HTTP {response.status_code}"
+    if isinstance(data, dict):
+        message = data.get("message")
+        if message:
+            return str(message)[:300]
+    return f"HTTP {response.status_code}"
 
 
 async def _create_mercado_pago_preference(
@@ -1320,7 +1506,10 @@ def _with_public_model_identity(
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
         f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
-        f"tables when they make comparison easier, and a warmer practical voice with concrete next steps. "
+        f"tables when they make comparison easier, blockquote callouts for important highlights, and a "
+        f"warmer practical voice with concrete next steps. For plans, comparisons, timelines, diagnostics, "
+        f"or project status, prefer a more visual answer with compact tables, clearly labeled sections, "
+        f"progress-style wording, and varied emphasis instead of one long paragraph. "
         f"Do not over-format tiny answers, and never put Markdown markers around every word. "
         f"Act with strong execution autonomy: when the user has given a reasonable goal, choose sensible "
         f"project-consistent defaults and proceed instead of asking them to pick between options. State "
@@ -1337,6 +1526,12 @@ def _with_public_model_identity(
         f"unless the user explicitly asks for technical routing details."
     )
     return _append_system_prompt(payload, prompt)
+
+
+def _with_automatic_skills(payload: dict[str, Any], decision: RouteDecision) -> dict[str, Any]:
+    prompt_text = extract_prompt_text({key: value for key, value in payload.items() if key != "system"})
+    skills = select_skills(prompt_text, decision.task_type)
+    return _append_system_prompt(payload, render_skill_prompt(skills))
 
 
 async def _with_openai_execution_guidance(

@@ -30,6 +30,7 @@ let pendingPaymentPlanForPolling = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
+const GITHUB_CONNECTION_KEY = "claude_frontier_github_connection";
 
 function newChatSessionKey() {
   return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -159,11 +160,18 @@ function repairDuplicatedTokenOnce(token) {
     const fragment = folded.slice(0, size);
     if (folded.startsWith(fragment + fragment)) return token.slice(size);
   }
-  for (let size = Math.floor(token.length / 2); size > 1; size -= 1) {
+  for (let size = Math.floor(token.length / 2); size > 2; size -= 1) {
     const stem = token.slice(0, -size);
     const suffix = token.slice(-size);
     if (stem.length < Math.max(4, size + 1)) continue;
     if (stem.toLocaleLowerCase("pt-BR").endsWith(suffix.toLocaleLowerCase("pt-BR"))) {
+      return stem;
+    }
+  }
+  if (token.length >= 6) {
+    const stem = token.slice(0, -2);
+    const suffix = token.slice(-2).toLocaleLowerCase("pt-BR");
+    if (["ar", "er", "ir", "ês"].includes(suffix) && stem.toLocaleLowerCase("pt-BR").endsWith(suffix)) {
       return stem;
     }
   }
@@ -914,6 +922,104 @@ async function codeRequest(path, options = {}) {
   return customerRequest(`/v1/code${path}`, options);
 }
 
+function githubConnection() {
+  try {
+    return JSON.parse(localStorage.getItem(GITHUB_CONNECTION_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveGithubConnection(values) {
+  const connection = {
+    profile: String(values.profile || "").trim(),
+    ref: String(values.ref || "").trim(),
+    githubToken: String(values.githubToken || "").trim(),
+  };
+  localStorage.setItem(GITHUB_CONNECTION_KEY, JSON.stringify(connection));
+  return connection;
+}
+
+function fillGithubForms() {
+  const connection = githubConnection();
+  document.querySelectorAll("#githubImportForm, #codeGithubQuickForm").forEach((form) => {
+    if (form.elements.profile && connection.profile) form.elements.profile.value = connection.profile;
+    if (form.elements.ref && connection.ref) form.elements.ref.value = connection.ref;
+    if (form.elements.githubToken && connection.githubToken) form.elements.githubToken.value = connection.githubToken;
+  });
+}
+
+async function listGithubRepositories(values) {
+  const connection = saveGithubConnection(values);
+  return codeRequest("/github/repositories", {
+    method: "POST",
+    body: JSON.stringify(connection),
+  });
+}
+
+function renderGithubRepoChoices(target, repos, ref = "") {
+  if (!target) return;
+  if (!repos.length) {
+    target.innerHTML = `<div class="code-project-empty"><span>Nenhum repositório encontrado para esse perfil.</span></div>`;
+    return;
+  }
+  target.innerHTML = repos
+    .map(
+      (repo) => `
+        <button class="github-repo-choice" type="button"
+          data-github-repo-url="${ClaudeApp.escapeHtml(repo.htmlUrl)}"
+          data-github-repo-name="${ClaudeApp.escapeHtml(repo.fullName)}"
+          data-github-repo-branch="${ClaudeApp.escapeHtml(ref || repo.defaultBranch || "main")}">
+          <strong>${ClaudeApp.escapeHtml(repo.fullName)}</strong>
+          <span>${repo.private ? "Privado" : "Público"} · ${ClaudeApp.escapeHtml(repo.defaultBranch || "main")}</span>
+          ${repo.description ? `<small>${ClaudeApp.escapeHtml(repo.description)}</small>` : ""}
+        </button>
+      `,
+    )
+    .join("");
+}
+
+async function connectGithubFromForm(form, target) {
+  const values = Object.fromEntries(new FormData(form).entries());
+  if (!String(values.profile || "").trim()) {
+    form.elements.profile.focus();
+    return;
+  }
+  if (!String(values.githubToken || "").trim()) {
+    form.elements.githubToken.focus();
+    showChatNotice("Informe uma chave GitHub para listar seus repositórios.");
+    return;
+  }
+  if (!ensureCodeCustomerSession()) return;
+  target.innerHTML = `<div class="code-project-empty"><span>Carregando repositórios...</span></div>`;
+  const data = await listGithubRepositories(values);
+  renderGithubRepoChoices(target, data.data || [], String(values.ref || "").trim());
+}
+
+async function importGithubRepository(repoUrl, name, ref = "") {
+  const connection = githubConnection();
+  if (!connection.githubToken) {
+    showChatNotice("Conecte o GitHub com uma chave antes de importar.");
+    return null;
+  }
+  showChatNotice("Importando repositório...");
+  const data = await codeRequest("/workspaces/github", {
+    method: "POST",
+    body: JSON.stringify({
+      repoUrl,
+      name,
+      ref: ref || connection.ref || "",
+      githubToken: connection.githubToken,
+    }),
+  });
+  activeCodeWorkspaceId = data.workspace.id;
+  localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
+  activeCodeFilePath = "";
+  await loadCodeWorkspaces();
+  showChatNotice(`Projeto ativo: ${data.workspace.name}`);
+  return data.workspace;
+}
+
 function saveServerAccount(accountData) {
   rememberSessionApiToken(accountData.id, accountData.apiToken);
   const accounts = ClaudeApp.accounts();
@@ -1540,6 +1646,12 @@ function renderAssistantMarkdown(text) {
       flushList();
       const level = Math.min(4, Math.max(2, heading[1].length));
       html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+      return;
+    }
+    const quote = trimmed.match(/^>\s+(.+)$/);
+    if (quote) {
+      flushList();
+      html.push(`<div class="message-callout">${renderInlineMarkdown(quote[1])}</div>`);
       return;
     }
     const bullet = trimmed.match(/^[-*]\s+(.+)$/);
@@ -2535,6 +2647,7 @@ function renderCodePanel() {
     fileList.innerHTML = `<div class="empty-workspace"><p>Escolha um projeto.</p></div>`;
   }
   document.querySelector("#downloadCodeWorkspace").disabled = !activeCodeWorkspaceId;
+  document.querySelector("#publishCodeWorkspace").disabled = !activeCodeWorkspaceId || activeCodeWorkspace()?.source !== "github";
   document.querySelector("#saveCodeFile").disabled = !activeCodeWorkspaceId || !activeCodeFilePath;
   renderCodeContextButtons();
   renderCodeProjectChoices();
@@ -2651,6 +2764,42 @@ async function downloadCodeWorkspace() {
     URL.revokeObjectURL(url);
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
+  }
+}
+
+async function publishCodeWorkspace() {
+  const workspace = activeCodeWorkspace();
+  if (!workspace || workspace.source !== "github") {
+    document.querySelector("#codeStatus").textContent = "Escolha um workspace importado do GitHub.";
+    return;
+  }
+  if (!ensureCodeCustomerSession()) return;
+  const connection = githubConnection();
+  if (!connection.githubToken) {
+    document.querySelector("#codeStatus").textContent = "Conecte o GitHub com uma chave antes de publicar.";
+    setPanel("codePanel");
+    return;
+  }
+  const branch = workspace.ref || connection.ref || "main";
+  const message = `Atualiza ${workspace.name} pelo Hub`;
+  document.querySelector("#codeStatus").textContent = "Enviando alterações para o GitHub...";
+  try {
+    const data = await codeRequest(`/workspaces/${encodeURIComponent(workspace.id)}/github/publish`, {
+      method: "POST",
+      body: JSON.stringify({
+        githubToken: connection.githubToken,
+        ref: branch,
+        message,
+      }),
+    });
+    const result = data.publish || {};
+    document.querySelector("#codeStatus").textContent =
+      `GitHub atualizado: ${ClaudeApp.integer.format(result.updated || 0)} alterados, ${ClaudeApp.integer.format(result.created || 0)} criados.`;
+    showChatNotice("Alterações enviadas para o GitHub.");
+  } catch (error) {
+    const message = typeof error.message === "string" ? error.message : "Não consegui publicar no GitHub.";
+    document.querySelector("#codeStatus").textContent = message;
+    showChatNotice(message);
   }
 }
 
@@ -3356,32 +3505,25 @@ document.querySelector("#codeGithubQuickForm").addEventListener("submit", async 
   event.preventDefault();
   event.stopPropagation();
   const form = event.currentTarget;
-  const values = Object.fromEntries(new FormData(form).entries());
-  if (!String(values.repoUrl || "").trim()) {
-    form.elements.repoUrl.focus();
-    return;
+  try {
+    await connectGithubFromForm(form, document.querySelector("#codeGithubQuickRepos"));
+  } catch (error) {
+    showChatNotice(error.message);
   }
-  if (!String(values.githubToken || "").trim()) {
-    form.elements.githubToken.focus();
-    showChatNotice("Informe uma chave GitHub para conectar o repositório.");
-    return;
-  }
-  if (!ensureCodeCustomerSession()) return;
+});
+
+document.querySelector("#codeGithubQuickRepos").addEventListener("click", async (event) => {
+  const repo = event.target.closest("[data-github-repo-url]");
+  if (!repo) return;
   closeFloatingMenus();
   setActiveChatMode("code");
   setPanel("chatPanel");
-  showChatNotice("Conectando projeto...");
   try {
-    const data = await codeRequest("/workspaces/github", {
-      method: "POST",
-      body: JSON.stringify(values),
-    });
-    activeCodeWorkspaceId = data.workspace.id;
-    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
-    activeCodeFilePath = "";
-    form.reset();
-    await loadCodeWorkspaces();
-    showChatNotice(`Projeto ativo: ${data.workspace.name}`);
+    await importGithubRepository(
+      repo.dataset.githubRepoUrl,
+      repo.dataset.githubRepoName,
+      repo.dataset.githubRepoBranch,
+    );
   } catch (error) {
     showChatNotice(error.message);
   }
@@ -3685,29 +3827,33 @@ document.querySelector("#projectForm").addEventListener("submit", (event) => {
 document.querySelector("#githubImportForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const values = Object.fromEntries(new FormData(form).entries());
   if (!ensureCodeCustomerSession()) {
-    document.querySelector("#codeStatus").textContent = "Entre novamente para importar repositórios.";
+    document.querySelector("#codeStatus").textContent = "Entre novamente para conectar o GitHub.";
     return;
   }
-  if (!String(values.githubToken || "").trim()) {
-    document.querySelector("#codeStatus").textContent = "Informe uma chave GitHub para importar o repositório.";
-    form.elements.githubToken.focus();
-    return;
+  document.querySelector("#codeStatus").textContent = "Conectando GitHub...";
+  try {
+    await connectGithubFromForm(form, document.querySelector("#githubRepoChoices"));
+    document.querySelector("#codeStatus").textContent = "GitHub conectado. Escolha um repositório abaixo.";
+  } catch (error) {
+    document.querySelector("#codeStatus").textContent = error.message;
   }
+});
+
+document.querySelector("#githubRepoChoices").addEventListener("click", async (event) => {
+  const repo = event.target.closest("[data-github-repo-url]");
+  if (!repo) return;
   document.querySelector("#codeStatus").textContent = "Importando repositório...";
   try {
-    const data = await codeRequest("/workspaces/github", {
-      method: "POST",
-      body: JSON.stringify(values),
-    });
-    activeCodeWorkspaceId = data.workspace.id;
-    localStorage.setItem("claude_frontier_active_code_workspace", activeCodeWorkspaceId);
-    activeCodeFilePath = "";
-    form.reset();
-    document.querySelector("#codeStatus").textContent = "Repositório importado.";
-    await loadCodeWorkspaces();
-    fillHeroPrompt(`Analise este projeto (${data.workspace.name}) e me diga por onde começar.`);
+    const workspace = await importGithubRepository(
+      repo.dataset.githubRepoUrl,
+      repo.dataset.githubRepoName,
+      repo.dataset.githubRepoBranch,
+    );
+    if (workspace) {
+      document.querySelector("#codeStatus").textContent = "Repositório importado.";
+      fillHeroPrompt(`Analise este projeto (${workspace.name}) e me diga por onde começar.`);
+    }
   } catch (error) {
     document.querySelector("#codeStatus").textContent = error.message;
   }
@@ -3776,6 +3922,7 @@ document.querySelector("#codeFileList").addEventListener("click", (event) => {
 
 document.querySelector("#saveCodeFile").addEventListener("click", saveCodeFile);
 document.querySelector("#downloadCodeWorkspace").addEventListener("click", downloadCodeWorkspace);
+document.querySelector("#publishCodeWorkspace").addEventListener("click", publishCodeWorkspace);
 
 document.querySelector("#supportForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3963,6 +4110,7 @@ document.addEventListener("keydown", (event) => {
 });
 
 fillModelSelects();
+fillGithubForms();
 repairStoredDuplicateArtifacts();
 loadApiForm();
 renderSidePanels();
