@@ -247,7 +247,7 @@ When a customer token calls `/v1/messages`, the gateway forces the allowed model
 
 The Admin still generates gift cards for direct sales through `/v1/admin/gift-cards`.
 Customers can also create a free account without a gift card through `/v1/auth/signup`;
-free accounts use the economy model with a small daily limit. After signup or
+free accounts use the economy model with a 200-token daily limit. After signup or
 redemption, the account receives its own `sk-...` API token and can use the
 chat/API with server-side limits.
 

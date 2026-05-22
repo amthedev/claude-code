@@ -38,7 +38,7 @@ const ClaudeApp = (() => {
       description: "Para testar com respostas básicas.",
       price: 0,
       modelKey: "haiku",
-      manualLimit: 50,
+      manualLimit: 200,
       checkoutMode: "instant",
     },
     {
@@ -224,7 +224,7 @@ const ClaudeApp = (() => {
           plan: "Grátis",
           price: 0,
           modelKey: "haiku",
-          manualLimit: 50,
+          manualLimit: 200,
         }
       : account;
     const limit = calculateLimit(

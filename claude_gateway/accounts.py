@@ -35,7 +35,7 @@ PLAN_CATALOG = (
         "description": "Para testar o chat com respostas básicas.",
         "price": 0.0,
         "modelKey": "haiku",
-        "manualLimit": 50,
+        "manualLimit": 200,
         "checkoutMode": "instant",
     },
     {

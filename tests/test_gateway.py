@@ -636,7 +636,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(account["plan"], "Grátis")
             self.assertEqual(account["modelKey"], "haiku")
             self.assertEqual(account["price"], 0)
-            self.assertEqual(account["dailyLimit"], 50)
+            self.assertEqual(account["dailyLimit"], 200)
 
             message = client.post(
                 "/v1/messages",
@@ -658,6 +658,13 @@ class GatewayTestCase(unittest.TestCase):
             self.assertGreater(usage.json()["account"]["usedToday"], 0)
             self.assertEqual(usage.json()["account"]["usageDay"], _today())
 
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    "UPDATE accounts SET used_today = 199, usage_day = ? WHERE id = ?",
+                    (_today(), account["id"]),
+                )
+                db.commit()
+
             blocked = client.post(
                 "/v1/messages",
                 headers={"Authorization": f"Bearer {account['apiToken']}"},
@@ -671,7 +678,7 @@ class GatewayTestCase(unittest.TestCase):
 
             with app.state.account_store._connect() as db:
                 db.execute(
-                    "UPDATE accounts SET used_today = 50, usage_day = '2000-01-01' WHERE id = ?",
+                    "UPDATE accounts SET used_today = 200, usage_day = '2000-01-01' WHERE id = ?",
                     (account["id"],),
                 )
                 db.commit()
@@ -747,7 +754,7 @@ class GatewayTestCase(unittest.TestCase):
                     "password": "secret-free",
                 },
             ).json()["account"]
-            self.assertEqual(free["dailyLimit"], 50)
+            self.assertEqual(free["dailyLimit"], 200)
 
             trial_settings = make_settings()
             trial_settings.account_data_file = f"{directory}/gateway.sqlite3"
@@ -783,7 +790,7 @@ class GatewayTestCase(unittest.TestCase):
             account = expired.json()["account"]
             self.assertEqual(account["plan"], "Grátis")
             self.assertEqual(account["modelKey"], "haiku")
-            self.assertEqual(account["dailyLimit"], 50)
+            self.assertEqual(account["dailyLimit"], 200)
             self.assertFalse(account["publicTrialActive"])
             self.assertEqual(account["trialExpiresAt"], "")
 
@@ -831,7 +838,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(migrated["plan"], "Grátis")
             self.assertEqual(migrated["modelKey"], "haiku")
             self.assertEqual(migrated["price"], 0)
-            self.assertEqual(migrated["dailyLimit"], 50)
+            self.assertEqual(migrated["dailyLimit"], 200)
 
     def test_purchase_approval_upgrades_account_and_tracks_revenue(self) -> None:
         with TemporaryDirectory() as directory:
