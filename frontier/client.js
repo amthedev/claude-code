@@ -26,6 +26,7 @@ let pendingPlanId = "";
 let pendingAuthIntent = "";
 let paymentPollTimer = null;
 let pendingPaymentPlanId = "";
+let pendingPaymentPlanForPolling = "";
 
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
@@ -1045,7 +1046,12 @@ function openPaymentModal(planId) {
   form.reset();
   form.elements.paymentMethod.value = "pix";
   document.querySelector("#paymentError").textContent = "";
+  document.querySelector("#paymentSummary").classList.remove("hidden");
+  document.querySelector("#paymentForm .payment-methods").classList.remove("hidden");
+  document.querySelector("#paymentForm .payment-field").classList.remove("hidden");
+  document.querySelector(".payment-actions").classList.remove("hidden");
   document.querySelector("#paymentResult").classList.add("hidden");
+  document.querySelector("#paymentResult").classList.remove("payment-result-screen", "success");
   document.querySelector("#paymentResult").innerHTML = "";
   renderPaymentMethods();
   renderPaymentSummary(plan);
@@ -1079,21 +1085,32 @@ function renderPaymentMethods() {
 
 function renderPixPayment(payment) {
   const target = document.querySelector("#paymentResult");
+  const plan = planById(pendingPaymentPlanId);
+  document.querySelector("#paymentSummary").classList.add("hidden");
+  document.querySelector("#paymentForm .payment-methods").classList.add("hidden");
+  document.querySelector("#paymentForm .payment-field").classList.add("hidden");
+  document.querySelector(".payment-actions").classList.add("hidden");
   const qrImage = payment.qrCodeBase64
     ? `<img alt="QR Code Pix" src="data:image/png;base64,${ClaudeApp.escapeHtml(payment.qrCodeBase64)}" />`
     : "";
   const qrCode = payment.qrCode || "";
   target.innerHTML = `
-    <strong>Pix gerado com segurança</strong>
-    <span>Escaneie o QR Code ou copie o código Pix. O plano atualiza automaticamente após a confirmação.</span>
-    ${qrImage}
-    <div class="payment-copy-row">
-      <code>${ClaudeApp.escapeHtml(qrCode || "Código Pix indisponível")}</code>
-      <button type="button" data-copy-pix ${qrCode ? "" : "disabled"}>Copiar</button>
+    <div class="payment-pix-screen">
+      <span class="payment-state-label">Pix seguro</span>
+      <h3>Escaneie o QR Code</h3>
+      <p>${ClaudeApp.escapeHtml(plan?.name || "Plano")} · ${plan ? ClaudeApp.brl.format(plan.price) : ""}</p>
+      <div class="payment-qr-box">${qrImage || "<span>QR Code indisponível</span>"}</div>
+      <div class="payment-copy-row">
+        <code>${ClaudeApp.escapeHtml(qrCode || "Código Pix indisponível")}</code>
+        <button type="button" data-copy-pix ${qrCode ? "" : "disabled"}>Copiar código</button>
+      </div>
+      <small>Assim que o pagamento for confirmado, esta tela muda automaticamente.</small>
+      ${payment.ticketUrl ? `<a class="secondary" href="${ClaudeApp.escapeHtml(payment.ticketUrl)}" target="_blank" rel="noreferrer">Abrir no Mercado Pago</a>` : ""}
     </div>
-    ${payment.ticketUrl ? `<a class="secondary" href="${ClaudeApp.escapeHtml(payment.ticketUrl)}" target="_blank" rel="noreferrer">Abrir comprovante do Mercado Pago</a>` : ""}
   `;
   target.classList.remove("hidden");
+  target.classList.add("payment-result-screen");
+  target.classList.remove("success");
 }
 
 async function loadPurchases() {
@@ -1131,6 +1148,7 @@ function stopPaymentStatusPolling() {
 function startPaymentStatusPolling(planId = "") {
   const targetPlanId = planId || sessionStorage.getItem(PENDING_PAYMENT_SESSION_KEY) || "";
   if (!targetPlanId || !customerApiToken()) return;
+  pendingPaymentPlanForPolling = targetPlanId;
   sessionStorage.setItem(PENDING_PAYMENT_SESSION_KEY, targetPlanId);
   stopPaymentStatusPolling();
   let attempts = 0;
@@ -1140,11 +1158,34 @@ function startPaymentStatusPolling(planId = "") {
     if (refreshed && isCurrentPaidPlan(refreshed, planById(targetPlanId))) {
       stopPaymentStatusPolling();
       sessionStorage.removeItem(PENDING_PAYMENT_SESSION_KEY);
+      renderPaymentSuccess(targetPlanId);
       showChatNotice("Pagamento confirmado. Plano atualizado.");
       return;
     }
     if (attempts >= 60) stopPaymentStatusPolling();
   }, 5000);
+}
+
+function renderPaymentSuccess(planId = "") {
+  const modal = document.querySelector("#paymentModal");
+  const result = document.querySelector("#paymentResult");
+  if (!modal || !result || modal.classList.contains("hidden")) return;
+  const plan = planById(planId || pendingPaymentPlanForPolling || pendingPaymentPlanId);
+  document.querySelector("#paymentSummary").classList.add("hidden");
+  document.querySelector("#paymentForm .payment-methods").classList.add("hidden");
+  document.querySelector("#paymentForm .payment-field").classList.add("hidden");
+  document.querySelector("#paymentError").textContent = "";
+  document.querySelector(".payment-actions").classList.add("hidden");
+  result.innerHTML = `
+    <div class="payment-success-screen">
+      <div class="payment-success-mark">✓</div>
+      <h3>Pagamento confirmado</h3>
+      <p>${ClaudeApp.escapeHtml(plan?.name || "Seu plano")} foi ativado na sua conta.</p>
+      <button class="primary" type="button" data-payment-done>Continuar</button>
+    </div>
+  `;
+  result.classList.remove("hidden");
+  result.classList.add("payment-result-screen", "success");
 }
 
 async function confirmPaymentReturn() {
@@ -1186,6 +1227,7 @@ async function confirmPaymentReturn() {
       renderAccount();
       renderBilling();
     }
+    if (data.purchase?.status === "paid") renderPaymentSuccess(data.purchase.planId);
     showChatNotice(data.purchase?.status === "paid" ? "Pagamento confirmado. Plano atualizado." : "Pagamento em confirmação.");
   } catch (error) {
     showChatNotice(error.message);
@@ -3309,6 +3351,10 @@ document.querySelector("#paymentForm").addEventListener("submit", async (event) 
 });
 
 document.querySelector("#paymentResult").addEventListener("click", async (event) => {
+  if (event.target.closest("[data-payment-done]")) {
+    closePaymentModal();
+    return;
+  }
   const button = event.target.closest("[data-copy-pix]");
   if (!button) return;
   const code = document.querySelector("#paymentResult code")?.textContent || "";
