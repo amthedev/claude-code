@@ -875,6 +875,8 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-235b-a22b-thinking-2507")
         self.assertEqual(data["agents"]["reasoning"], "qwen/qwen3-235b-a22b-thinking-2507")
         self.assertEqual(data["agents"]["coding"], "moonshotai/kimi-k2.6")
+        self.assertEqual(data["agents"]["premium_review"], "deepseek/deepseek-v4-pro")
+        self.assertLessEqual(data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"], 0.4)
 
     def test_critical_ultra_reasoning_uses_r1_only_when_needed(self) -> None:
         response = self.client.post(

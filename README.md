@@ -53,6 +53,7 @@ The default model combo is tuned for Claude Code terminal work: direct tool call
 Every request also receives a Claude public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
 
 See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and terminal setup.
+Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark and the low-token live smoke test.
 
 ## Public Models
 
@@ -62,7 +63,7 @@ See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and termina
 - `claude-code-ui`: frontend/UI path, usually Qwen3 Coder Next with Hy3/DeepSeek guidance.
 - `claude-code-auto`: heuristically chooses between the above.
 
-You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-18.
+You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-22.
 
 ## Cost Guard
 
@@ -79,7 +80,7 @@ With the default model set, the main paths stay well under that budget:
 - DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
 - Qwen3 Coder Next: about 3.0% of Claude Opus 4.7 blended token cost.
 - DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
-- Qwen3 235B A22B Thinking: about 2.4% of Claude Opus 4.7 blended token cost.
+- Qwen3 235B A22B Thinking: about 5.5% of Claude Opus 4.7 blended token cost.
 - Gemini 2.5 Flash Lite: about 1.7% of Claude Opus 4.7 blended token cost.
 - DeepSeek R1: about 10.7% of Claude Opus 4.7 blended token cost.
 - Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.

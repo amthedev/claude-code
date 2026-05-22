@@ -432,7 +432,7 @@ class RoutePlanner:
                     agents["ultra_fallback"] = self._premium_agent_or_budget_safe(
                         self.settings.ultra_fallback
                     )
-                    premium_review = self._premium_agent_or_budget_safe(self.settings.premium_fallback)
+                    premium_review = self._premium_agent_or_budget_safe(self.settings.reasoning_agent)
             agents["premium_review"] = premium_review
         return agents
 

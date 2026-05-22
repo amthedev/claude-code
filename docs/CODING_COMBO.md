@@ -59,7 +59,7 @@ ENABLE_AGENT_ORCHESTRATION=true
 
 - `claude-code-economy`: força o caminho barato.
 - `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools e o pedido realmente precisar de raciocínio profundo, faz pipeline com DeepSeek/Kimi/Gemini.
-- `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e só sobe para DeepSeek R1 em tarefas críticas.
+- `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e revisão DeepSeek Pro; só sobe para DeepSeek R1 em tarefas críticas.
 - `claude-code-ui`: usa Qwen3 Coder Next para construir frontend, DeepSeek Flash para correções simples e Hy3 para raciocínio de UI.
 - `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
 - Pesquisa web: por padrão fica em `auto`; usa OpenAI Responses API `web_search` somente quando o pedido exige informação atual ou quando `gateway_web_search="required"`.
@@ -93,6 +93,6 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 
 ## Fontes usadas
 
-- OpenRouter pages, consultadas em 2026-05-18: IDs e preços para Qwen3 Coder Next, DeepSeek V4 Flash/Pro, DeepSeek R1, Hy3 Preview, Kimi K2.6, Gemini 2.5 Flash Lite e Qwen3 235B Thinking.
+- OpenRouter Models API, consultada em 2026-05-22: IDs e preços para Qwen3 Coder Next, DeepSeek V4 Flash/Pro, DeepSeek R1, Hy3 Preview, Kimi K2.6, Gemini 2.5 Flash Lite e Qwen3 235B Thinking.
 - OpenAI docs: o helper usa Responses API com reasoning effort baixo e modelo configurável; o preset usa `gpt-5.4-mini` por custo.
 - Anthropic Claude Code docs: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` e `ANTHROPIC_BASE_URL` são os pontos corretos para mapear aliases/modelos no Claude Code.

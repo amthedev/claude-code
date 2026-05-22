@@ -28,7 +28,7 @@ class CostEstimate:
 
 
 # OpenRouter price strings are dollars per token. These defaults were checked against
-# OpenRouter's public models API on 2026-05-18.
+# OpenRouter's public models API on 2026-05-22.
 DEFAULT_PRICES: dict[str, ModelPrice] = {
     "anthropic/claude-opus-4.7": ModelPrice(prompt=0.000005, completion=0.000025),
     "anthropic/claude-opus-4.7-fast": ModelPrice(prompt=0.00003, completion=0.00015),
@@ -39,7 +39,10 @@ DEFAULT_PRICES: dict[str, ModelPrice] = {
     "google/gemini-2.5-flash-lite": ModelPrice(prompt=0.0000001, completion=0.0000004),
     "moonshotai/kimi-k2.6": ModelPrice(prompt=0.00000073, completion=0.00000349),
     "qwen/qwen3.6-flash": ModelPrice(prompt=0.0000001875, completion=0.000001125),
-    "qwen/qwen3-235b-a22b-thinking-2507": ModelPrice(prompt=0.00000011, completion=0.0000006),
+    "qwen/qwen3-235b-a22b-thinking-2507": ModelPrice(
+        prompt=0.0000001495,
+        completion=0.000001495,
+    ),
     "qwen/qwen3-coder-next": ModelPrice(prompt=0.00000011, completion=0.0000008),
     "qwen/qwen3-coder-30b-a3b-instruct": ModelPrice(prompt=0.00000007, completion=0.00000027),
     "qwen/qwen3-coder-flash": ModelPrice(prompt=0.000000195, completion=0.000000975),
