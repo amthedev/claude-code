@@ -243,9 +243,10 @@ redirects the user to pay. Mercado Pago calls
 backend upgrades the account automatically. Current app plans are:
 
 ```text
-Básico      R$ 65,00   claude-code-economy
-Pro 5X      R$ 125,00  claude-code-pro
-Max 30X     R$ 280,00  claude-code-ultra
+Pro         R$ 65,00   claude-code-economy
+5X          R$ 125,00  claude-code-pro
+20X         R$ 280,00  claude-code-ultra
+30X         R$ 390,00  claude-code-ultra
 ```
 
 The app sets security headers, disables public OpenAPI docs, rate-limits login

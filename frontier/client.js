@@ -408,8 +408,8 @@ function publicTrialCopy() {
   const label = publicTrialState?.label || "Teste grátis 24h";
   const expiry = trialExpiryLabel(publicTrialState?.endAt);
   return expiry
-    ? `${label}: Max 30X grátis até ${expiry}.`
-    : `${label}: Max 30X grátis por tempo limitado.`;
+    ? `${label}: 30X grátis até ${expiry}.`
+    : `${label}: 30X grátis por tempo limitado.`;
 }
 
 function defaultAuthCopy() {
@@ -480,8 +480,8 @@ function renderPublicTrialState() {
   if (accountTrialActive(current)) {
     const expiry = trialExpiryLabel(current.trialExpiresAt);
     notice.textContent = expiry
-      ? `Teste grátis Max 30X ativo até ${expiry}. Depois disso, a conta volta automaticamente ao plano Grátis.`
-      : "Teste grátis Max 30X ativo. Depois da janela, a conta volta automaticamente ao plano Grátis.";
+      ? `Teste grátis 30X ativo até ${expiry}. Depois disso, a conta volta automaticamente ao plano Grátis.`
+      : "Teste grátis 30X ativo. Depois da janela, a conta volta automaticamente ao plano Grátis.";
     notice.classList.remove("hidden");
   } else {
     notice.textContent = "";
@@ -1193,7 +1193,7 @@ function renderPlanCards() {
       : "";
     const upgradeText =
       highlightedPlanId === "ultra"
-        ? "Claude Opus 4.7 está no plano Max 30X. Faça upgrade para liberar respostas mais fortes."
+        ? "Claude Opus 4.7 está no plano 30X. Faça upgrade para liberar respostas mais fortes."
         : "";
     notice.classList.toggle("hidden", !trialText && !highlightedPlanId);
     notice.textContent = trialText || upgradeText;
@@ -1222,7 +1222,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">${plan.id === "ultra" ? "Inclui Claude Opus 4.7 para trabalhos mais pesados." : plan.id === "pro" ? "Inclui Claude Sonnet 4.6 para trabalho diário." : "Inclui Claude Haiku 4.5 para tarefas leves."}</p>
+            <p class="plan-model-note">${plan.modelKey === "opus" ? "Inclui Claude Opus 4.7 para trabalhos mais pesados." : plan.modelKey === "sonnet" ? "Inclui Claude Sonnet 4.6 para trabalho diário." : "Inclui Claude Haiku 4.5 para tarefas leves."}</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -3775,7 +3775,7 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
     focusHighlightedPlan();
     showChatNotice(
       item.dataset.modelValue === "claude-code-ultra"
-        ? "Claude Opus 4.7 está no plano Max 30X."
+        ? "Claude Opus 4.7 está no plano 30X."
         : "Esse modelo exige upgrade de plano.",
     );
     return;

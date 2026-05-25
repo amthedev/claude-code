@@ -627,7 +627,7 @@ function seedDemo() {
   cards.unshift(
     uniqueGiftCard({
       code: "FRONTIER-DEMO-PRO",
-      plan: "Pro 5X",
+      plan: "5X",
       price: 125,
       model: "sonnet",
       manualLimit: "",
@@ -635,8 +635,8 @@ function seedDemo() {
     }),
     uniqueGiftCard({
       code: "FRONTIER-DEMO-ULTRA",
-      plan: "Max 30X",
-      price: 280,
+      plan: "30X",
+      price: 390,
       model: "opus",
       manualLimit: "150000",
       active: "true",
@@ -778,7 +778,7 @@ giftCardForm.addEventListener("submit", async (event) => {
   }
 
   event.currentTarget.reset();
-  event.currentTarget.elements.plan.value = "Básico";
+  event.currentTarget.elements.plan.value = "Pro";
   event.currentTarget.elements.price.value = "65.00";
   event.currentTarget.elements.active.value = "true";
   renderPreview();
