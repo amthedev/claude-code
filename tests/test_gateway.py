@@ -480,6 +480,56 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_admin_can_create_one_day_api_token_with_twenty_percent_profit(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={
+                    "name": "Fornecedor Teste",
+                    "price": 50,
+                    "durationHours": 24,
+                    "model": "sonnet",
+                },
+            )
+
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            self.assertTrue(account["apiToken"].startswith("sk-"))
+            self.assertTrue(account["apiOnly"])
+            self.assertTrue(account["active"])
+            self.assertFalse(account["publicTrialActive"])
+            self.assertEqual(account["giftCardCode"], "__api_only__")
+            self.assertEqual(account["price"], 50)
+            self.assertEqual(account["modelKey"], "sonnet")
+            self.assertEqual(account["dailyLimit"], 66_875_648)
+            self.assertAlmostEqual(account["maxCostUsd"], 40 / 5.5)
+
+            usage = client.get(
+                "/v1/usage",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+            )
+            self.assertEqual(usage.status_code, 200)
+            self.assertEqual(usage.json()["today"]["daily_cost_budget_usd"], round(40 / 5.5, 8))
+
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    "UPDATE accounts SET trial_expires_at = ? WHERE id = ?",
+                    ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(), account["id"]),
+                )
+                db.commit()
+
+            accounts = client.get("/v1/admin/accounts", headers=self.headers)
+            self.assertEqual(accounts.status_code, 200)
+            expired = next(item for item in accounts.json()["data"] if item["id"] == account["id"])
+            self.assertFalse(expired["active"])
+
     def test_admin_ip_check_reports_detected_proxy_ip(self) -> None:
         settings = make_settings()
         settings.admin_trusted_ips = ("177.200.246.8",)

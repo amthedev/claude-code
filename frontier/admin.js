@@ -1,6 +1,7 @@
 const adminLogin = document.querySelector("#adminLogin");
 const adminApp = document.querySelector("#adminApp");
 const giftCardForm = document.querySelector("#giftCardForm");
+const apiTokenForm = document.querySelector("#apiTokenForm");
 let supportState = { waiting: [], active: [], closed: [] };
 let activeSupportTicket = null;
 let supportPollTimer = null;
@@ -212,6 +213,15 @@ function renderPreview() {
   document.querySelector("#previewCost").textContent = `${ClaudeApp.usd.format(limit.maxCostUsd)}/mês`;
 }
 
+function renderApiPreview() {
+  const values = Object.fromEntries(new FormData(apiTokenForm).entries());
+  const limit = ClaudeApp.calculateApiOnlyLimit(values.price, values.durationHours);
+  document.querySelector("#apiPreviewProfit").textContent = ClaudeApp.brl.format(limit.protectedProfitBrl);
+  document.querySelector("#apiPreviewTokens").textContent =
+    `${ClaudeApp.integer.format(limit.dailyLimit)} tokens/dia`;
+  document.querySelector("#apiPreviewCost").textContent = ClaudeApp.usd.format(limit.maxCostUsd);
+}
+
 function renderMetrics(accounts) {
   const active = accounts.filter((account) => account.active);
   const revenue = active.reduce((sum, account) => sum + account.price, 0);
@@ -224,7 +234,11 @@ function renderMetrics(accounts) {
   document.querySelector("#metricRevenue").textContent = ClaudeApp.brl.format(revenue);
   document.querySelector("#metricCollected").textContent = ClaudeApp.brl.format(collected);
   document.querySelector("#metricProfit").textContent = ClaudeApp.brl.format(
-    revenue * ClaudeApp.MIN_PROFIT_MARGIN,
+    active.reduce(
+      (sum, account) =>
+        sum + Number(account.price || 0) * (account.apiOnly ? ClaudeApp.API_ONLY_PROFIT_MARGIN : ClaudeApp.MIN_PROFIT_MARGIN),
+      0,
+    ),
   );
   document.querySelector("#metricLimit").textContent = ClaudeApp.integer.format(limits);
   document.querySelector("#metricUsage").textContent = ClaudeApp.integer.format(usage);
@@ -508,18 +522,32 @@ function renderAccounts() {
   table.innerHTML = accounts
     .map((account) => {
       const remaining = Math.max(0, account.dailyLimit - account.usedToday);
+      const isApiOnly = Boolean(account.apiOnly);
+      const expiresAt = account.expiresAt || account.trialExpiresAt || "";
+      const expirationLabel = expiresAt
+        ? new Date(expiresAt).toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "";
       return `
         <tr>
           <td>
             <strong>${ClaudeApp.escapeHtml(account.name)}</strong>
-            <div class="muted">${ClaudeApp.escapeHtml(account.login)}</div>
-            <div class="muted">Gift card: ${ClaudeApp.escapeHtml(account.giftCardCode || "-")}</div>
+            <div class="muted">${isApiOnly ? "Sem login de cliente" : ClaudeApp.escapeHtml(account.login)}</div>
+            <div class="muted">${
+              isApiOnly
+                ? `API avulsa${expirationLabel ? ` ate ${ClaudeApp.escapeHtml(expirationLabel)}` : ""}`
+                : `Gift card: ${ClaudeApp.escapeHtml(account.giftCardCode || "-")}`
+            }</div>
             <div class="muted">API: ${ClaudeApp.escapeHtml(account.apiToken)}</div>
           </td>
           <td>
             ${ClaudeApp.escapeHtml(ClaudeApp.planDisplayName(account.plan))}
-            <div class="muted">Modelos liberados no app</div>
-            <div class="muted">${ClaudeApp.brl.format(account.price)}/mês</div>
+            <div class="muted">${isApiOnly ? "Modelo liberado na API" : "Modelos liberados no app"}</div>
+            <div class="muted">${ClaudeApp.brl.format(account.price)}${isApiOnly ? "/teste" : "/mês"}</div>
           </td>
           <td>
             ${ClaudeApp.integer.format(account.usedToday)} usados
@@ -533,6 +561,7 @@ function renderAccounts() {
           </td>
           <td>
             <div class="row-actions">
+              <button data-action="copy-token" data-id="${account.id}">Copiar API</button>
               <button data-action="toggle" data-id="${account.id}">
                 ${account.active ? "Pausar" : "Ativar"}
               </button>
@@ -748,6 +777,7 @@ document.querySelectorAll("[data-admin-tab]").forEach((button) => {
 });
 
 giftCardForm.addEventListener("input", renderPreview);
+apiTokenForm.addEventListener("input", renderApiPreview);
 
 giftCardForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -782,6 +812,33 @@ giftCardForm.addEventListener("submit", async (event) => {
   event.currentTarget.elements.price.value = "65.00";
   event.currentTarget.elements.active.value = "true";
   renderPreview();
+  renderAll();
+});
+
+apiTokenForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  document.querySelector("#apiTokenError").textContent = "";
+
+  const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const accounts = ClaudeApp.accounts();
+  try {
+    const data = await adminRequest("/v1/admin/api-tokens", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    accounts.unshift(data.account);
+    ClaudeApp.saveAccounts(accounts);
+  } catch (error) {
+    document.querySelector("#apiTokenError").textContent = error.fallback ? "API admin indisponível." : error.message;
+    return;
+  }
+
+  event.currentTarget.reset();
+  event.currentTarget.elements.name.value = "Fornecedor API";
+  event.currentTarget.elements.price.value = "50.00";
+  event.currentTarget.elements.durationHours.value = "24";
+  event.currentTarget.elements.model.value = "sonnet";
+  renderApiPreview();
   renderAll();
 });
 
@@ -845,6 +902,16 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
   const accounts = ClaudeApp.accounts();
   const index = accounts.findIndex((account) => account.id === button.dataset.id);
   if (index < 0) return;
+
+  if (button.dataset.action === "copy-token") {
+    try {
+      await navigator.clipboard.writeText(accounts[index].apiToken);
+      button.textContent = "Copiado";
+    } catch {
+      prompt("Copie a API:", accounts[index].apiToken);
+    }
+    return;
+  }
 
   if (button.dataset.action === "toggle") {
     const nextActive = !accounts[index].active;
@@ -971,6 +1038,7 @@ document.querySelector("#closeSupportTicket").addEventListener("click", async ()
 document.querySelector("#seedDemo").addEventListener("click", seedDemo);
 
 renderPreview();
+renderApiPreview();
 fillAdminLoginForm();
 fillAdminApiTargetForm();
 loadAdminSetupStatus();

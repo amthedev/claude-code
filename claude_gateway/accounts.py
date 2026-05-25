@@ -4,7 +4,7 @@ import math
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Settings
-from .customers import CustomerPlan, estimate_request_tokens, reasoning_token_multiplier
+from .customers import CustomerPlan, TOKEN_VALUE_MULTIPLIER, estimate_request_tokens, reasoning_token_multiplier
 from .security import hash_password, verify_password
 
 
@@ -83,6 +83,9 @@ MODEL_TOKEN_PRICES = {
 }
 
 PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
+API_ONLY_GIFT_MARKER = "__api_only__"
+API_ONLY_PROFIT_MARGIN = 0.20
+API_ONLY_DEFAULT_DURATION_HOURS = 24
 
 @dataclass(frozen=True, slots=True)
 class AccountUsageReservation:
@@ -158,6 +161,26 @@ class AccountStore:
             )
             db.commit()
         return _public_gift_card(card)
+
+    def create_api_token(self, values: dict[str, Any]) -> dict[str, Any]:
+        account = _api_only_account_from_values(values, self.settings)
+        with self._lock, self._connect() as db:
+            while self._login_exists(db, account["login"]):
+                account["login"] = _api_only_login()
+            while db.execute("SELECT 1 FROM accounts WHERE api_token = ?", (account["apiToken"],)).fetchone():
+                account["apiToken"] = _generate_api_token()
+            db.execute(
+                """
+                INSERT INTO accounts (
+                    id, api_token, name, display_name, login, password_hash, plan, price,
+                    model_key, manual_limit, active, gift_card_code, used_today, usage_day,
+                    daily_limit, computed_daily_tokens, max_cost_usd, created_at, trial_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _account_values(account),
+            )
+            db.commit()
+        return _public_account(account)
 
     def update_gift_card(self, card_id: str, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
@@ -657,6 +680,10 @@ class AccountStore:
             return None
         daily_limit = int(account.get("dailyLimit") or 0)
         used_today = int(account.get("usedToday") or 0)
+        is_api_only = account.get("giftCardCode") == API_ONLY_GIFT_MARKER
+        daily_cost_budget_usd = float(account.get("maxCostUsd") or 0)
+        if not is_api_only:
+            daily_cost_budget_usd = daily_cost_budget_usd / 30
         return {
             "customer": {
                 "name": account["name"],
@@ -669,7 +696,7 @@ class AccountStore:
                 "date": account.get("usageDay") or _today(),
                 "requests": None,
                 "reserved_cost_usd": None,
-                "daily_cost_budget_usd": round(float(account.get("maxCostUsd") or 0) / 30, 8),
+                "daily_cost_budget_usd": round(daily_cost_budget_usd, 8),
                 "reserved_tokens": used_today,
                 "remaining_cost_usd": None,
                 "remaining_tokens": max(0, daily_limit - used_today),
@@ -821,6 +848,17 @@ class AccountStore:
 
     def _reset_stale_usage(self, db: sqlite3.Connection) -> None:
         self._sync_public_trials(db)
+        now = _now()
+        db.execute(
+            """
+            UPDATE accounts
+               SET active = 0
+             WHERE gift_card_code = ?
+               AND trial_expires_at <> ''
+               AND trial_expires_at <= ?
+            """,
+            (API_ONLY_GIFT_MARKER, now),
+        )
         today = _today()
         db.execute(
             """
@@ -974,6 +1012,51 @@ def _gift_card_from_values(values: dict[str, Any], code: str, settings: Settings
         "usedByLogin": "",
         "usedAt": "",
         "createdAt": _now(),
+    }
+
+
+def _api_only_account_from_values(values: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    price = max(0.0, float(values.get("price") or 50))
+    duration_hours = int(float(values.get("durationHours") or values.get("duration_hours") or API_ONLY_DEFAULT_DURATION_HOURS))
+    duration_hours = max(1, min(duration_hours, 24 * 30))
+    model_key = _normalize_model_key(values.get("model") or values.get("modelKey") or "sonnet")
+    name = str(values.get("name") or "Fornecedor API").strip() or "Fornecedor API"
+    limit = _calculate_api_only_limit(price, duration_hours, settings)
+    expires_at = (_now_datetime() + timedelta(hours=duration_hours)).isoformat()
+    return {
+        "id": f"acct_{secrets.token_hex(12)}",
+        "apiToken": _generate_api_token(),
+        "name": name,
+        "displayName": name,
+        "login": _api_only_login(),
+        "passwordHash": hash_password(secrets.token_urlsafe(24)),
+        "plan": f"API avulsa {duration_hours}h",
+        "price": price,
+        "modelKey": model_key,
+        "manualLimit": limit["dailyLimit"],
+        "active": True,
+        "giftCardCode": API_ONLY_GIFT_MARKER,
+        "usedToday": 0,
+        "usageDay": _today(),
+        "dailyLimit": limit["dailyLimit"],
+        "computedDailyTokens": limit["computedDailyTokens"],
+        "maxCostUsd": limit["maxCostUsd"],
+        "createdAt": _now(),
+        "trialExpiresAt": expires_at,
+    }
+
+
+def _calculate_api_only_limit(price_brl: float, duration_hours: int, settings: Settings) -> dict[str, float | int]:
+    revenue = max(0.0, price_brl)
+    cost_budget_brl = revenue * (1 - API_ONLY_PROFIT_MARGIN)
+    max_cost_usd = cost_budget_brl / max(0.01, settings.usd_to_brl)
+    daily_cost_usd = max_cost_usd / max(1, math.ceil(duration_hours / 24))
+    raw_tokens = math.floor(daily_cost_usd / PLAN_LIMIT_TOKEN_PRICE)
+    displayed_tokens = max(0, raw_tokens * TOKEN_VALUE_MULTIPLIER)
+    return {
+        "dailyLimit": displayed_tokens,
+        "computedDailyTokens": displayed_tokens,
+        "maxCostUsd": max_cost_usd,
     }
 
 
@@ -1242,8 +1325,11 @@ def _public_gift_card(card: dict[str, Any]) -> dict[str, Any]:
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     public = dict(account)
     public.pop("passwordHash", None)
+    api_only = public.get("giftCardCode") == API_ONLY_GIFT_MARKER
     expires_at = _parse_datetime(str(public.get("trialExpiresAt") or ""))
-    public["publicTrialActive"] = bool(expires_at and expires_at > _now_datetime())
+    public["apiOnly"] = api_only
+    public["expiresAt"] = public.get("trialExpiresAt") if api_only else ""
+    public["publicTrialActive"] = bool(not api_only and expires_at and expires_at > _now_datetime())
     return public
 
 
@@ -1452,6 +1538,10 @@ def _generate_gift_code() -> str:
 
 def _generate_api_token() -> str:
     return f"sk-{secrets.token_urlsafe(36)}"
+
+
+def _api_only_login() -> str:
+    return f"api-{secrets.token_hex(8)}@api.local"
 
 
 def _now() -> str:

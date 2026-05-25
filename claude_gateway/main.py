@@ -597,6 +597,17 @@ def create_app(
         _require_admin(request, app.state.settings)
         return {"data": app.state.account_store.list_accounts()}
 
+    @app.post("/v1/admin/api-tokens")
+    async def create_api_token(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"account": app.state.account_store.create_api_token(payload)})
+
     @app.get("/v1/admin/purchases")
     async def list_purchases(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)

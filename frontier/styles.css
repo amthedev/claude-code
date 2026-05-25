@@ -320,6 +320,10 @@ p {
   gap: 10px;
 }
 
+.api-limit-box {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .limit-box > div,
 .explain-grid > div {
   border-radius: 8px;

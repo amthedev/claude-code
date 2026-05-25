@@ -11,7 +11,9 @@ const ClaudeApp = (() => {
 
   const USD_TO_BRL = 5.5;
   const MIN_PROFIT_MARGIN = 0.5;
+  const API_ONLY_PROFIT_MARGIN = 0.2;
   const PLAN_LIMIT_USD_PER_TOKEN = 0.00000087;
+  const TOKEN_VALUE_MULTIPLIER = 8;
 
   const models = {
     haiku: {
@@ -222,8 +224,38 @@ const ClaudeApp = (() => {
     };
   }
 
+  function calculateApiOnlyLimit(priceBrl, durationHours = 24) {
+    const revenue = Math.max(0, Number(priceBrl) || 0);
+    const hours = Math.max(1, Number(durationHours) || 24);
+    const maxCostBrl = revenue * (1 - API_ONLY_PROFIT_MARGIN);
+    const maxCostUsd = maxCostBrl / USD_TO_BRL;
+    const days = Math.max(1, Math.ceil(hours / 24));
+    const rawTokens = Math.floor((maxCostUsd / days) / PLAN_LIMIT_USD_PER_TOKEN);
+    const dailyLimit = Math.max(0, rawTokens * TOKEN_VALUE_MULTIPLIER);
+
+    return {
+      dailyLimit,
+      computedDailyTokens: dailyLimit,
+      maxCostUsd,
+      protectedProfitBrl: revenue * API_ONLY_PROFIT_MARGIN,
+    };
+  }
+
   function recalculateAccount(account) {
     const price = Number(account.price) || 0;
+    const isApiOnly = Boolean(account.apiOnly || account.giftCardCode === "__api_only__");
+    if (isApiOnly) {
+      const dailyLimit = Number(account.dailyLimit) || 0;
+      return {
+        ...account,
+        apiOnly: true,
+        expiresAt: account.expiresAt || account.trialExpiresAt || "",
+        modelKey: normalizeModelKey(account.modelKey),
+        dailyLimit,
+        computedDailyTokens: Number(account.computedDailyTokens) || dailyLimit,
+        maxCostUsd: Number(account.maxCostUsd) || 0,
+      };
+    }
     const trialExpiresAt = String(account.trialExpiresAt || "");
     const trialActive = Boolean(trialExpiresAt && new Date(trialExpiresAt).getTime() > Date.now());
     const isSignupFreeAccount = price <= 0 && !account.giftCardCode && !trialActive;
@@ -383,6 +415,7 @@ const ClaudeApp = (() => {
     purchases,
     savePurchases,
     calculateLimit,
+    calculateApiOnlyLimit,
     makeAccount,
     makeGiftCard,
     estimateTokens,
@@ -401,5 +434,6 @@ const ClaudeApp = (() => {
     usd,
     integer,
     MIN_PROFIT_MARGIN,
+    API_ONLY_PROFIT_MARGIN,
   };
 })();
