@@ -3055,13 +3055,21 @@ button.result-item {
 }
 
 .plan-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
   gap: 12px;
   margin-bottom: 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .plan-card {
+  flex: 0 0 clamp(300px, calc((100% - 24px) / 3), 450px);
   min-height: 230px;
   border: 1px solid var(--cloud-line);
   border-radius: 12px;
@@ -3071,6 +3079,7 @@ button.result-item {
   align-content: space-between;
   gap: 14px;
   box-shadow: 0 16px 42px rgba(50, 45, 38, 0.05);
+  scroll-snap-align: start;
 }
 
 .plan-card.current {
@@ -3190,11 +3199,14 @@ button.result-item {
   .limit-box,
   .explain-grid,
   .support-admin-grid,
-  .plan-grid,
   .payment-summary,
   .payment-methods,
   .purchase-row {
     grid-template-columns: 1fr;
+  }
+
+  .plan-card {
+    flex-basis: min(86vw, 360px);
   }
 
   .admin-sidebar {
