@@ -83,6 +83,7 @@ MODEL_TOKEN_PRICES = {
 }
 
 PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
+ACCOUNT_TOKEN_VALUE_MULTIPLIER = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -590,7 +591,7 @@ class AccountStore:
         token: str,
         payload: dict[str, Any],
     ) -> AccountUsageReservation | None:
-        estimated_tokens = estimate_request_tokens(payload, self.settings)
+        estimated_tokens = estimate_request_tokens(payload, self.settings) * ACCOUNT_TOKEN_VALUE_MULTIPLIER
         today = _today()
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)

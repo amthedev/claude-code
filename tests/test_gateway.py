@@ -655,7 +655,7 @@ class GatewayTestCase(unittest.TestCase):
                 headers={"Authorization": f"Bearer {account['apiToken']}"},
             )
             self.assertEqual(usage.status_code, 200)
-            self.assertGreater(usage.json()["account"]["usedToday"], 0)
+            self.assertGreater(usage.json()["account"]["usedToday"], 200)
             self.assertEqual(usage.json()["account"]["usageDay"], _today())
 
             with app.state.account_store._connect() as db:
