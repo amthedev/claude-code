@@ -243,11 +243,19 @@ class RoutePlanner:
 
     def plan(self, payload: dict[str, Any], *, force_orchestration: bool = False) -> RouteDecision:
         requested_model = str(payload.get("model") or self.settings.auto_public_model)
+        requested_auto = requested_model == self.settings.auto_public_model or not requested_model.strip()
+        reasoning_mode = str(payload.get("__gateway_reasoning_mode") or "normal")
         task_text = extract_prompt_text(payload)
         task_type = self._task_type(task_text)
         complexity = self._complexity(task_text)
 
         mode = self._mode_for_requested_model(requested_model, task_type, complexity)
+        if requested_auto and reasoning_mode == "fast":
+            mode = "economy"
+        elif requested_auto and reasoning_mode == "strong":
+            mode = "pro"
+        elif requested_auto and reasoning_mode == "xstrong":
+            mode = "ultra"
         public_model = self._public_model_for_mode(mode)
         selected_model = self._openrouter_model_for_mode(mode, task_type, complexity)
         external_model_requested = "/" in requested_model and requested_model not in self._public_ids()
@@ -268,6 +276,11 @@ class RoutePlanner:
         has_tool_contract = payload_has_tool_contract(payload)
         is_streaming = bool(payload.get("stream"))
         deep_request = self._needs_deep_reasoning(task_type, complexity)
+        if reasoning_mode == "fast":
+            deep_request = False
+        elif reasoning_mode in {"strong", "xstrong"}:
+            deep_request = True
+        force_orchestration = force_orchestration or reasoning_mode == "xstrong"
         can_orchestrate = (
             self.settings.enable_agent_orchestration
             and not has_tool_contract

@@ -20,6 +20,7 @@ let webSearchMode =
   localStorage.getItem("claude_web_search_mode") ||
   localStorage.getItem("frontier_web_search_mode") ||
   "auto";
+let reasoningMode = localStorage.getItem("claude_reasoning_mode") || "auto";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -37,6 +38,15 @@ const messageTypewriterTimers = new WeakMap();
 const CLIENT_API_TOKEN_SESSION_KEY = "claude_frontier_client_api_tokens";
 const PENDING_PAYMENT_SESSION_KEY = "claude_frontier_pending_payment_plan";
 const GITHUB_CONNECTION_KEY = "claude_frontier_github_connection";
+
+const reasoningModes = {
+  auto: { label: "Auto", title: "Equilibra velocidade e força conforme a tarefa", multiplier: 8 },
+  fast: { label: "Rápido", title: "Responde mais rápido e gasta menos toques", multiplier: 4 },
+  normal: { label: "Normal", title: "Uso padrão do plano", multiplier: 8 },
+  medium: { label: "Médio", title: "Mais análise, gasta mais toques", multiplier: 12 },
+  strong: { label: "Forte", title: "Raciocínio forte para tarefas difíceis", multiplier: 16 },
+  xstrong: { label: "Extra forte", title: "Máxima análise, maior consumo de toques", multiplier: 24 },
+};
 
 function newChatSessionKey() {
   return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -508,6 +518,7 @@ function fillModelSelects() {
   if (apiModel) apiModel.innerHTML = ClaudeApp.modelOptionsForAccount(current, selected);
   updateModelButtons();
   renderWebSearchControls();
+  renderReasoningControls();
 }
 
 function modelLabel(value) {
@@ -534,6 +545,27 @@ function renderWebSearchControls() {
     if (button.dataset.webSearchMode === "auto") button.title = "Pesquisar só quando a resposta precisar de dados atuais";
     if (button.dataset.webSearchMode === "required") button.title = "Forçar pesquisa web nesta conversa";
     if (button.dataset.webSearchMode === "off") button.title = "Responder sem pesquisa web";
+  });
+}
+
+function normalizeReasoningMode(value) {
+  return reasoningModes[value] ? value : "auto";
+}
+
+function reasoningTokenMultiplier(value) {
+  return reasoningModes[normalizeReasoningMode(value)].multiplier;
+}
+
+function renderReasoningControls() {
+  reasoningMode = normalizeReasoningMode(reasoningMode);
+  document.querySelectorAll("[data-reasoning-label]").forEach((label) => {
+    label.textContent = reasoningModes[reasoningMode].label;
+  });
+  document.querySelectorAll("[data-reasoning-mode]").forEach((button) => {
+    const active = button.dataset.reasoningMode === reasoningMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.title = reasoningModes[button.dataset.reasoningMode]?.title || "";
   });
 }
 
@@ -2318,15 +2350,17 @@ function mergeStreamText(current, incoming) {
   return repairDuplicatedText(current + text);
 }
 
-function outputTokenLimitForAccount(current, estimatedInput) {
+function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMode) {
   const remaining = Math.max(0, Number(current?.dailyLimit || 0) - Number(current?.usedToday || 0));
-  const availableOutput = remaining - estimatedInput;
+  const availableRawTokens = Math.floor(remaining / reasoningTokenMultiplier(mode));
+  const availableOutput = availableRawTokens - estimatedInput;
   if (availableOutput <= 0) return 0;
   return Math.max(1, Math.min(1200, availableOutput));
 }
 
-async function callGateway(selectedModel, messages, onText, maxTokens = 1200) {
+async function callGateway(selectedModel, messages, onText, maxTokens = 1200, selectedReasoningMode = reasoningMode) {
   const settings = ClaudeApp.apiSettings();
+  const searchMode = selectedReasoningMode === "fast" && webSearchMode === "auto" ? "off" : webSearchMode;
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
     headers: {
@@ -2337,7 +2371,8 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200) {
       model: selectedModel,
       max_tokens: Math.max(1, Math.min(1200, Math.floor(Number(maxTokens) || 1))),
       stream: true,
-      gateway_web_search: webSearchMode,
+      gateway_web_search: searchMode,
+      gateway_reasoning_mode: selectedReasoningMode,
       messages,
     }),
   });
@@ -2419,9 +2454,11 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   }
   current = (await refreshCustomerAccount({ silent: true })) || current;
 
+  const selectedReasoningMode = normalizeReasoningMode(reasoningMode);
+  const tokenMultiplier = reasoningTokenMultiplier(selectedReasoningMode);
   const estimatedInput = ClaudeApp.estimateTokens(prompt);
-  const reservedOutput = outputTokenLimitForAccount(current, estimatedInput);
-  const reservedTotal = estimatedInput + reservedOutput;
+  const reservedOutput = outputTokenLimitForAccount(current, estimatedInput, selectedReasoningMode);
+  const reservedTotal = (estimatedInput + reservedOutput) * tokenMultiplier;
   const remaining = current.dailyLimit - current.usedToday;
 
   if (reservedOutput <= 0 || reservedTotal > remaining) {
@@ -2444,7 +2481,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
     stopChatProgress();
     animateMessageTo(assistantMessage, partialAnswer);
-  }, reservedOutput);
+  }, reservedOutput, selectedReasoningMode);
   stopChatProgress();
   if (activeChatMode === "code" && promptRequestsTerminal(prompt)) {
     const command = defaultWorkspaceTestCommand();
@@ -3749,6 +3786,23 @@ document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
     localStorage.removeItem("frontier_web_search_mode");
     renderWebSearchControls();
   });
+});
+
+document.querySelectorAll("[data-reasoning-trigger]").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    toggleFloatingMenu("#reasoningMenu", button, "right");
+  });
+});
+
+document.querySelector("#reasoningMenu").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-reasoning-mode]");
+  if (!item) return;
+  reasoningMode = normalizeReasoningMode(item.dataset.reasoningMode);
+  localStorage.setItem("claude_reasoning_mode", reasoningMode);
+  closeFloatingMenus();
+  renderReasoningControls();
 });
 
 document.querySelectorAll("[data-model-trigger]").forEach((button) => {

@@ -162,6 +162,10 @@
                   </button>
                 </div>
                 <div class="composer-right">
+                  <button class="model-trigger reasoning-trigger" type="button" data-reasoning-trigger aria-label="Raciocínio">
+                    <span data-reasoning-label>Auto</span>
+                    <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+                  </button>
                   <select id="heroModel" class="hidden-model-select" aria-label="Modelo"></select>
                   <button class="model-trigger" type="button" data-model-trigger="heroModel" aria-label="Modelo">
                     <span data-model-label="heroModel">Claude Sonnet 4.6</span>
@@ -239,6 +243,10 @@
                 </button>
               </div>
               <div class="composer-right">
+                <button class="model-trigger reasoning-trigger" type="button" data-reasoning-trigger aria-label="Raciocínio">
+                  <span data-reasoning-label>Auto</span>
+                  <svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5" /></svg>
+                </button>
                 <select id="bottomModel" class="hidden-model-select" aria-label="Modelo"></select>
                 <button class="model-trigger" type="button" data-model-trigger="bottomModel" aria-label="Modelo">
                   <span data-model-label="bottomModel">Claude Sonnet 4.6</span>
@@ -514,6 +522,33 @@
       </button>
     </div>
 
+    <div id="reasoningMenu" class="floating-menu model-menu hidden" role="menu" aria-label="Raciocínio">
+      <button type="button" data-reasoning-mode="auto">
+        <strong>Automático</strong>
+        <span>Equilibra velocidade e força sozinho</span>
+      </button>
+      <button type="button" data-reasoning-mode="fast">
+        <strong>Rápido</strong>
+        <span>Mais veloz, usa menos toques</span>
+      </button>
+      <button type="button" data-reasoning-mode="normal">
+        <strong>Normal</strong>
+        <span>Padrão do plano</span>
+      </button>
+      <button type="button" data-reasoning-mode="medium">
+        <strong>Médio</strong>
+        <span>Mais análise para perguntas difíceis</span>
+      </button>
+      <button type="button" data-reasoning-mode="strong">
+        <strong>Forte</strong>
+        <span>Raciocínio pesado, usa mais toques</span>
+      </button>
+      <button type="button" data-reasoning-mode="xstrong">
+        <strong>Extra forte</strong>
+        <span>Máxima análise, maior consumo</span>
+      </button>
+    </div>
+
     <section id="projectModal" class="auth-modal hidden" aria-modal="true" role="dialog" aria-label="Criar um projeto">
       <form id="projectForm" class="project-dialog dark-card" novalidate>
         <div class="modal-header">
@@ -656,6 +691,6 @@
 
     <input id="attachmentInput" class="hidden" type="file" accept=".txt,.md,.csv,.json,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml" multiple />
     <script src="/frontier/shared.js?v=plans-20260525d"></script>
-    <script src="/frontier/client.js?v=plans-20260525a"></script>
+    <script src="/frontier/client.js?v=reasoning-20260525a"></script>
   </body>
 </html>

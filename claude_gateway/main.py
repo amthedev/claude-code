@@ -29,7 +29,12 @@ from .benchmark import BENCHMARK_CASES, benchmark_failures, benchmark_payload
 from .code_workspaces import CodeWorkspaceStore, github_repo_parts
 from .config import Settings, get_settings
 from .conversations import ConversationStore
-from .customers import CustomerReservation, CustomerUsageStore, clamp_customer_payload
+from .customers import (
+    CustomerReservation,
+    CustomerUsageStore,
+    clamp_customer_payload,
+    normalize_reasoning_mode,
+)
 from .openai_client import OpenAIHelperClient
 from .openai_compat import (
     anthropic_to_chat_completion,
@@ -1610,12 +1615,21 @@ def _prepare_payload(
         )
 
     limited = dict(payload)
+    reasoning_value = limited.pop("gateway_reasoning_mode", None)
+    if reasoning_value is None:
+        reasoning_value = limited.pop("reasoning_mode", "normal")
+    else:
+        limited.pop("reasoning_mode", None)
+    limited["__gateway_reasoning_mode"] = normalize_reasoning_mode(reasoning_value)
     policy_value = limited.pop("gateway_web_search", None)
     if policy_value is None:
         policy_value = limited.pop("web_search", "auto")
     else:
         limited.pop("web_search", None)
-    limited["__gateway_web_search_policy"] = normalize_web_search_policy(policy_value)
+    search_policy = normalize_web_search_policy(policy_value)
+    if limited["__gateway_reasoning_mode"] == "fast" and search_policy == "auto":
+        search_policy = "off"
+    limited["__gateway_web_search_policy"] = search_policy
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
     if payload_has_tool_contract(limited):
         limited["max_tokens"] = max(
@@ -2178,7 +2192,16 @@ def _clean_generated_title(value: str) -> str:
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:
     outgoing = dict(payload)
-    if decision.complexity == "critical" or decision.mode == "ultra":
+    mode = normalize_reasoning_mode(outgoing.get("__gateway_reasoning_mode"))
+    if mode == "fast":
+        outgoing["__gateway_reasoning"] = "none"
+    elif mode == "medium":
+        outgoing["__gateway_reasoning"] = "low"
+    elif mode == "strong":
+        outgoing["__gateway_reasoning"] = "medium"
+    elif mode == "xstrong":
+        outgoing["__gateway_reasoning"] = "high"
+    elif decision.complexity == "critical" or decision.mode == "ultra":
         outgoing["__gateway_reasoning"] = "medium"
     elif decision.complexity == "high" or decision.task_type in {
         "architecture",
@@ -2452,7 +2475,7 @@ def _reserve_customer_budget(
 ) -> CustomerReservation | AccountUsageReservation | None:
     if not auth.customer:
         return None
-    account_reservation = app.state.account_store.reserve_usage_for_token(auth.token, payload)
+    account_reservation = app.state.account_store.reserve_usage_for_token(auth.token, payload, decision)
     if account_reservation:
         return account_reservation
     return app.state.customer_usage.reserve(auth.customer, payload, decision)

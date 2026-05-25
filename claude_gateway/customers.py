@@ -38,6 +38,62 @@ class CustomerReservation:
     estimated_tokens: int
 
 
+TOKEN_VALUE_MULTIPLIER = 8
+REASONING_TOKEN_MULTIPLIERS = {
+    "fast": 4,
+    "normal": TOKEN_VALUE_MULTIPLIER,
+    "medium": 12,
+    "strong": 16,
+    "xstrong": 24,
+}
+
+
+def normalize_reasoning_mode(value: Any) -> str:
+    mode = str(value or "normal").strip().lower().replace("-", "_")
+    aliases = {
+        "auto": "auto",
+        "automatic": "auto",
+        "automatico": "auto",
+        "automático": "auto",
+        "rapido": "fast",
+        "rápido": "fast",
+        "fast": "fast",
+        "fraco": "fast",
+        "normal": "normal",
+        "medio": "medium",
+        "médio": "medium",
+        "medium": "medium",
+        "forte": "strong",
+        "strong": "strong",
+        "extra": "xstrong",
+        "extra_forte": "xstrong",
+        "extra forte": "xstrong",
+        "xstrong": "xstrong",
+    }
+    return aliases.get(mode, "normal")
+
+
+def reasoning_token_multiplier(mode: str, decision: RouteDecision | None = None) -> int:
+    normalized = normalize_reasoning_mode(mode)
+    if normalized != "auto":
+        return REASONING_TOKEN_MULTIPLIERS[normalized]
+    if decision is None:
+        return TOKEN_VALUE_MULTIPLIER
+    if decision.complexity == "critical" or decision.mode == "ultra":
+        return REASONING_TOKEN_MULTIPLIERS["strong"]
+    if decision.complexity == "high" or decision.task_type in {
+        "architecture",
+        "debugging",
+        "frontend",
+        "review",
+        "testing",
+    }:
+        return REASONING_TOKEN_MULTIPLIERS["medium"]
+    if decision.complexity == "low" or decision.task_type == "explanation" or decision.mode == "economy":
+        return REASONING_TOKEN_MULTIPLIERS["fast"]
+    return TOKEN_VALUE_MULTIPLIER
+
+
 def parse_customer_accounts(settings: Settings) -> dict[str, CustomerPlan]:
     raw = settings.customer_accounts.strip()
     if not raw:
@@ -103,7 +159,10 @@ class CustomerUsageStore:
                 detail="Request path is outside the configured cost budget.",
             )
 
-        estimated_tokens = estimate_request_tokens(payload, self.settings)
+        estimated_tokens = estimate_request_tokens(payload, self.settings) * reasoning_token_multiplier(
+            str(payload.get("__gateway_reasoning_mode") or "normal"),
+            decision,
+        )
         estimated_cost_usd = estimate_request_cost_usd(
             payload,
             decision,

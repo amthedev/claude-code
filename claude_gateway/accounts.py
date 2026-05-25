@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Settings
-from .customers import CustomerPlan, estimate_request_tokens
+from .customers import CustomerPlan, estimate_request_tokens, reasoning_token_multiplier
 from .security import hash_password, verify_password
 
 
@@ -83,8 +83,6 @@ MODEL_TOKEN_PRICES = {
 }
 
 PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
-ACCOUNT_TOKEN_VALUE_MULTIPLIER = 8
-
 
 @dataclass(frozen=True, slots=True)
 class AccountUsageReservation:
@@ -590,8 +588,12 @@ class AccountStore:
         self,
         token: str,
         payload: dict[str, Any],
+        decision: Any | None = None,
     ) -> AccountUsageReservation | None:
-        estimated_tokens = estimate_request_tokens(payload, self.settings) * ACCOUNT_TOKEN_VALUE_MULTIPLIER
+        estimated_tokens = estimate_request_tokens(payload, self.settings) * reasoning_token_multiplier(
+            str(payload.get("__gateway_reasoning_mode") or "normal"),
+            decision,
+        )
         today = _today()
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)

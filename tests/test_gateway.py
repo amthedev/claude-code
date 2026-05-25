@@ -1202,6 +1202,25 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(off["web_search_policy"], "off")
         self.assertFalse(off["web_search_should_search"])
 
+    def test_fast_reasoning_disables_auto_web_search_and_uses_economy_for_auto_model(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-auto",
+                "max_tokens": 128,
+                "gateway_reasoning_mode": "fast",
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["public_model"], "claude-code-economy")
+        self.assertEqual(data["web_search_policy"], "off")
+        self.assertFalse(data["web_search_should_search"])
+        self.assertFalse(data["use_orchestration"])
+
     def test_web_search_context_is_injected_when_required(self) -> None:
         settings = make_settings()
         settings.openai_api_key = "test-openai-token"
@@ -1915,6 +1934,25 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"event: message_start", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+
+    def test_extra_strong_reasoning_requests_high_hidden_reasoning(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "stream": True,
+                "max_tokens": 128,
+                "gateway_reasoning_mode": "xstrong",
+                "messages": [{"role": "user", "content": "Explique a função"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"event: message_start", body)
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "high")
 
     def test_streaming_complex_request_uses_internal_pipeline(self) -> None:
         with self.client.stream(
