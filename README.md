@@ -278,7 +278,7 @@ When a customer token calls `/v1/messages`, the gateway forces the allowed model
 
 The Admin still generates gift cards for direct sales through `/v1/admin/gift-cards`.
 Customers can also create a free account without a gift card through `/v1/auth/signup`;
-free accounts use the economy model with a 200-token daily limit. After signup or
+free accounts use the economy model with a 1,600-token daily limit. After signup or
 redemption, the account receives its own `sk-...` API token and can use the
 chat/API with server-side limits.
 
@@ -294,7 +294,7 @@ Paid and gift-card accounts are never downgraded or overwritten.
 PUBLIC_TRIAL_ENABLED=true
 PUBLIC_TRIAL_END_AT=2026-05-23T18:00:00Z
 PUBLIC_TRIAL_PLAN_ID=ultra
-PUBLIC_TRIAL_DAILY_LIMIT=150000
+PUBLIC_TRIAL_DAILY_LIMIT=1200000
 PUBLIC_TRIAL_LABEL=Teste grátis 24h
 ```
 

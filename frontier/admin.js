@@ -638,7 +638,7 @@ function seedDemo() {
       plan: "30X",
       price: 390,
       model: "opus",
-      manualLimit: "150000",
+      manualLimit: "1200000",
       active: "true",
     }),
   );

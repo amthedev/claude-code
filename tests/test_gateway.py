@@ -636,7 +636,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(account["plan"], "Grátis")
             self.assertEqual(account["modelKey"], "haiku")
             self.assertEqual(account["price"], 0)
-            self.assertEqual(account["dailyLimit"], 200)
+            self.assertEqual(account["dailyLimit"], 1600)
 
             message = client.post(
                 "/v1/messages",
@@ -660,7 +660,7 @@ class GatewayTestCase(unittest.TestCase):
 
             with app.state.account_store._connect() as db:
                 db.execute(
-                    "UPDATE accounts SET used_today = 199, usage_day = ? WHERE id = ?",
+                    "UPDATE accounts SET used_today = 1599, usage_day = ? WHERE id = ?",
                     (_today(), account["id"]),
                 )
                 db.commit()
@@ -678,7 +678,7 @@ class GatewayTestCase(unittest.TestCase):
 
             with app.state.account_store._connect() as db:
                 db.execute(
-                    "UPDATE accounts SET used_today = 200, usage_day = '2000-01-01' WHERE id = ?",
+                    "UPDATE accounts SET used_today = 1600, usage_day = '2000-01-01' WHERE id = ?",
                     (account["id"],),
                 )
                 db.commit()
@@ -699,14 +699,14 @@ class GatewayTestCase(unittest.TestCase):
             settings.public_trial_enabled = True
             settings.public_trial_end_at = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
             settings.public_trial_plan_id = "ultra"
-            settings.public_trial_daily_limit = 150000
+            settings.public_trial_daily_limit = 1200000
             settings.public_trial_label = "Teste grátis 24h"
             app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
             client = TestClient(app)
 
             plans = client.get("/v1/plans").json()
             self.assertTrue(plans["public_trial"]["active"])
-            self.assertEqual(plans["public_trial"]["dailyLimit"], 150000)
+            self.assertEqual(plans["public_trial"]["dailyLimit"], 1200000)
 
             response = client.post(
                 "/v1/auth/signup",
@@ -722,7 +722,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(account["plan"], "Teste grátis 24h")
             self.assertEqual(account["modelKey"], "opus")
             self.assertEqual(account["price"], 0)
-            self.assertEqual(account["dailyLimit"], 150000)
+            self.assertEqual(account["dailyLimit"], 1200000)
             self.assertTrue(account["publicTrialActive"])
             self.assertTrue(account["trialExpiresAt"])
 
@@ -754,7 +754,7 @@ class GatewayTestCase(unittest.TestCase):
                     "password": "secret-free",
                 },
             ).json()["account"]
-            self.assertEqual(free["dailyLimit"], 200)
+            self.assertEqual(free["dailyLimit"], 1600)
 
             trial_settings = make_settings()
             trial_settings.account_data_file = f"{directory}/gateway.sqlite3"
@@ -771,7 +771,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(login.status_code, 200)
             promoted = login.json()["account"]
             self.assertEqual(promoted["modelKey"], "opus")
-            self.assertEqual(promoted["dailyLimit"], 150000)
+            self.assertEqual(promoted["dailyLimit"], 1200000)
             self.assertTrue(promoted["publicTrialActive"])
 
             expired_settings = make_settings()
@@ -790,7 +790,7 @@ class GatewayTestCase(unittest.TestCase):
             account = expired.json()["account"]
             self.assertEqual(account["plan"], "Grátis")
             self.assertEqual(account["modelKey"], "haiku")
-            self.assertEqual(account["dailyLimit"], 200)
+            self.assertEqual(account["dailyLimit"], 1600)
             self.assertFalse(account["publicTrialActive"])
             self.assertEqual(account["trialExpiresAt"], "")
 
@@ -838,7 +838,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(migrated["plan"], "Grátis")
             self.assertEqual(migrated["modelKey"], "haiku")
             self.assertEqual(migrated["price"], 0)
-            self.assertEqual(migrated["dailyLimit"], 200)
+            self.assertEqual(migrated["dailyLimit"], 1600)
 
     def test_purchase_approval_upgrades_account_and_tracks_revenue(self) -> None:
         with TemporaryDirectory() as directory:

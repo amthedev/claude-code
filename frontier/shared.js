@@ -38,7 +38,7 @@ const ClaudeApp = (() => {
       description: "Para testar com respostas básicas.",
       price: 0,
       modelKey: "haiku",
-      manualLimit: 200,
+      manualLimit: 1600,
       checkoutMode: "instant",
     },
     {
@@ -47,7 +47,7 @@ const ClaudeApp = (() => {
       description: "Para conversas, estudos e tarefas do dia a dia.",
       price: 65,
       modelKey: "haiku",
-      manualLimit: 16000,
+      manualLimit: 128000,
       checkoutMode: "mercado_pago",
     },
     {
@@ -56,7 +56,7 @@ const ClaudeApp = (() => {
       description: "Mais limite e força para trabalho diário.",
       price: 125,
       modelKey: "sonnet",
-      manualLimit: 50000,
+      manualLimit: 400000,
       checkoutMode: "mercado_pago",
     },
     {
@@ -65,7 +65,7 @@ const ClaudeApp = (() => {
       description: "Mais força e limite para uso pesado.",
       price: 280,
       modelKey: "opus",
-      manualLimit: 100000,
+      manualLimit: 800000,
       checkoutMode: "mercado_pago",
     },
     {
@@ -74,7 +74,7 @@ const ClaudeApp = (() => {
       description: "O maior limite para equipes e rotinas intensas.",
       price: 390,
       modelKey: "opus",
-      manualLimit: 150000,
+      manualLimit: 1200000,
       checkoutMode: "mercado_pago",
     },
   ];
@@ -233,7 +233,7 @@ const ClaudeApp = (() => {
           plan: "Grátis",
           price: 0,
           modelKey: "haiku",
-          manualLimit: 200,
+          manualLimit: 1600,
         }
       : account;
     const limit = calculateLimit(
