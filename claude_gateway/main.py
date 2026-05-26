@@ -2475,6 +2475,8 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
     mode = normalize_reasoning_mode(outgoing.get("__gateway_reasoning_mode"))
     if mode == "fast":
         outgoing["__gateway_reasoning"] = "none"
+    elif decision.mode == "economy" and mode in {"auto", "normal"}:
+        outgoing["__gateway_reasoning"] = "none"
     elif mode == "medium":
         outgoing["__gateway_reasoning"] = "low"
     elif mode == "strong":

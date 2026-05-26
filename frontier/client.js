@@ -556,6 +556,12 @@ function reasoningTokenMultiplier(value) {
   return reasoningModes[normalizeReasoningMode(value)].multiplier;
 }
 
+function isFastResponsePath(mode = reasoningMode, selectedModel = "") {
+  const normalizedMode = normalizeReasoningMode(mode);
+  const model = String(selectedModel || "").toLocaleLowerCase("pt-BR");
+  return normalizedMode === "fast" || model.includes("economy") || model.includes("haiku");
+}
+
 function renderReasoningControls() {
   reasoningMode = normalizeReasoningMode(reasoningMode);
   document.querySelectorAll("[data-reasoning-label]").forEach((label) => {
@@ -1955,9 +1961,14 @@ function promptNeedsFreshInfo(prompt) {
   return /\b(hoje|agora|atual|atuais|latest|mais recente|recentes|noticia|notícias|preço|preco|cotação|cotacao|agenda|calendário|calendario|versão atual|versao atual|2026|amanhã|ontem)\b/i.test(text);
 }
 
-function startChatProgressMessage(message, prompt) {
+function startChatProgressMessage(message, prompt, mode = reasoningMode, selectedModel = "") {
   if (activeChatMode === "code") return startCodeProgressMessage(message);
-  const stages = promptNeedsFreshInfo(prompt)
+  const stages = isFastResponsePath(mode, selectedModel)
+    ? [
+        "Respondendo no modo rápido...",
+        "Preparando resposta direta...",
+      ]
+    : promptNeedsFreshInfo(prompt)
     ? [
         "Verificando se a pergunta depende de dados atuais...",
         "Buscando sinais de informação que pode ter mudado...",
@@ -2479,8 +2490,11 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
     promptWithActiveProjectContext(prompt),
     attachments,
   );
-  const assistantMessage = addMessage("assistant", "Pensando...");
-  const stopChatProgress = startChatProgressMessage(assistantMessage, prompt);
+  const assistantMessage = addMessage(
+    "assistant",
+    isFastResponsePath(selectedReasoningMode, selectedModel) ? "Respondendo..." : "Pensando...",
+  );
+  const stopChatProgress = startChatProgressMessage(assistantMessage, prompt, selectedReasoningMode, selectedModel);
 
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {

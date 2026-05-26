@@ -2074,6 +2074,44 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
 
+    def test_economy_model_skips_hidden_reasoning_for_complex_default_request(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "corrija esse bug no projeto"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"event: message_start", body)
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+
+    def test_economy_model_can_raise_reasoning_when_user_selects_higher_level(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "stream": True,
+                "max_tokens": 128,
+                "gateway_reasoning_mode": "medium",
+                "messages": [{"role": "user", "content": "corrija esse bug no projeto"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"event: message_start", body)
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "low")
+
     def test_extra_strong_reasoning_requests_high_hidden_reasoning(self) -> None:
         with self.client.stream(
             "POST",
