@@ -2502,7 +2502,7 @@ def _selected_model_identity_answer(
     public_model: str,
     settings: Settings,
 ) -> str | None:
-    prompt = _normalize_text(extract_prompt_text(payload))
+    prompt = _normalize_text(_last_user_message_text(payload))
     identity_phrases = (
         "qual modelo e voce",
         "que modelo e voce",
@@ -2520,6 +2520,28 @@ def _selected_model_identity_answer(
 
     label = _public_model_label(public_model, settings)
     return f"Eu sou o {label}, o modo selecionado neste chat."
+
+
+def _last_user_message_text(payload: dict[str, Any]) -> str:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").lower() != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get("text"), str):
+                    parts.append(block["text"])
+            return " ".join(parts)
+        return str(content or "")
+    return ""
 
 
 def _normalize_text(value: str) -> str:

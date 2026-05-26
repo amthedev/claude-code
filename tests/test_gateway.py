@@ -2261,6 +2261,29 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Claude Opus 4.7", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
+    def test_previous_model_identity_question_does_not_override_next_request(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 128,
+                "messages": [
+                    {"role": "user", "content": "qual modelo e voce?"},
+                    {
+                        "role": "assistant",
+                        "content": "Eu sou o Claude Opus 4.7, o modo selecionado neste chat.",
+                    },
+                    {"role": "user", "content": "apague o squarecloud.app do meu projeto"},
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertNotIn("modo selecionado neste chat", response.json()["content"][0]["text"])
+        self.assertGreaterEqual(len(self.app.state.openrouter.calls), 1)
+
     def test_streaming_model_identity_question_returns_selected_public_model(self) -> None:
         with self.client.stream(
             "POST",
