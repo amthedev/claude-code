@@ -229,6 +229,7 @@ class GatewayTestCase(unittest.TestCase):
                 "BACKEND_PARTNER_AGENT": "moonshotai/kimi-k2.6",
                 "PROJECT_REASONING_AGENT": "qwen/qwen3-235b-a22b-thinking-2507",
                 "DEEP_REASONING_AGENT": "deepseek/deepseek-r1",
+                "API_RATE_LIMIT": "120",
             },
         ):
             settings = Settings.from_env()
@@ -239,6 +240,31 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(settings.backend_partner_agent, "deepseek/deepseek-v4-pro")
         self.assertEqual(settings.project_reasoning_agent, "deepseek/deepseek-v4-pro")
         self.assertEqual(settings.deep_reasoning_agent, "deepseek/deepseek-v4-pro")
+        self.assertEqual(settings.api_rate_limit, 600)
+
+    def test_large_old_context_is_trimmed_instead_of_rejected(self) -> None:
+        settings = make_settings()
+        settings.max_request_input_chars = 1000
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 16,
+                "messages": [
+                    {"role": "user", "content": "contexto antigo " + ("x" * 5000)},
+                    {"role": "assistant", "content": "resposta antiga"},
+                    {"role": "user", "content": "responda agora"},
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = app.state.openrouter.calls[-1][1]
+        self.assertEqual(sent_payload["messages"], [{"role": "user", "content": "responda agora"}])
 
     def test_models_requires_auth(self) -> None:
         response = self.client.get("/v1/models")

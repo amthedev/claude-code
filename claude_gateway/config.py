@@ -78,7 +78,7 @@ class Settings:
     admin_password_hash: str = ""
     rate_limit_window_seconds: int = 60
     auth_rate_limit: int = 10
-    api_rate_limit: int = 120
+    api_rate_limit: int = 600
     trusted_hosts: tuple[str, ...] = ("*",)
     admin_trusted_ips: tuple[str, ...] = ()
     trust_proxy_headers: bool = False
@@ -165,7 +165,7 @@ class Settings:
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
             rate_limit_window_seconds=int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60")),
             auth_rate_limit=int(os.getenv("AUTH_RATE_LIMIT", "10")),
-            api_rate_limit=int(os.getenv("API_RATE_LIMIT", "120")),
+            api_rate_limit=max(int(os.getenv("API_RATE_LIMIT", "600")), 600),
             trusted_hosts=_csv_env("TRUSTED_HOSTS", "*"),
             admin_trusted_ips=_csv_env("ADMIN_TRUSTED_IPS", ""),
             trust_proxy_headers=_bool_env("TRUST_PROXY_HEADERS", False),

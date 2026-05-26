@@ -1671,11 +1671,12 @@ def _prepare_payload(
         limited["model"] = controls["model"]
         limited["__gateway_model_locked"] = True
 
+    limited = _limit_payload_context(limited, settings)
     prompt_text = extract_prompt_text(limited)
     if len(prompt_text) > settings.max_request_input_chars:
         raise HTTPException(
             status_code=413,
-            detail="Request input is larger than MAX_REQUEST_INPUT_CHARS.",
+            detail="Latest request is larger than MAX_REQUEST_INPUT_CHARS.",
         )
 
     reasoning_value = limited.pop("gateway_reasoning_mode", None)
@@ -1708,6 +1709,68 @@ def _prepare_payload(
     if auth.customer:
         limited = clamp_customer_payload(limited, settings, auth.customer)
     return limited
+
+
+def _limit_payload_context(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    limit = settings.max_request_input_chars
+    if limit <= 0 or len(extract_prompt_text(payload)) <= limit:
+        return payload
+
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return payload
+
+    limited = dict(payload)
+    kept: list[Any] = []
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        candidate = [message, *kept]
+        candidate_payload = {**limited, "messages": candidate}
+        if len(extract_prompt_text(candidate_payload)) <= limit:
+            kept = candidate
+            continue
+        if not kept:
+            truncated = _truncate_message_to_context(message, limit)
+            if truncated is not None:
+                kept = [truncated]
+        break
+
+    if kept:
+        while kept and (
+            not isinstance(kept[0], dict)
+            or str(kept[0].get("role") or "").lower() != "user"
+        ):
+            kept.pop(0)
+        limited["messages"] = kept
+        limited["__gateway_context_trimmed"] = True
+    return limited
+
+
+def _truncate_message_to_context(message: dict[str, Any], limit: int) -> dict[str, Any] | None:
+    content = message.get("content")
+    budget = max(1000, limit - 2000)
+    if isinstance(content, str):
+        return {**message, "content": content[-budget:]}
+    if not isinstance(content, list):
+        return None
+
+    trimmed_blocks: list[Any] = []
+    remaining = budget
+    for block in reversed(content):
+        if not isinstance(block, dict) or not isinstance(block.get("text"), str):
+            trimmed_blocks.insert(0, block)
+            continue
+        text = block["text"]
+        if remaining <= 0:
+            continue
+        trimmed_text = text[-remaining:]
+        remaining -= len(trimmed_text)
+        trimmed_blocks.insert(0, {**block, "text": trimmed_text})
+
+    if not trimmed_blocks:
+        return None
+    return {**message, "content": trimmed_blocks}
 
 
 def _apply_prompt_control_commands(
