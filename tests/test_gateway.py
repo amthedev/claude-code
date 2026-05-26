@@ -1133,7 +1133,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["complexity"], "low")
         self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-flash")
 
-    def test_integral_project_analysis_uses_qwen_thinking(self) -> None:
+    def test_integral_project_analysis_avoids_expensive_thinking_defaults(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
@@ -1152,13 +1152,13 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "ultra")
         self.assertEqual(data["task_type"], "architecture")
-        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-235b-a22b-thinking-2507")
-        self.assertEqual(data["agents"]["reasoning"], "qwen/qwen3-235b-a22b-thinking-2507")
-        self.assertEqual(data["agents"]["coding"], "moonshotai/kimi-k2.6")
+        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(data["agents"]["coding"], "qwen/qwen3-coder-next")
         self.assertEqual(data["agents"]["premium_review"], "deepseek/deepseek-v4-pro")
-        self.assertLessEqual(data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"], 0.4)
+        self.assertLessEqual(data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"], 0.2)
 
-    def test_critical_ultra_reasoning_uses_r1_only_when_needed(self) -> None:
+    def test_critical_ultra_reasoning_avoids_r1_by_default(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
@@ -1177,8 +1177,8 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "ultra")
         self.assertEqual(data["complexity"], "critical")
-        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-r1")
-        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-r1")
+        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-v4-pro")
 
     def test_tool_calls_are_proxied_without_orchestration(self) -> None:
         response = self.client.post(
@@ -1585,6 +1585,44 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
             self.assertEqual(response.json()["public_model"], "claude-code-ultra")
+
+    def test_customer_ultra_xstrong_avoids_expensive_models_by_default(self) -> None:
+        expensive_models = {
+            "deepseek/deepseek-r1",
+            "moonshotai/kimi-k2.6",
+            "qwen/qwen3-235b-a22b-thinking-2507",
+        }
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.customer_accounts = "wild-token|Maria|9999|100000|*|true"
+            settings.quota_data_file = f"{tmpdir}/usage.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": "Bearer wild-token"},
+                json={
+                    "model": "claude-code-ultra",
+                    "gateway_reasoning_mode": "xstrong",
+                    "max_tokens": 128,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Analise um bug critical de auth em production "
+                                "e corrija a arquitetura do projeto"
+                            ),
+                        }
+                    ],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            used_models = {data["selected_openrouter_model"], *data["agents"].values()}
+            self.assertTrue(expensive_models.isdisjoint(used_models), used_models)
+            self.assertFalse(data["use_orchestration"])
 
     def test_customer_wildcard_model_downgrades_when_daily_tokens_are_low(self) -> None:
         with TemporaryDirectory() as tmpdir:

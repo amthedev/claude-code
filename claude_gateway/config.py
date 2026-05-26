@@ -49,7 +49,7 @@ class Settings:
     openai_helper_model: str = "gpt-5.4-mini"
     openai_helper_max_output_tokens: int = 900
     openai_helper_reasoning_effort: str = "low"
-    openai_helper_for_customers: bool = True
+    openai_helper_for_customers: bool = False
     enable_openai_design_director: bool = True
     enable_openai_decision_director: bool = True
     enable_web_search: bool = True
@@ -109,16 +109,16 @@ class Settings:
     reasoning_agent: str = "deepseek/deepseek-v4-pro"
     ui_agent: str = "qwen/qwen3-coder-next"
     fast_agent: str = "deepseek/deepseek-v4-flash"
-    premium_fallback: str = "moonshotai/kimi-k2.6"
-    ultra_fallback: str = "qwen/qwen3-235b-a22b-thinking-2507"
+    premium_fallback: str = "deepseek/deepseek-v4-pro"
+    ultra_fallback: str = "qwen/qwen3-coder-next"
     frontend_coder_agent: str = "qwen/qwen3-coder-next"
     frontend_fix_agent: str = "deepseek/deepseek-v4-flash"
     frontend_reasoning_agent: str = "tencent/hy3-preview"
-    backend_partner_agent: str = "moonshotai/kimi-k2.6"
-    project_reasoning_agent: str = "qwen/qwen3-235b-a22b-thinking-2507"
-    deep_reasoning_agent: str = "deepseek/deepseek-r1"
+    backend_partner_agent: str = "deepseek/deepseek-v4-pro"
+    project_reasoning_agent: str = "deepseek/deepseek-v4-pro"
+    deep_reasoning_agent: str = "deepseek/deepseek-v4-pro"
     gemini_code_helper_agent: str = "google/gemini-2.5-flash-lite"
-    enable_gemini_code_helper: bool = True
+    enable_gemini_code_helper: bool = False
 
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
@@ -136,7 +136,7 @@ class Settings:
             openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.4-mini"),
             openai_helper_max_output_tokens=int(os.getenv("OPENAI_HELPER_MAX_OUTPUT_TOKENS", "900")),
             openai_helper_reasoning_effort=os.getenv("OPENAI_HELPER_REASONING_EFFORT", "low"),
-            openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", True),
+            openai_helper_for_customers=_bool_env("OPENAI_HELPER_FOR_CUSTOMERS", False),
             enable_openai_design_director=_bool_env("ENABLE_OPENAI_DESIGN_DIRECTOR", True),
             enable_openai_decision_director=_bool_env("ENABLE_OPENAI_DECISION_DIRECTOR", True),
             enable_web_search=_bool_env("ENABLE_WEB_SEARCH", True),
@@ -193,22 +193,22 @@ class Settings:
             reasoning_agent=os.getenv("REASONING_AGENT", "deepseek/deepseek-v4-pro"),
             ui_agent=os.getenv("UI_AGENT", "qwen/qwen3-coder-next"),
             fast_agent=os.getenv("FAST_AGENT", "deepseek/deepseek-v4-flash"),
-            premium_fallback=os.getenv("PREMIUM_FALLBACK", "moonshotai/kimi-k2.6"),
-            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3-235b-a22b-thinking-2507"),
+            premium_fallback=os.getenv("PREMIUM_FALLBACK", "deepseek/deepseek-v4-pro"),
+            ultra_fallback=os.getenv("ULTRA_FALLBACK", "qwen/qwen3-coder-next"),
             frontend_coder_agent=os.getenv("FRONTEND_CODER_AGENT", "qwen/qwen3-coder-next"),
             frontend_fix_agent=os.getenv("FRONTEND_FIX_AGENT", "deepseek/deepseek-v4-flash"),
             frontend_reasoning_agent=os.getenv("FRONTEND_REASONING_AGENT", "tencent/hy3-preview"),
-            backend_partner_agent=os.getenv("BACKEND_PARTNER_AGENT", "moonshotai/kimi-k2.6"),
+            backend_partner_agent=os.getenv("BACKEND_PARTNER_AGENT", "deepseek/deepseek-v4-pro"),
             project_reasoning_agent=os.getenv(
                 "PROJECT_REASONING_AGENT",
-                "qwen/qwen3-235b-a22b-thinking-2507",
+                "deepseek/deepseek-v4-pro",
             ),
-            deep_reasoning_agent=os.getenv("DEEP_REASONING_AGENT", "deepseek/deepseek-r1"),
+            deep_reasoning_agent=os.getenv("DEEP_REASONING_AGENT", "deepseek/deepseek-v4-pro"),
             gemini_code_helper_agent=os.getenv(
                 "GEMINI_CODE_HELPER_AGENT",
                 "google/gemini-2.5-flash-lite",
             ),
-            enable_gemini_code_helper=_bool_env("ENABLE_GEMINI_CODE_HELPER", True),
+            enable_gemini_code_helper=_bool_env("ENABLE_GEMINI_CODE_HELPER", False),
             openrouter_site_url=os.getenv("OPENROUTER_SITE_URL", "http://localhost:8787"),
             openrouter_app_name=os.getenv(
                 "OPENROUTER_APP_NAME",

@@ -28,13 +28,13 @@ class CostEstimate:
 
 
 # OpenRouter price strings are dollars per token. These defaults were checked against
-# OpenRouter's public models API on 2026-05-22.
+# OpenRouter's public models API on 2026-05-26.
 DEFAULT_PRICES: dict[str, ModelPrice] = {
     "anthropic/claude-opus-4.7": ModelPrice(prompt=0.000005, completion=0.000025),
     "anthropic/claude-opus-4.7-fast": ModelPrice(prompt=0.00003, completion=0.00015),
     "anthropic/claude-sonnet-4.6": ModelPrice(prompt=0.000003, completion=0.000015),
     "deepseek/deepseek-v4-pro": ModelPrice(prompt=0.000000435, completion=0.00000087),
-    "deepseek/deepseek-v4-flash": ModelPrice(prompt=0.000000112, completion=0.000000224),
+    "deepseek/deepseek-v4-flash": ModelPrice(prompt=0.0000001, completion=0.0000002),
     "deepseek/deepseek-r1": ModelPrice(prompt=0.0000007, completion=0.0000025),
     "google/gemini-2.5-flash-lite": ModelPrice(prompt=0.0000001, completion=0.0000004),
     "moonshotai/kimi-k2.6": ModelPrice(prompt=0.00000073, completion=0.00000349),
