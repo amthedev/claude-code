@@ -1766,6 +1766,43 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.json()["requested_model"], "claude-code-pro")
             self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
+    def test_admin_can_recharge_account_with_tokens_or_brl(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24, "model": "opus"},
+            )
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            original_limit = account["dailyLimit"]
+
+            token_topup = client.patch(
+                f"/v1/admin/accounts/{account['id']}",
+                headers=self.headers,
+                json={"addTokens": 12345},
+            )
+            self.assertEqual(token_topup.status_code, 200)
+            token_account = token_topup.json()["account"]
+            self.assertEqual(token_account["dailyLimit"], original_limit + 12345)
+            self.assertEqual(token_account["manualLimit"], token_account["dailyLimit"])
+
+            brl_topup = client.patch(
+                f"/v1/admin/accounts/{account['id']}",
+                headers=self.headers,
+                json={"rechargeBrl": 50},
+            )
+            self.assertEqual(brl_topup.status_code, 200)
+            brl_account = brl_topup.json()["account"]
+            self.assertGreater(brl_account["dailyLimit"], token_account["dailyLimit"])
+            self.assertEqual(brl_account["price"], 100)
+            self.assertEqual(brl_account["manualLimit"], brl_account["dailyLimit"])
+
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
             "/v1/responses",

@@ -348,9 +348,41 @@ class AccountStore:
             if values.get("resetUsage"):
                 account["usedToday"] = 0
                 account["usageDay"] = _today()
+            added_tokens = int(float(values.get("addTokens") or values.get("add_tokens") or 0))
+            recharge_brl = max(0.0, float(values.get("rechargeBrl") or values.get("recharge_brl") or 0))
+            if recharge_brl > 0:
+                recharge = _calculate_api_only_limit(recharge_brl, API_ONLY_DEFAULT_DURATION_HOURS, self.settings)
+                added_tokens += int(recharge["dailyLimit"])
+                account["price"] = round(float(account.get("price") or 0) + recharge_brl, 2)
+                account["maxCostUsd"] = float(account.get("maxCostUsd") or 0) + float(recharge["maxCostUsd"])
+            if added_tokens > 0:
+                account["dailyLimit"] = int(account.get("dailyLimit") or 0) + added_tokens
+                account["computedDailyTokens"] = int(account.get("computedDailyTokens") or 0) + added_tokens
+                account["manualLimit"] = int(account.get("dailyLimit") or 0)
             db.execute(
-                "UPDATE accounts SET active = ?, used_today = ?, usage_day = ? WHERE id = ?",
-                (int(account["active"]), int(account["usedToday"]), account["usageDay"], account_id),
+                """
+                UPDATE accounts
+                   SET active = ?,
+                       used_today = ?,
+                       usage_day = ?,
+                       price = ?,
+                       manual_limit = ?,
+                       daily_limit = ?,
+                       computed_daily_tokens = ?,
+                       max_cost_usd = ?
+                 WHERE id = ?
+                """,
+                (
+                    int(account["active"]),
+                    int(account["usedToday"]),
+                    account["usageDay"],
+                    float(account["price"]),
+                    int(account["manualLimit"]),
+                    int(account["dailyLimit"]),
+                    int(account["computedDailyTokens"]),
+                    float(account["maxCostUsd"]),
+                    account_id,
+                ),
             )
             db.commit()
         return _public_account(account)

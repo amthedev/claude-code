@@ -222,6 +222,27 @@ function renderApiPreview() {
   document.querySelector("#apiPreviewCost").textContent = ClaudeApp.usd.format(limit.maxCostUsd);
 }
 
+function accountRechargePayload(account) {
+  const tokensText = prompt(
+    `Adicionar quantos tokens ao limite diário de ${account.name}?\nDeixe vazio para recarregar por valor em R$.`,
+    "",
+  );
+  if (tokensText === null) return null;
+  const normalizedTokens = tokensText.trim().replace(/\./g, "").replace(",", ".");
+  const addTokens = Math.floor(Number(normalizedTokens) || 0);
+  if (addTokens > 0) return { addTokens };
+
+  const brlText = prompt("Valor da recarga em R$ para converter em tokens:", "50");
+  if (brlText === null) return null;
+  const rechargeBrl = Number(brlText.trim().replace(/\./g, "").replace(",", ".")) || 0;
+  if (rechargeBrl <= 0) return null;
+  const preview = ClaudeApp.calculateApiOnlyLimit(rechargeBrl, 24);
+  if (!confirm(`Adicionar ${ClaudeApp.integer.format(preview.dailyLimit)} tokens/dia por ${ClaudeApp.brl.format(rechargeBrl)}?`)) {
+    return null;
+  }
+  return { rechargeBrl };
+}
+
 function renderMetrics(accounts) {
   const active = accounts.filter((account) => account.active);
   const revenue = active.reduce((sum, account) => sum + account.price, 0);
@@ -562,6 +583,7 @@ function renderAccounts() {
           <td>
             <div class="row-actions">
               <button data-action="copy-token" data-id="${account.id}">Copiar API</button>
+              <button data-action="recharge" data-id="${account.id}">Recarregar</button>
               <button data-action="toggle" data-id="${account.id}">
                 ${account.active ? "Pausar" : "Ativar"}
               </button>
@@ -943,6 +965,28 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
         return;
       }
       accounts[index].usedToday = 0;
+    }
+  }
+
+  if (button.dataset.action === "recharge") {
+    const payload = accountRechargePayload(accounts[index]);
+    if (!payload) return;
+    try {
+      const data = await adminRequest(`/v1/admin/accounts/${accounts[index].id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      accounts[index] = data.account;
+    } catch (error) {
+      if (!error.fallback) {
+        alert(error.message);
+        return;
+      }
+      const addTokens = payload.addTokens || ClaudeApp.calculateApiOnlyLimit(payload.rechargeBrl, 24).dailyLimit;
+      accounts[index].dailyLimit += addTokens;
+      accounts[index].computedDailyTokens += addTokens;
+      accounts[index].manualLimit = accounts[index].dailyLimit;
+      if (payload.rechargeBrl) accounts[index].price += payload.rechargeBrl;
     }
   }
 
