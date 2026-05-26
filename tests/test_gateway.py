@@ -1893,6 +1893,63 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(brl_account["price"], 100)
             self.assertEqual(brl_account["manualLimit"], brl_account["dailyLimit"])
 
+    def test_api_only_token_defaults_to_28_hours_and_reports_pacing_fields(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "model": "opus"},
+            )
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            self.assertIn("API avulsa 28h", account["plan"])
+
+            usage = client.get("/v1/usage", headers={"Authorization": f"Bearer {account['apiToken']}"})
+            self.assertEqual(usage.status_code, 200)
+            self.assertTrue(usage.json()["customer"]["api_only"])
+            self.assertTrue(usage.json()["customer"]["expires_at"])
+
+    def test_api_only_wildcard_downgrades_when_usage_is_ahead_of_time_pace(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 28, "model": "opus"},
+            )
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    "UPDATE accounts SET used_today = ? WHERE id = ?",
+                    (int(account["dailyLimit"] * 0.90), account["id"]),
+                )
+                db.commit()
+
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Implemente uma API"}],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["requested_model"], "claude-code-economy")
+            self.assertEqual(response.json()["public_model"], "claude-code-economy")
+
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
             "/v1/responses",

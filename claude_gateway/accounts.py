@@ -85,7 +85,7 @@ MODEL_TOKEN_PRICES = {
 PLAN_LIMIT_TOKEN_PRICE = MODEL_TOKEN_PRICES["sonnet"]
 API_ONLY_GIFT_MARKER = "__api_only__"
 API_ONLY_PROFIT_MARGIN = 0.20
-API_ONLY_DEFAULT_DURATION_HOURS = 24
+API_ONLY_DEFAULT_DURATION_HOURS = 28
 
 @dataclass(frozen=True, slots=True)
 class AccountUsageReservation:
@@ -766,6 +766,9 @@ class AccountStore:
                 "monthly_price_brl": float(account.get("price") or 0),
                 "daily_token_limit": daily_limit,
                 "active": bool(account.get("active")),
+                "api_only": is_api_only,
+                "created_at": account.get("createdAt") or "",
+                "expires_at": account.get("trialExpiresAt") if is_api_only else "",
             },
             "today": {
                 "date": account.get("usageDay") or _today(),

@@ -352,6 +352,10 @@ class RoutePlanner:
     def _openrouter_model_for_mode(self, mode: str, task_type: str, complexity: str) -> str:
         if mode == "economy":
             return self.settings.cheap_code_agent
+        if mode == "ultra" and task_type == "explanation" and complexity != "critical":
+            return self.settings.cheap_code_agent
+        if mode == "ultra" and task_type == "simple_code" and complexity == "low":
+            return self.settings.cheap_code_agent
         if task_type == "frontend" and complexity == "low":
             return self.settings.frontend_fix_agent
         if mode == "ui" or task_type == "frontend":

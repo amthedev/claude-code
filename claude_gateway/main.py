@@ -1952,10 +1952,11 @@ def _with_customer_power_tier(
     ratio = 1.0
     if isinstance(remaining, int) and limit > 0:
         ratio = max(0.0, min(1.0, remaining / limit))
+    pacing_ratio = _customer_time_pacing_ratio(snapshot)
 
-    if ratio <= 0.05:
+    if ratio <= 0.05 or pacing_ratio <= 0.65:
         target_model = settings.economy_public_model
-    elif ratio <= 0.20:
+    elif ratio <= 0.20 or pacing_ratio <= 0.90:
         target_model = settings.pro_public_model
     elif requested_lower == settings.ui_public_model.lower():
         target_model = settings.ui_public_model
@@ -1966,9 +1967,45 @@ def _with_customer_power_tier(
     outgoing["model"] = target_model
     outgoing["__gateway_customer_power_tier"] = {
         "remaining_token_ratio": round(ratio, 4),
+        "time_pacing_ratio": round(pacing_ratio, 4),
         "selected_public_model": target_model,
     }
     return outgoing
+
+
+def _customer_time_pacing_ratio(snapshot: dict[str, Any]) -> float:
+    customer = snapshot.get("customer") if isinstance(snapshot, dict) else {}
+    today = snapshot.get("today") if isinstance(snapshot, dict) else {}
+    if not isinstance(customer, dict) or not isinstance(today, dict):
+        return 1.0
+    if not customer.get("api_only"):
+        return 1.0
+
+    limit = int(customer.get("daily_token_limit") or 0)
+    remaining = today.get("remaining_tokens")
+    if limit <= 0 or not isinstance(remaining, int):
+        return 1.0
+
+    created_at = _parse_iso_datetime(str(customer.get("created_at") or ""))
+    expires_at = _parse_iso_datetime(str(customer.get("expires_at") or ""))
+    if not created_at or not expires_at or expires_at <= created_at:
+        return 1.0
+
+    now = datetime.now(expires_at.tzinfo) if expires_at.tzinfo else datetime.now()
+    total_seconds = max(1.0, (expires_at - created_at).total_seconds())
+    remaining_seconds = max(0.0, (expires_at - now).total_seconds())
+    expected_remaining_ratio = max(0.05, min(1.0, remaining_seconds / total_seconds))
+    actual_remaining_ratio = max(0.0, min(1.0, remaining / limit))
+    return actual_remaining_ratio / expected_remaining_ratio
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _is_explicit_low_power_model(model: str, settings: Settings) -> bool:
