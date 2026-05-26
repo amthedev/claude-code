@@ -837,7 +837,7 @@ apiTokenForm.addEventListener("submit", async (event) => {
   event.currentTarget.elements.name.value = "Fornecedor API";
   event.currentTarget.elements.price.value = "50.00";
   event.currentTarget.elements.durationHours.value = "24";
-  event.currentTarget.elements.model.value = "sonnet";
+  event.currentTarget.elements.model.value = "opus";
   renderApiPreview();
   renderAll();
 });

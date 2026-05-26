@@ -6,7 +6,7 @@
     <title>Claude Admin</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=api-only-20260525a" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=api-command-20260525a" />
   </head>
   <body class="admin-page">
     <main id="adminLogin" class="auth-screen">
@@ -180,11 +180,11 @@
                   <input name="durationHours" type="number" min="1" max="720" value="24" required />
                 </label>
                 <label>
-                  Modelo liberado
+                  Modelos liberados
                   <select name="model">
-                    <option value="sonnet" selected>Claude Sonnet 4.6</option>
+                    <option value="opus" selected>Todos os modelos</option>
+                    <option value="sonnet">Até Claude Sonnet 4.6</option>
                     <option value="haiku">Claude Haiku 4.5</option>
-                    <option value="opus">Claude Opus 4.7</option>
                   </select>
                 </label>
               </div>
@@ -374,7 +374,7 @@
       </section>
     </main>
 
-    <script src="/frontier/shared.js?v=api-only-20260525a"></script>
-    <script src="/frontier/admin.js?v=api-only-20260525a"></script>
+    <script src="/frontier/shared.js?v=api-command-20260525a"></script>
+    <script src="/frontier/admin.js?v=api-command-20260525a"></script>
   </body>
 </html>

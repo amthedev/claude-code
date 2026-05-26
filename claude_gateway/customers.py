@@ -24,6 +24,8 @@ class CustomerPlan:
     daily_token_limit: int
     allowed_model: str
     active: bool = True
+    preferred_model: str = ""
+    preferred_reasoning: str = ""
 
     @property
     def token_hash(self) -> str:

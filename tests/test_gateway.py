@@ -495,7 +495,6 @@ class GatewayTestCase(unittest.TestCase):
                     "name": "Fornecedor Teste",
                     "price": 50,
                     "durationHours": 24,
-                    "model": "sonnet",
                 },
             )
 
@@ -507,7 +506,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertFalse(account["publicTrialActive"])
             self.assertEqual(account["giftCardCode"], "__api_only__")
             self.assertEqual(account["price"], 50)
-            self.assertEqual(account["modelKey"], "sonnet")
+            self.assertEqual(account["modelKey"], "opus")
             self.assertEqual(account["dailyLimit"], 66_875_648)
             self.assertAlmostEqual(account["maxCostUsd"], 40 / 5.5)
 
@@ -529,6 +528,96 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(accounts.status_code, 200)
             expired = next(item for item in accounts.json()["data"] if item["id"] == account["id"])
             self.assertFalse(expired["active"])
+
+    def test_prompt_command_only_returns_confirmation_without_model_call(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-auto",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "/modelo opus\n/raciocinio extra forte"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertIn("Configuração aplicada", response.json()["content"][0]["text"])
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
+    def test_prompt_commands_switch_model_and_reasoning_for_current_request(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-auto",
+                "max_tokens": 128,
+                "gateway_web_search": "auto",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "/modelo sonnet\n/raciocinio rapido\nPesquise notícias atuais de IA",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["requested_model"], "claude-code-pro")
+        self.assertEqual(data["public_model"], "claude-code-pro")
+        self.assertEqual(data["web_search_policy"], "off")
+
+    def test_account_prompt_commands_are_saved_as_api_preferences(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24},
+            )
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            token_headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            first = client.post(
+                "/v1/router/debug",
+                headers=token_headers,
+                json={
+                    "model": "claude-code-economy",
+                    "max_tokens": 128,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "/modelo sonnet\n/raciocinio forte\nExplique essa função",
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(first.json()["requested_model"], "claude-code-pro")
+
+            accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
+            stored = next(item for item in accounts if item["id"] == account["id"])
+            self.assertEqual(stored["preferredModel"], "claude-code-pro")
+            self.assertEqual(stored["preferredReasoning"], "strong")
+
+            second = client.post(
+                "/v1/router/debug",
+                headers=token_headers,
+                json={
+                    "model": "claude-code-economy",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "Explique de novo"}],
+                },
+            )
+            self.assertEqual(second.status_code, 200)
+            self.assertEqual(second.json()["requested_model"], "claude-code-pro")
 
     def test_admin_ip_check_reports_detected_proxy_ip(self) -> None:
         settings = make_settings()

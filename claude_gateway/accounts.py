@@ -605,7 +605,42 @@ class AccountStore:
             daily_token_limit=int(account.get("dailyLimit") or 0),
             allowed_model=PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
             active=bool(account.get("active")),
+            preferred_model=str(account.get("preferredModel") or ""),
+            preferred_reasoning=str(account.get("preferredReasoning") or ""),
         )
+
+    def update_preferences_for_token(
+        self,
+        token: str,
+        *,
+        model: str | None = None,
+        reasoning: str | None = None,
+    ) -> dict[str, str] | None:
+        updates: list[str] = []
+        params: list[Any] = []
+        if model is not None:
+            updates.append("preferred_model = ?")
+            params.append(model)
+        if reasoning is not None:
+            updates.append("preferred_reasoning = ?")
+            params.append(reasoning)
+        if not updates:
+            return None
+
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT id FROM accounts WHERE api_token = ?", (token,)).fetchone()
+            if not row:
+                return None
+            params.extend([token])
+            db.execute(
+                f"UPDATE accounts SET {', '.join(updates)} WHERE api_token = ?",
+                tuple(params),
+            )
+            db.commit()
+        return {
+            "preferredModel": model or "",
+            "preferredReasoning": reasoning or "",
+        }
 
     def reserve_usage_for_token(
         self,
@@ -749,7 +784,9 @@ class AccountStore:
                     computed_daily_tokens INTEGER NOT NULL,
                     max_cost_usd REAL NOT NULL,
                     created_at TEXT NOT NULL,
-                    trial_expires_at TEXT NOT NULL DEFAULT ''
+                    trial_expires_at TEXT NOT NULL DEFAULT '',
+                    preferred_model TEXT NOT NULL DEFAULT '',
+                    preferred_reasoning TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
@@ -757,6 +794,10 @@ class AccountStore:
                 db.execute("ALTER TABLE accounts ADD COLUMN usage_day TEXT NOT NULL DEFAULT ''")
             if not _column_exists(db, "accounts", "trial_expires_at"):
                 db.execute("ALTER TABLE accounts ADD COLUMN trial_expires_at TEXT NOT NULL DEFAULT ''")
+            if not _column_exists(db, "accounts", "preferred_model"):
+                db.execute("ALTER TABLE accounts ADD COLUMN preferred_model TEXT NOT NULL DEFAULT ''")
+            if not _column_exists(db, "accounts", "preferred_reasoning"):
+                db.execute("ALTER TABLE accounts ADD COLUMN preferred_reasoning TEXT NOT NULL DEFAULT ''")
             db.execute("UPDATE accounts SET usage_day = ? WHERE usage_day = ''", (_today(),))
             db.execute(
                 """
@@ -1019,7 +1060,7 @@ def _api_only_account_from_values(values: dict[str, Any], settings: Settings) ->
     price = max(0.0, float(values.get("price") or 50))
     duration_hours = int(float(values.get("durationHours") or values.get("duration_hours") or API_ONLY_DEFAULT_DURATION_HOURS))
     duration_hours = max(1, min(duration_hours, 24 * 30))
-    model_key = _normalize_model_key(values.get("model") or values.get("modelKey") or "sonnet")
+    model_key = _normalize_model_key(values.get("model") or values.get("modelKey") or "opus")
     name = str(values.get("name") or "Fornecedor API").strip() or "Fornecedor API"
     limit = _calculate_api_only_limit(price, duration_hours, settings)
     expires_at = (_now_datetime() + timedelta(hours=duration_hours)).isoformat()
@@ -1373,6 +1414,8 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "maxCostUsd": row["max_cost_usd"],
         "createdAt": row["created_at"],
         "trialExpiresAt": row["trial_expires_at"],
+        "preferredModel": row["preferred_model"],
+        "preferredReasoning": row["preferred_reasoning"],
     }
 
 

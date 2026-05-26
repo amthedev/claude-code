@@ -965,6 +965,11 @@ function renderApiInstallGuide() {
         <button type="button" class="secondary" data-copy-value="${ClaudeApp.escapeHtml(config.token)}">Copiar token</button>
         <button type="button" class="secondary" data-api-secret-toggle>${revealLabel}</button>
       </div>
+      <div class="api-kv">
+        <strong>Comandos no chat</strong>
+        <code>/modelo Claude Code Auto | /modelo Claude Sonnet 4.6 | /modelo Claude Opus 4.7</code>
+        <code>/raciocinio Automatico | Rapido | Normal | Medio | Forte | Extra forte</code>
+      </div>
     </section>
     <details class="api-advanced">
       <summary>Configurações avançadas</summary>

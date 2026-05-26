@@ -316,9 +316,23 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
-        payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
+        control_answer = _prompt_control_answer(payload, app.state.settings)
+        if control_answer:
+            message = build_text_message(
+                decision.public_model,
+                control_answer,
+                usage={"input_tokens": 0, "output_tokens": len(control_answer.split())},
+            )
+            if payload.get("stream"):
+                return StreamingResponse(
+                    _stream_text_message(message),
+                    media_type="text/event-stream",
+                )
+            return JSONResponse(message)
+
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         reservation = None
         if not identity_answer:
@@ -894,7 +908,7 @@ def create_app(
     ) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
-        payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload).to_dict()
         web_search = _web_search_debug(payload, app.state.settings, auth)
@@ -913,7 +927,7 @@ def create_app(
     ) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
-        payload = _prepare_payload(payload, app.state.settings, auth)
+        payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
         if payload.get("stream"):
             payload = {**payload, "stream": False}
@@ -1573,9 +1587,20 @@ async def _complete_gateway_message(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
     auth = require_gateway_auth(request, app.state.settings)
-    payload = _prepare_payload(payload, app.state.settings, auth)
+    payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
     payload = _with_customer_power_tier(payload, app, auth)
     decision = app.state.planner.plan(payload)
+    control_answer = _prompt_control_answer(payload, app.state.settings)
+    if control_answer:
+        return (
+            build_text_message(
+                decision.public_model,
+                control_answer,
+                usage={"input_tokens": 0, "output_tokens": len(control_answer.split())},
+            ),
+            decision.public_model,
+        )
+
     identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
     reservation = None
     if not identity_answer:
@@ -1617,20 +1642,44 @@ def _prepare_payload(
     payload: dict[str, Any],
     settings: Settings,
     auth: AuthContext,
+    account_store: AccountStore | None = None,
 ) -> dict[str, Any]:
-    prompt_text = extract_prompt_text(payload)
+    limited, controls = _apply_prompt_control_commands(dict(payload), settings)
+    if auth.customer and account_store and (controls.get("model") is not None or controls.get("reasoning") is not None):
+        account_store.update_preferences_for_token(
+            auth.token,
+            model=controls.get("model"),
+            reasoning=controls.get("reasoning"),
+        )
+
+    if auth.customer and controls.get("model"):
+        limited["model"] = controls["model"]
+        limited["__gateway_model_locked"] = True
+    elif auth.customer and auth.customer.preferred_model:
+        limited["model"] = auth.customer.preferred_model
+        limited["__gateway_model_locked"] = True
+    elif controls.get("model"):
+        limited["model"] = controls["model"]
+        limited["__gateway_model_locked"] = True
+
+    prompt_text = extract_prompt_text(limited)
     if len(prompt_text) > settings.max_request_input_chars:
         raise HTTPException(
             status_code=413,
             detail="Request input is larger than MAX_REQUEST_INPUT_CHARS.",
         )
 
-    limited = dict(payload)
     reasoning_value = limited.pop("gateway_reasoning_mode", None)
     if reasoning_value is None:
-        reasoning_value = limited.pop("reasoning_mode", "normal")
+        reasoning_value = limited.pop("reasoning_mode", None)
     else:
         limited.pop("reasoning_mode", None)
+    if controls.get("reasoning"):
+        reasoning_value = controls["reasoning"]
+    elif reasoning_value is None and auth.customer and auth.customer.preferred_reasoning:
+        reasoning_value = auth.customer.preferred_reasoning
+    if reasoning_value is None:
+        reasoning_value = "normal"
     limited["__gateway_reasoning_mode"] = normalize_reasoning_mode(reasoning_value)
     policy_value = limited.pop("gateway_web_search", None)
     if policy_value is None:
@@ -1652,6 +1701,217 @@ def _prepare_payload(
     return limited
 
 
+def _apply_prompt_control_commands(
+    payload: dict[str, Any],
+    settings: Settings,
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    controls: dict[str, str | None] = {}
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return payload, controls
+
+    cleaned_messages: list[Any] = []
+    last_user_index = max(
+        (
+            index
+            for index, message in enumerate(messages)
+            if isinstance(message, dict) and str(message.get("role") or "").lower() == "user"
+        ),
+        default=-1,
+    )
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict) or str(message.get("role") or "").lower() != "user":
+            cleaned_messages.append(message)
+            continue
+
+        cleaned, message_controls, has_content = _clean_control_message(message, settings)
+        controls.update(message_controls)
+        if index == last_user_index and message_controls and not has_content:
+            payload["__gateway_prompt_control_only"] = True
+        if has_content:
+            cleaned_messages.append(cleaned)
+
+    if controls:
+        payload["messages"] = cleaned_messages
+        payload["__gateway_prompt_controls"] = controls
+    return payload, controls
+
+
+def _prompt_control_answer(payload: dict[str, Any], settings: Settings) -> str | None:
+    if not payload.get("__gateway_prompt_control_only"):
+        return None
+    controls = payload.get("__gateway_prompt_controls")
+    if not isinstance(controls, dict):
+        return None
+
+    parts: list[str] = []
+    if controls.get("model"):
+        parts.append(f"modelo {_public_model_label(str(payload.get('model') or settings.auto_public_model), settings)}")
+    if controls.get("reasoning"):
+        parts.append(f"raciocínio {_reasoning_label(str(payload.get('__gateway_reasoning_mode') or 'normal'))}")
+    if not parts:
+        return None
+    return f"Configuração aplicada: {', '.join(parts)}. Pode mandar a próxima mensagem."
+
+
+def _clean_control_message(
+    message: dict[str, Any],
+    settings: Settings,
+) -> tuple[dict[str, Any], dict[str, str | None], bool]:
+    content = message.get("content")
+    controls: dict[str, str | None] = {}
+    if isinstance(content, str):
+        cleaned, text_controls = _strip_control_lines(content, settings)
+        controls.update(text_controls)
+        return {**message, "content": cleaned}, controls, bool(cleaned.strip())
+
+    if not isinstance(content, list):
+        return message, controls, bool(content)
+
+    cleaned_blocks: list[Any] = []
+    has_content = False
+    for block in content:
+        if not isinstance(block, dict) or not isinstance(block.get("text"), str):
+            cleaned_blocks.append(block)
+            has_content = True
+            continue
+        cleaned, text_controls = _strip_control_lines(block["text"], settings)
+        controls.update(text_controls)
+        if cleaned.strip():
+            cleaned_blocks.append({**block, "text": cleaned})
+            has_content = True
+    return {**message, "content": cleaned_blocks}, controls, has_content
+
+
+def _strip_control_lines(text: str, settings: Settings) -> tuple[str, dict[str, str | None]]:
+    controls: dict[str, str | None] = {}
+    kept: list[str] = []
+    for line in str(text or "").splitlines():
+        parsed = _parse_control_line(line, settings)
+        if parsed:
+            controls.update(parsed)
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip(), controls
+
+
+def _parse_control_line(line: str, settings: Settings) -> dict[str, str] | None:
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+
+    slash = raw.startswith("/")
+    candidate = raw[1:].strip() if slash else raw
+    normalized = _normalize_text(candidate.replace(":", " ").replace("=", " "))
+    tokens = normalized.split()
+    if not tokens:
+        return None
+
+    if slash and len(tokens) <= 3:
+        reasoning = _command_reasoning(" ".join(tokens))
+        if reasoning:
+            return {"reasoning": reasoning}
+        model = _command_model(" ".join(tokens), settings)
+        if model:
+            return {"model": model}
+
+    model_value = _command_value(tokens, {"modelo", "model", "perfil"}, allow_leading_verb=True)
+    reasoning_value = _command_value(
+        tokens,
+        {"raciocinio", "reasoning", "pensamento", "analise", "modo"},
+        allow_leading_verb=True,
+    )
+    controls: dict[str, str] = {}
+    if model_value:
+        model = _command_model(model_value, settings)
+        if model:
+            controls["model"] = model
+    if reasoning_value:
+        reasoning = _command_reasoning(reasoning_value)
+        if reasoning:
+            controls["reasoning"] = reasoning
+    return controls or None
+
+
+def _command_value(tokens: list[str], keywords: set[str], *, allow_leading_verb: bool = False) -> str:
+    verbs = {"trocar", "mudar", "alterar", "usar", "use", "setar", "definir", "colocar"}
+    starters = ("para", "pra", "pro", "por", "como", "em")
+    for index, token in enumerate(tokens):
+        if token not in keywords:
+            continue
+        if index > 0 and not (allow_leading_verb and any(item in verbs for item in tokens[:index])):
+            continue
+        value = tokens[index + 1 :]
+        while value and value[0] in starters:
+            value = value[1:]
+        return " ".join(value)
+    return ""
+
+
+def _command_reasoning(value: str) -> str:
+    normalized = _normalize_text(value)
+    if normalized in {
+        "auto",
+        "automatico",
+        "rapido",
+        "fast",
+        "fraco",
+        "normal",
+        "padrao",
+        "medio",
+        "forte",
+        "strong",
+        "extra",
+        "extra forte",
+        "xstrong",
+    }:
+        if normalized == "padrao":
+            return "normal"
+        return normalize_reasoning_mode(normalized)
+    return ""
+
+
+def _reasoning_label(value: str) -> str:
+    return {
+        "auto": "Automático",
+        "fast": "Rápido",
+        "normal": "Normal",
+        "medium": "Médio",
+        "strong": "Forte",
+        "xstrong": "Extra forte",
+    }.get(normalize_reasoning_mode(value), "Normal")
+
+
+def _command_model(value: str, settings: Settings) -> str:
+    raw = str(value or "").strip()
+    normalized = _normalize_text(raw)
+    if not normalized:
+        return ""
+    if "/" in raw:
+        return raw
+
+    public_models = {
+        settings.economy_public_model.lower(): settings.economy_public_model,
+        settings.pro_public_model.lower(): settings.pro_public_model,
+        settings.ultra_public_model.lower(): settings.ultra_public_model,
+        settings.ui_public_model.lower(): settings.ui_public_model,
+        settings.auto_public_model.lower(): settings.auto_public_model,
+    }
+    if raw.lower() in public_models:
+        return public_models[raw.lower()]
+    if "auto" in normalized or "automatico" in normalized:
+        return settings.auto_public_model
+    if "ui" in normalized or "interface" in normalized:
+        return settings.ui_public_model
+    if "haiku" in normalized or "economy" in normalized or "economico" in normalized:
+        return settings.economy_public_model
+    if "sonnet" in normalized or normalized == "pro" or "padrao" in normalized:
+        return settings.pro_public_model
+    if "opus" in normalized or "ultra" in normalized or "avancado" in normalized:
+        return settings.ultra_public_model
+    return ""
+
+
 def _with_customer_power_tier(
     payload: dict[str, Any],
     app: FastAPI,
@@ -1663,7 +1923,16 @@ def _with_customer_power_tier(
     settings = app.state.settings
     requested = str(payload.get("model") or "").strip()
     requested_lower = requested.lower()
+    model_locked = bool(payload.get("__gateway_model_locked"))
     if "/" in requested_lower:
+        return payload
+    requested_auto = requested_lower in {"", settings.auto_public_model.lower(), "auto", "claude-code-auto"}
+    if model_locked and not requested_auto and requested_lower in {
+        settings.economy_public_model.lower(),
+        settings.pro_public_model.lower(),
+        settings.ultra_public_model.lower(),
+        settings.ui_public_model.lower(),
+    }:
         return payload
     if _is_explicit_low_power_model(requested_lower, settings):
         return payload
@@ -2074,7 +2343,7 @@ def _benchmark_route_rows(app: FastAPI, auth: AuthContext) -> list[dict[str, Any
     rows: list[dict[str, Any]] = []
     for case in BENCHMARK_CASES:
         started = time.perf_counter()
-        payload = _prepare_payload(benchmark_payload(case), app.state.settings, auth)
+        payload = _prepare_payload(benchmark_payload(case), app.state.settings, auth, app.state.account_store)
         decision = app.state.planner.plan(payload).to_dict()
         web_search = _web_search_debug(payload, app.state.settings, auth)
         elapsed_ms = (time.perf_counter() - started) * 1000
