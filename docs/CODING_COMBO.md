@@ -2,30 +2,40 @@
 
 Este preset foi montado em 2026-05-18 para priorizar código, edição de arquivos e uso no terminal, mantendo o custo bem abaixo de Claude Opus 4.7. A ideia é simples: deixar o Claude Code enxergar nomes familiares, mas rotear por trás para modelos baratos e fortes em papéis diferentes.
 
-## Preset recomendado
+## Preset fixo no codigo
+
+Os modelos internos ficam travados em `claude_gateway/config.py`. Variaveis de ambiente antigas como `DEEP_REASONING_AGENT`, `BACKEND_PARTNER_AGENT`, `PROJECT_REASONING_AGENT`, `PREMIUM_FALLBACK`, `ULTRA_FALLBACK` e `ENABLE_GEMINI_CODE_HELPER` sao ignoradas para evitar custo alto acidental.
+
+```text
+ROUTER_AGENT: tencent/hy3-preview
+CHEAP_CODE_AGENT: deepseek/deepseek-v4-flash
+CODE_AGENT: qwen/qwen3-coder-next
+REASONING_AGENT: deepseek/deepseek-v4-pro
+UI_AGENT: qwen/qwen3-coder-next
+FAST_AGENT: deepseek/deepseek-v4-flash
+PREMIUM_FALLBACK: deepseek/deepseek-v4-pro
+ULTRA_FALLBACK: qwen/qwen3-coder-next
+FRONTEND_CODER_AGENT: qwen/qwen3-coder-next
+FRONTEND_FIX_AGENT: deepseek/deepseek-v4-flash
+FRONTEND_REASONING_AGENT: tencent/hy3-preview
+BACKEND_PARTNER_AGENT: deepseek/deepseek-v4-pro
+PROJECT_REASONING_AGENT: deepseek/deepseek-v4-pro
+DEEP_REASONING_AGENT: deepseek/deepseek-v4-pro
+GEMINI_CODE_HELPER_AGENT: google/gemini-2.5-flash-lite
+ENABLE_GEMINI_CODE_HELPER: false
+OPENAI_HELPER_FOR_CUSTOMERS: false
+```
+
+## Variaveis ainda configuraveis
 
 ```env
-ROUTER_AGENT=tencent/hy3-preview
-CHEAP_CODE_AGENT=deepseek/deepseek-v4-flash
-CODE_AGENT=qwen/qwen3-coder-next
-REASONING_AGENT=deepseek/deepseek-v4-pro
-UI_AGENT=qwen/qwen3-coder-next
-FAST_AGENT=deepseek/deepseek-v4-flash
-PREMIUM_FALLBACK=moonshotai/kimi-k2.6
-ULTRA_FALLBACK=qwen/qwen3-235b-a22b-thinking-2507
-FRONTEND_CODER_AGENT=qwen/qwen3-coder-next
-FRONTEND_FIX_AGENT=deepseek/deepseek-v4-flash
-FRONTEND_REASONING_AGENT=tencent/hy3-preview
-BACKEND_PARTNER_AGENT=moonshotai/kimi-k2.6
-PROJECT_REASONING_AGENT=qwen/qwen3-235b-a22b-thinking-2507
-DEEP_REASONING_AGENT=deepseek/deepseek-r1
-GEMINI_CODE_HELPER_AGENT=google/gemini-2.5-flash-lite
-ENABLE_GEMINI_CODE_HELPER=true
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENAI_API_KEY=sk-proj-...
+GATEWAY_API_KEYS=strong-admin-token
 
 OPENAI_HELPER_MODEL=gpt-5.4-mini
 OPENAI_HELPER_REASONING_EFFORT=low
 OPENAI_HELPER_MAX_OUTPUT_TOKENS=900
-OPENAI_HELPER_FOR_CUSTOMERS=true
 ENABLE_OPENAI_DESIGN_DIRECTOR=true
 ENABLE_OPENAI_DECISION_DIRECTOR=true
 ENABLE_WEB_SEARCH=true

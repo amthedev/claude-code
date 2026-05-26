@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import os
 import unittest
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -217,6 +218,27 @@ class GatewayTestCase(unittest.TestCase):
         self.app = create_app(settings=make_settings(), client_factory=FakeOpenRouterClient)
         self.client = TestClient(self.app)
         self.headers = {"Authorization": "Bearer test-token"}
+
+    def test_expensive_model_environment_overrides_are_ignored(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_HELPER_FOR_CUSTOMERS": "true",
+                "ENABLE_GEMINI_CODE_HELPER": "true",
+                "PREMIUM_FALLBACK": "moonshotai/kimi-k2.6",
+                "BACKEND_PARTNER_AGENT": "moonshotai/kimi-k2.6",
+                "PROJECT_REASONING_AGENT": "qwen/qwen3-235b-a22b-thinking-2507",
+                "DEEP_REASONING_AGENT": "deepseek/deepseek-r1",
+            },
+        ):
+            settings = Settings.from_env()
+
+        self.assertFalse(settings.openai_helper_for_customers)
+        self.assertFalse(settings.enable_gemini_code_helper)
+        self.assertEqual(settings.premium_fallback, "deepseek/deepseek-v4-pro")
+        self.assertEqual(settings.backend_partner_agent, "deepseek/deepseek-v4-pro")
+        self.assertEqual(settings.project_reasoning_agent, "deepseek/deepseek-v4-pro")
+        self.assertEqual(settings.deep_reasoning_agent, "deepseek/deepseek-v4-pro")
 
     def test_models_requires_auth(self) -> None:
         response = self.client.get("/v1/models")

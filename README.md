@@ -58,12 +58,12 @@ Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark
 ## Public Models
 
 - `claude-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
-- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Next plus Kimi/DeepSeek review agents.
-- `claude-code-ultra`: strong path with Qwen Thinking, Kimi, and R1 only for critical reasoning.
+- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Next plus DeepSeek V4 Pro when reasoning is needed.
+- `claude-code-ultra`: strongest public mode, routed to DeepSeek V4 Pro/Qwen Coder by default without R1, Kimi, or Qwen Thinking.
 - `claude-code-ui`: frontend/UI path, usually Qwen3 Coder Next with Hy3/DeepSeek guidance.
 - `claude-code-auto`: heuristically chooses between the above.
 
-You can override every internal model with environment variables. The defaults in `.env.example` were checked against OpenRouter's public model list on 2026-05-22.
+Internal model choices are fixed in code to avoid expensive environment overrides. The defaults were checked against OpenRouter's public model list on 2026-05-26.
 
 ## Cost Guard
 
@@ -80,12 +80,9 @@ With the default model set, the main paths stay well under that budget:
 - DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
 - Qwen3 Coder Next: about 3.0% of Claude Opus 4.7 blended token cost.
 - DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
-- Qwen3 235B A22B Thinking: about 5.5% of Claude Opus 4.7 blended token cost.
-- Gemini 2.5 Flash Lite: about 1.7% of Claude Opus 4.7 blended token cost.
-- DeepSeek R1: about 10.7% of Claude Opus 4.7 blended token cost.
-- Kimi K2.6: about 14.1% of Claude Opus 4.7 blended token cost.
+- Tencent Hy3 Preview: about 1.1% of Claude Opus 4.7 blended token cost.
 
-`claude-code-ultra` improves quality through extra cheap candidates and review instead of calling Claude by default. Set `ALLOW_PREMIUM_FALLBACK=true` only if you intentionally want to permit premium fallback models that still pass the budget guard.
+`claude-code-ultra` improves quality through the stronger budget-safe default model instead of calling Claude, R1, Kimi, or Qwen Thinking by default.
 
 External model ids such as `anthropic/claude-opus-4.7` are not used directly by default. They are routed back into the budget-safe internal model set unless `ALLOW_DIRECT_EXTERNAL_MODELS=true` is explicitly enabled.
 
@@ -97,11 +94,7 @@ You can add an OpenAI/ChatGPT key so the internal agent pipeline gets one extra 
 OPENAI_API_KEY=sk-proj-...
 ```
 
-By default this helper can run for customer/admin pro, frontend, and strongest-mode calls as a concise decision director. It chooses practical defaults so the assistant executes instead of asking the user to pick between options. To disable it for customer chat:
-
-```env
-OPENAI_HELPER_FOR_CUSTOMERS=false
-```
+By default this helper is blocked for customer chat so paid tokens do not get spent on extra hidden helper calls. `OPENAI_HELPER_FOR_CUSTOMERS` is ignored intentionally.
 
 The default helper model is `gpt-5.4-mini`. You can switch it when needed:
 
