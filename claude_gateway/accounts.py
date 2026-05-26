@@ -715,6 +715,9 @@ class AccountStore:
         return AccountUsageReservation(token=token, usage_day=today, estimated_tokens=estimated_tokens)
 
     def rollback_usage(self, reservation: AccountUsageReservation | None) -> None:
+        self.settle_usage(reservation, actual_tokens=0)
+
+    def settle_usage(self, reservation: AccountUsageReservation | None, *, actual_tokens: int) -> None:
         if reservation is None:
             return
         with self._lock, self._connect() as db:
@@ -730,7 +733,15 @@ class AccountStore:
                    SET used_today = ?
                  WHERE id = ?
                 """,
-                (max(0, int(account.get("usedToday") or 0) - reservation.estimated_tokens), account["id"]),
+                (
+                    max(
+                        0,
+                        int(account.get("usedToday") or 0)
+                        - reservation.estimated_tokens
+                        + max(0, actual_tokens),
+                    ),
+                    account["id"],
+                ),
             )
             db.commit()
 

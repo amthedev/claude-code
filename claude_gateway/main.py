@@ -32,7 +32,9 @@ from .conversations import ConversationStore
 from .customers import (
     CustomerReservation,
     CustomerUsageStore,
+    actual_reserved_tokens_from_response,
     clamp_customer_payload,
+    estimate_request_cost_usd,
     normalize_reasoning_mode,
 )
 from .openai_client import OpenAIHelperClient
@@ -374,6 +376,7 @@ def create_app(
                     _rollback_customer_budget(app, reservation)
                     raise
 
+                _settle_customer_budget(app, reservation, payload, decision, response)
                 return StreamingResponse(
                     _stream_text_message(response),
                     media_type="text/event-stream",
@@ -384,9 +387,13 @@ def create_app(
                 raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
             app.state.usage.record_request(decision)
             return StreamingResponse(
-                _public_model_stream(
+                _public_model_stream_with_budget_settlement(
                     app.state.openrouter.stream_messages(payload, decision.selected_openrouter_model),
                     decision.public_model,
+                    app=app,
+                    reservation=reservation,
+                    payload=payload,
+                    decision=decision,
                 ),
                 media_type="text/event-stream",
             )
@@ -403,6 +410,7 @@ def create_app(
             _rollback_customer_budget(app, reservation)
             raise
 
+        _settle_customer_budget(app, reservation, payload, decision, response)
         return JSONResponse(response)
 
     @app.post("/v1/auth/signup")
@@ -1635,6 +1643,7 @@ async def _complete_gateway_message(
     except Exception:
         _rollback_customer_budget(app, reservation)
         raise
+    _settle_customer_budget(app, reservation, payload, decision, response)
     return response, decision.public_model
 
 
@@ -2589,17 +2598,72 @@ async def _iter_bytes(chunks: list[bytes]):
         yield chunk
 
 
-async def _public_model_stream(chunks: Any, public_model: str):
+async def _public_model_stream(chunks: Any, public_model: str, on_usage: Callable[[dict[str, int]], None] | None = None):
     buffer = ""
     text_normalizer = _StreamTextNormalizer()
     async for chunk in chunks:
         buffer += chunk.decode("utf-8", "replace")
         while "\n\n" in buffer:
             event, buffer = buffer.split("\n\n", 1)
+            usage = _stream_event_usage(event)
+            if usage and on_usage:
+                on_usage(usage)
             yield (_rewrite_stream_event_model(event, public_model, text_normalizer) + "\n\n").encode("utf-8")
 
     if buffer:
+        usage = _stream_event_usage(buffer)
+        if usage and on_usage:
+            on_usage(usage)
         yield _rewrite_stream_event_model(buffer, public_model, text_normalizer).encode("utf-8")
+
+
+async def _public_model_stream_with_budget_settlement(
+    chunks: Any,
+    public_model: str,
+    *,
+    app: FastAPI,
+    reservation: CustomerReservation | AccountUsageReservation | None,
+    payload: dict[str, Any],
+    decision: Any,
+):
+    usage: dict[str, int] = {}
+
+    def remember(next_usage: dict[str, int]) -> None:
+        usage.update(next_usage)
+
+    try:
+        async for chunk in _public_model_stream(chunks, public_model, on_usage=remember):
+            yield chunk
+    except Exception:
+        _rollback_customer_budget(app, reservation)
+        raise
+    if usage:
+        _settle_customer_budget(app, reservation, payload, decision, {"usage": usage})
+
+
+def _stream_event_usage(event: str) -> dict[str, int] | None:
+    data_lines = [
+        line.removeprefix("data:").strip()
+        for line in str(event or "").splitlines()
+        if line.startswith("data:")
+    ]
+    if not data_lines:
+        return None
+    data = "\n".join(data_lines)
+    if not data or data == "[DONE]":
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    if input_tokens <= 0 and output_tokens <= 0:
+        return None
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
 
 class _StreamTextNormalizer:
@@ -2793,6 +2857,34 @@ def _rollback_customer_budget(
         app.state.account_store.rollback_usage(reservation)
         return
     app.state.customer_usage.rollback(reservation)
+
+
+def _settle_customer_budget(
+    app: FastAPI,
+    reservation: CustomerReservation | AccountUsageReservation | None,
+    payload: dict[str, Any],
+    decision: Any,
+    response: dict[str, Any],
+) -> None:
+    if reservation is None:
+        return
+    actual_tokens = actual_reserved_tokens_from_response(response, payload, app.state.settings, decision)
+    if actual_tokens is None:
+        return
+    if isinstance(reservation, AccountUsageReservation):
+        app.state.account_store.settle_usage(reservation, actual_tokens=actual_tokens)
+        return
+    actual_cost = estimate_request_cost_usd(
+        payload,
+        decision,
+        app.state.settings,
+        estimated_tokens=actual_tokens,
+    )
+    app.state.customer_usage.settle(
+        reservation,
+        actual_tokens=actual_tokens,
+        actual_cost_usd=actual_cost,
+    )
 
 
 def _customer_usage_snapshot(app: FastAPI, auth: AuthContext) -> dict[str, Any]:

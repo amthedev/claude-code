@@ -47,6 +47,15 @@ class FakeOpenRouterClient:
         yield f'data: {{"message": {{"model": "{model}", "provider": "fake"}}}}\n\n'.encode()
 
 
+class FakeUsageStreamingOpenRouterClient(FakeOpenRouterClient):
+    async def stream_messages(self, payload: dict[str, Any], model: str):
+        self.calls.append((model, payload))
+        yield b"event: message_start\n"
+        yield f'data: {{"message": {{"model": "{model}", "provider": "fake"}}}}\n\n'.encode()
+        yield b'event: message_delta\ndata: {"type":"message_delta","usage":{"input_tokens":3,"output_tokens":5}}\n\n'
+        yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+
 class FakeOpenAIHelper:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -794,7 +803,8 @@ class GatewayTestCase(unittest.TestCase):
                 headers={"Authorization": f"Bearer {account['apiToken']}"},
             )
             self.assertEqual(usage.status_code, 200)
-            self.assertGreater(usage.json()["account"]["usedToday"], 200)
+            self.assertGreater(usage.json()["account"]["usedToday"], 0)
+            self.assertLess(usage.json()["account"]["usedToday"], 100)
             self.assertEqual(usage.json()["account"]["usageDay"], _today())
 
             with app.state.account_store._connect() as db:
@@ -1726,6 +1736,64 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(base_reserved, tool_reserved * 8)
         self.assertLess(tool_reserved, 20000)
+
+    def test_account_usage_is_settled_to_actual_response_usage(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            account = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24, "model": "opus"},
+            ).json()["account"]
+
+            response = client.post(
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-pro",
+                    "max_tokens": 16000,
+                    "messages": [{"role": "user", "content": "apague o squarecloud.app do meu projeto"}],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            usage = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {account['apiToken']}"})
+            self.assertGreater(usage.json()["account"]["usedToday"], 0)
+            self.assertLess(usage.json()["account"]["usedToday"], 100)
+
+    def test_streaming_account_usage_is_settled_to_actual_response_usage(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeUsageStreamingOpenRouterClient)
+            client = TestClient(app)
+            account = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24, "model": "opus"},
+            ).json()["account"]
+
+            with client.stream(
+                "POST",
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-pro",
+                    "stream": True,
+                    "max_tokens": 16000,
+                    "tools": [{"name": "delete_file", "input_schema": {"type": "object"}}],
+                    "messages": [{"role": "user", "content": "apague o squarecloud.app do meu projeto"}],
+                },
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                body = b"".join(response.iter_bytes())
+
+            self.assertIn(b"message_delta", body)
+            usage = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {account['apiToken']}"})
+            self.assertEqual(usage.json()["account"]["usedToday"], 8)
 
     def test_gift_card_signup_creates_customer_token(self) -> None:
         with TemporaryDirectory() as tmpdir:

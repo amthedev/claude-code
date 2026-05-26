@@ -110,6 +110,26 @@ def estimate_reserved_tokens(
     )
 
 
+def actual_reserved_tokens_from_response(
+    response: dict[str, Any],
+    payload: dict[str, Any],
+    settings: Settings,
+    decision: RouteDecision | None = None,
+) -> int | None:
+    usage = response.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    actual_tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    if actual_tokens <= 0:
+        return None
+    if payload_has_tool_contract(payload) or (decision and decision.use_orchestration):
+        return actual_tokens
+    return actual_tokens * reasoning_token_multiplier(
+        str(payload.get("__gateway_reasoning_mode") or "normal"),
+        decision,
+    )
+
+
 def parse_customer_accounts(settings: Settings) -> dict[str, CustomerPlan]:
     raw = settings.customer_accounts.strip()
     if not raw:
@@ -236,12 +256,22 @@ class CustomerUsageStore:
         )
 
     def rollback(self, reservation: CustomerReservation | None) -> None:
+        self.settle(reservation, actual_tokens=0, actual_cost_usd=0.0, decrement_request=True)
+
+    def settle(
+        self,
+        reservation: CustomerReservation | None,
+        *,
+        actual_tokens: int,
+        actual_cost_usd: float,
+        decrement_request: bool = False,
+    ) -> None:
         if reservation is None:
             return
-
         with self._lock:
             with self._connect() as db:
                 bucket = self._bucket(db, reservation.date, reservation.token_hash)
+                request_delta = 1 if decrement_request else 0
                 db.execute(
                     """
                     INSERT INTO customer_usage (
@@ -255,16 +285,22 @@ class CustomerUsageStore:
                     (
                         reservation.date,
                         reservation.token_hash,
-                        max(0, int(bucket["requests"] or 0) - 1),
+                        max(0, int(bucket["requests"] or 0) - request_delta),
                         round(
                             max(
                                 0.0,
                                 float(bucket["reserved_cost_usd"] or 0)
-                                - reservation.estimated_cost_usd,
+                                - reservation.estimated_cost_usd
+                                + max(0.0, actual_cost_usd),
                             ),
                             8,
                         ),
-                        max(0, int(bucket["reserved_tokens"] or 0) - reservation.estimated_tokens),
+                        max(
+                            0,
+                            int(bucket["reserved_tokens"] or 0)
+                            - reservation.estimated_tokens
+                            + max(0, actual_tokens),
+                        ),
                     ),
                 )
                 db.commit()
