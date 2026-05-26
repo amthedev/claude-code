@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from claude_gateway.anthropic import clean_model_text
 from claude_gateway.accounts import _calculate_limit
 from claude_gateway.config import Settings
-from claude_gateway.customers import _today, daily_cost_budget_usd, parse_customer_accounts
+from claude_gateway.customers import _today, daily_cost_budget_usd, estimate_reserved_tokens, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.openrouter import OpenRouterClient
 from claude_gateway.research import WebSearchResult, WebSource, parse_web_search_response
@@ -1206,7 +1206,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "pro")
         self.assertEqual(data["task_type"], "file_edit")
         self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-next")
-        self.assertTrue(data["use_orchestration"])
+        self.assertFalse(data["use_orchestration"])
 
     def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
         response = self.client.post(
@@ -1704,6 +1704,28 @@ class GatewayTestCase(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 429)
             self.assertEqual(app.state.openrouter.calls, [])
+
+    def test_tool_contract_reservation_does_not_apply_reasoning_multiplier(self) -> None:
+        settings = make_settings()
+        planner = create_app(settings=settings, client_factory=FakeOpenRouterClient).state.planner
+        base_payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 16000,
+            "__gateway_reasoning_mode": "normal",
+            "messages": [{"role": "user", "content": "apague o squarecloud.app do meu projeto"}],
+        }
+        tool_payload = {
+            **base_payload,
+            "tools": [{"name": "delete_file", "input_schema": {"type": "object"}}],
+        }
+        base_decision = planner.plan(base_payload)
+        tool_decision = planner.plan(tool_payload)
+
+        base_reserved = estimate_reserved_tokens(base_payload, settings, base_decision)
+        tool_reserved = estimate_reserved_tokens(tool_payload, settings, tool_decision)
+
+        self.assertEqual(base_reserved, tool_reserved * 8)
+        self.assertLess(tool_reserved, 20000)
 
     def test_gift_card_signup_creates_customer_token(self) -> None:
         with TemporaryDirectory() as tmpdir:

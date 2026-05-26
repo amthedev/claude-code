@@ -13,7 +13,7 @@ from fastapi import HTTPException, status
 
 from .budget import CLAUDE_BASELINE_MODEL, CostPolicy
 from .config import Settings
-from .routing import RouteDecision, extract_prompt_text
+from .routing import RouteDecision, extract_prompt_text, payload_has_tool_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +96,20 @@ def reasoning_token_multiplier(mode: str, decision: RouteDecision | None = None)
     return TOKEN_VALUE_MULTIPLIER
 
 
+def estimate_reserved_tokens(
+    payload: dict[str, Any],
+    settings: Settings,
+    decision: RouteDecision | None = None,
+) -> int:
+    base_tokens = estimate_request_tokens(payload, settings)
+    if payload_has_tool_contract(payload):
+        return base_tokens
+    return base_tokens * reasoning_token_multiplier(
+        str(payload.get("__gateway_reasoning_mode") or "normal"),
+        decision,
+    )
+
+
 def parse_customer_accounts(settings: Settings) -> dict[str, CustomerPlan]:
     raw = settings.customer_accounts.strip()
     if not raw:
@@ -161,10 +175,7 @@ class CustomerUsageStore:
                 detail="Request path is outside the configured cost budget.",
             )
 
-        estimated_tokens = estimate_request_tokens(payload, self.settings) * reasoning_token_multiplier(
-            str(payload.get("__gateway_reasoning_mode") or "normal"),
-            decision,
-        )
+        estimated_tokens = estimate_reserved_tokens(payload, self.settings, decision)
         estimated_cost_usd = estimate_request_cost_usd(
             payload,
             decision,

@@ -559,13 +559,14 @@ class RoutePlanner:
         return ", ".join(details)
 
     def _needs_deep_reasoning(self, task_type: str, complexity: str) -> bool:
-        return complexity in {"high", "critical"} or task_type in {
+        if complexity == "critical":
+            return True
+        if complexity != "high":
+            return False
+        return task_type in {
             "architecture",
             "debugging",
-            "file_edit",
-            "frontend",
             "review",
-            "testing",
         }
 
 

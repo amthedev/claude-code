@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Settings
-from .customers import CustomerPlan, TOKEN_VALUE_MULTIPLIER, estimate_request_tokens, reasoning_token_multiplier
+from .customers import CustomerPlan, TOKEN_VALUE_MULTIPLIER, estimate_reserved_tokens
 from .security import hash_password, verify_password
 
 
@@ -680,10 +680,7 @@ class AccountStore:
         payload: dict[str, Any],
         decision: Any | None = None,
     ) -> AccountUsageReservation | None:
-        estimated_tokens = estimate_request_tokens(payload, self.settings) * reasoning_token_multiplier(
-            str(payload.get("__gateway_reasoning_mode") or "normal"),
-            decision,
-        )
+        estimated_tokens = estimate_reserved_tokens(payload, self.settings, decision)
         today = _today()
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)
