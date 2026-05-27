@@ -393,6 +393,35 @@ class GatewayTestCase(unittest.TestCase):
         self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
         self.assertEqual(outgoing["tool_choice"], "auto")
 
+    def test_vps_openai_chat_trims_large_history_to_fit_input_budget(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "system": "system guidance " * 5000,
+                "max_tokens": 16000,
+                "messages": [
+                    {"role": "user", "content": "historico antigo " * 4000},
+                    {"role": "assistant", "content": "resposta antiga " * 4000},
+                    {"role": "user", "content": "como vc ta"},
+                ],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=False,
+        )
+
+        joined = "\n".join(message["content"] for message in outgoing["messages"])
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        self.assertLessEqual(estimated_input, 18000)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
+        self.assertIn("como vc ta", joined)
+        self.assertNotIn("historico antigo historico antigo", joined)
+        self.assertIn("previous content omitted", joined)
+
     def test_vps_openai_chat_format_converts_anthropic_payload(self) -> None:
         settings = make_settings()
         settings.vps_model_base_url = "https://runpod.example/v1"

@@ -17,6 +17,8 @@ from .openrouter import OpenRouterClient, OpenRouterError
 
 OPENAI_CHAT_CONTEXT_TOKENS = 24_576
 OPENAI_CHAT_CONTEXT_MARGIN_TOKENS = 512
+OPENAI_CHAT_INPUT_BUDGET_TOKENS = 18_000
+OPENAI_CHAT_MIN_TRIMMED_CHARS = 1_200
 
 
 class AnthropicModelClient(Protocol):
@@ -195,6 +197,7 @@ class VPSAnthropicClient:
         if self._should_disable_qwen_thinking(payload, target):
             messages = self._messages_with_no_think(messages)
         tools = self._tools_to_openai(payload.get("tools"))
+        messages = self._trim_messages_for_openai_chat_context(messages, tools)
         requested_max_tokens = int(payload.get("max_tokens") or 4096)
         outgoing: dict[str, Any] = {
             "model": target.model_id,
@@ -309,6 +312,29 @@ class VPSAnthropicClient:
         available = OPENAI_CHAT_CONTEXT_TOKENS - estimated_input_tokens - OPENAI_CHAT_CONTEXT_MARGIN_TOKENS
         return max(1, min(max(1, requested_max_tokens), available))
 
+    def _trim_messages_for_openai_chat_context(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        trimmed = deepcopy(messages) or [{"role": "user", "content": ""}]
+        while self._estimate_openai_chat_input_tokens(trimmed, tools) > OPENAI_CHAT_INPUT_BUDGET_TOKENS:
+            removable_index = next(
+                (idx for idx, message in enumerate(trimmed[:-1]) if message.get("role") != "system"),
+                None,
+            )
+            if removable_index is not None:
+                trimmed.pop(removable_index)
+                continue
+
+            longest_index = max(range(len(trimmed)), key=lambda idx: len(str(trimmed[idx].get("content") or "")))
+            content = str(trimmed[longest_index].get("content") or "")
+            if len(content) <= OPENAI_CHAT_MIN_TRIMMED_CHARS:
+                break
+            target_chars = max(OPENAI_CHAT_MIN_TRIMMED_CHARS, int(len(content) * 0.65))
+            trimmed[longest_index]["content"] = self._truncate_text_middle(content, target_chars)
+        return trimmed
+
     def _estimate_openai_chat_input_tokens(
         self,
         messages: list[dict[str, Any]],
@@ -318,6 +344,15 @@ class VPSAnthropicClient:
         char_estimate = len(serialized) / 3.2
         word_estimate = len(serialized.split()) * 1.35
         return max(1, int(max(char_estimate, word_estimate)) + (6 * len(messages)) + 32)
+
+    def _truncate_text_middle(self, text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        marker = "\n\n[... previous content omitted to fit the model context window ...]\n\n"
+        available = max(0, max_chars - len(marker))
+        head = available // 2
+        tail = available - head
+        return f"{text[:head]}{marker}{text[-tail:]}"
 
     def _tool_choice_to_openai(self, tool_choice: Any) -> Any:
         if isinstance(tool_choice, str):
