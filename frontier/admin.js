@@ -243,7 +243,7 @@ function renderVpsSchedules() {
   const state = vpsScheduleState.status || gatewayHealthState?.vps_scheduler || {};
   status.textContent = state.configured
     ? `Pod ${state.podId || "-"} · desejado agora: ${state.desiredState || "-"}${state.nextTransitionAt ? ` · próxima troca ${new Date(state.nextTransitionAt).toLocaleString("pt-BR")}` : ""}`
-    : "Configure RUNPOD_API_KEY e RUNPOD_POD_ID no Square para a agenda ligar/desligar a VPS.";
+    : "Configure RUNPOD_API_KEY da conta RunPod e RUNPOD_POD_ID no Square. A chave sk-[pod-id] do vLLM serve só para chamadas de chat.";
   const schedules = vpsScheduleState.data || [];
   if (!schedules.length) {
     table.innerHTML = `<tr><td colspan="4" class="muted">Nenhuma agenda cadastrada.</td></tr>`;
@@ -952,12 +952,25 @@ document.querySelector("#tickVpsSchedule")?.addEventListener("click", async () =
 async function runVpsAction(action) {
   const message = document.querySelector("#vpsScheduleMessage");
   if (message) message.textContent = "";
+  const state = vpsScheduleState.status || gatewayHealthState?.vps_scheduler || {};
+  if (!state.configured) {
+    if (message) {
+      message.textContent =
+        "Falta RUNPOD_API_KEY da conta RunPod. VPS_MODEL_API_KEY=sk-[pod-id] é só para o vLLM depois que o pod estiver ligado.";
+    }
+    return;
+  }
   try {
     const data = await adminRequest("/v1/admin/vps/actions", {
       method: "POST",
       body: JSON.stringify({ action }),
     });
-    if (message) message.textContent = data.status?.status === "success" ? "Comando enviado para a VPS." : "Comando processado.";
+    if (message) {
+      message.textContent =
+        data.status?.status === "success"
+          ? "Comando enviado para a VPS. Aguarde o vLLM carregar o modelo antes de testar o chat."
+          : "Comando processado.";
+    }
     const fresh = await adminRequest("/v1/admin/vps/schedules");
     vpsScheduleState = fresh;
     renderVpsSchedules();

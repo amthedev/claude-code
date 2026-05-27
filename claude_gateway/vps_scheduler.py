@@ -87,7 +87,9 @@ class VPSScheduleStore:
         desired = self._desired_state(active[0]) if active else {"desiredState": "off", "nextTransitionAt": ""}
         return {
             "configured": bool(self.settings.runpod_api_key and self.settings.runpod_pod_id),
+            "runpodApiConfigured": bool(self.settings.runpod_api_key),
             "podId": self.settings.runpod_pod_id,
+            "vllmBaseUrl": self.settings.vps_model_base_url,
             "activeSchedules": len(active),
             **desired,
         }
@@ -126,6 +128,7 @@ class VPSScheduleStore:
             "status": "success",
             **self.status(),
             "desiredState": desired_state,
+            "message": "RunPod command sent. vLLM can still take a few minutes to finish loading the model.",
         }
 
     def _desired_state(self, schedule: dict[str, Any]) -> dict[str, str]:

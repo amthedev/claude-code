@@ -926,6 +926,8 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(actions, ["start"])
             self.assertEqual(response.json()["status"]["action"], "start")
             self.assertEqual(response.json()["status"]["desiredState"], "on")
+            self.assertTrue(response.json()["status"]["runpodApiConfigured"])
+            self.assertIn("vLLM", response.json()["status"]["message"])
 
     def test_prompt_command_only_returns_confirmation_without_model_call(self) -> None:
         response = self.client.post(

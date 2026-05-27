@@ -18,9 +18,15 @@ VPS_MODEL_BASE_URL=https://sua-vps.example.com
 VPS_MODEL_ID=local-model
 VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
+RUNPOD_API_KEY=
+RUNPOD_POD_ID=
 ```
 
 Optionally set `OPENROUTER_API_KEY` only for emergency fallback.
+
+For RunPod vLLM templates, `VPS_MODEL_API_KEY` is the vLLM serving key, often
+`sk-[pod-id]`. The admin panel's "Ligar VPS" button needs `RUNPOD_API_KEY`,
+which is the account API key from RunPod settings, plus `RUNPOD_POD_ID`.
 
 Run the API:
 
