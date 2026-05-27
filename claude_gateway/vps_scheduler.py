@@ -113,6 +113,21 @@ class VPSScheduleStore:
         self._record(schedule["id"], state, "")
         return {"action": action, "status": "success", **desired}
 
+    async def manual_action(self, action: str) -> dict[str, Any]:
+        normalized = str(action or "").strip().lower()
+        if normalized not in {"start", "stop"}:
+            raise HTTPException(status_code=400, detail="Action must be start or stop.")
+        if not self.settings.runpod_api_key or not self.settings.runpod_pod_id:
+            raise HTTPException(status_code=400, detail="RunPod credentials are not configured.")
+        await self._runpod(normalized)
+        desired_state = "on" if normalized == "start" else "off"
+        return {
+            "action": normalized,
+            "status": "success",
+            **self.status(),
+            "desiredState": desired_state,
+        }
+
     def _desired_state(self, schedule: dict[str, Any]) -> dict[str, str]:
         start_at = _parse_datetime(schedule.get("startAt"))
         if not start_at:

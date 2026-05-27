@@ -901,6 +901,32 @@ class GatewayTestCase(unittest.TestCase):
             self.assertFalse(listed.json()["status"]["configured"])
             self.assertEqual(len(listed.json()["data"]), 1)
 
+    def test_admin_can_start_vps_manually(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.runpod_api_key = "runpod-token"
+            settings.runpod_pod_id = "pod-123"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            actions: list[str] = []
+
+            async def fake_runpod(action: str) -> None:
+                actions.append(action)
+
+            app.state.vps_schedules._runpod = fake_runpod
+
+            response = client.post(
+                "/v1/admin/vps/actions",
+                headers=self.headers,
+                json={"action": "start"},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(actions, ["start"])
+            self.assertEqual(response.json()["status"]["action"], "start")
+            self.assertEqual(response.json()["status"]["desiredState"], "on")
+
     def test_prompt_command_only_returns_confirmation_without_model_call(self) -> None:
         response = self.client.post(
             "/v1/messages",

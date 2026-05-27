@@ -721,6 +721,17 @@ def create_app(
         _require_admin(request, app.state.settings)
         return JSONResponse({"status": await app.state.vps_schedules.tick()})
 
+    @app.post("/v1/admin/vps/actions")
+    async def run_vps_action(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"status": await app.state.vps_schedules.manual_action(str(payload.get("action") or ""))})
+
     @app.get("/v1/admin/purchases")
     async def list_purchases(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)

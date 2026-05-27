@@ -949,6 +949,26 @@ document.querySelector("#tickVpsSchedule")?.addEventListener("click", async () =
   }
 });
 
+async function runVpsAction(action) {
+  const message = document.querySelector("#vpsScheduleMessage");
+  if (message) message.textContent = "";
+  try {
+    const data = await adminRequest("/v1/admin/vps/actions", {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (message) message.textContent = data.status?.status === "success" ? "Comando enviado para a VPS." : "Comando processado.";
+    const fresh = await adminRequest("/v1/admin/vps/schedules");
+    vpsScheduleState = fresh;
+    renderVpsSchedules();
+  } catch (error) {
+    if (message) message.textContent = error.fallback ? "API admin indisponível." : error.message;
+  }
+}
+
+document.querySelector("#startVpsNow")?.addEventListener("click", () => runVpsAction("start"));
+document.querySelector("#stopVpsNow")?.addEventListener("click", () => runVpsAction("stop"));
+
 document.querySelector("#vpsSchedulesTable")?.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
