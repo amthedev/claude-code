@@ -34,9 +34,9 @@ Configure Claude Code:
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 export ANTHROPIC_API_KEY=""
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
@@ -51,7 +51,7 @@ The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients p
 
 - Primary Anthropic-compatible: `POST {VPS_MODEL_BASE_URL}/v1/messages`
 - Primary OpenAI-compatible/vLLM/RunPod: `POST {VPS_MODEL_BASE_URL}/chat/completions` when `VPS_MODEL_API_FORMAT=openai-chat`
-- Public models: `claude-code-economy`, `claude-code-pro`, `claude-code-ultra`, `claude-code-ui`, `claude-code-auto`
+- Public model: `claude-code-pro`
 - Actual VPS model id sent upstream: `VPS_MODEL_ID`
 - Emergency fallback: OpenRouter only when the VPS errors or is too slow before the first response
 
@@ -79,15 +79,11 @@ Every request also receives a Claude public response profile while preserving An
 See [docs/CODING_COMBO.md](docs/CODING_COMBO.md) for the full preset and terminal setup.
 Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark and the low-token live smoke test.
 
-## Public Models
+## Public Model
 
-- `claude-code-economy`: economy public identity, backed by `VPS_MODEL_ID`.
-- `claude-code-pro`: pro public identity, backed by `VPS_MODEL_ID`.
-- `claude-code-ultra`: strongest public identity, backed by `VPS_MODEL_ID`.
-- `claude-code-ui`: frontend/UI public identity, backed by `VPS_MODEL_ID`.
-- `claude-code-auto`: heuristically chooses between the above.
+- `claude-code-pro`: Claude Sonnet 4.5 public identity, backed by `VPS_MODEL_ID`.
 
-The visible model names stay stable for clients. The VPS receives `VPS_MODEL_ID` regardless of which public model the user selected.
+The visible model name stays stable for clients. The VPS receives `VPS_MODEL_ID`.
 
 ## Cost Guard
 
@@ -99,7 +95,7 @@ export ALLOW_PREMIUM_FALLBACK=false
 export ALLOW_DIRECT_EXTERNAL_MODELS=false
 ```
 
-`claude-code-ultra` improves quality through the same VPS model and stronger prompting/routing behavior. OpenRouter models are not used unless the emergency fallback activates.
+`claude-code-pro` is the only public model exposed to clients. OpenRouter models are not used unless the emergency fallback activates.
 
 ## Optional ChatGPT Helper
 
@@ -251,10 +247,10 @@ redirects the user to pay. Mercado Pago calls
 backend upgrades the account automatically. Current app plans are:
 
 ```text
-Pro         R$ 65,00   claude-code-economy
+Pro         R$ 65,00   claude-code-pro
 5X          R$ 125,00  claude-code-pro
-20X         R$ 280,00  claude-code-ultra
-30X         R$ 390,00  claude-code-ultra
+20X         R$ 280,00  claude-code-pro
+30X         R$ 390,00  claude-code-pro
 ```
 
 The app sets security headers, disables public OpenAPI docs, rate-limits login
@@ -419,5 +415,5 @@ curl -s http://127.0.0.1:8787/health | jq
 curl -s http://127.0.0.1:8787/v1/router/debug \
   -H "Authorization: Bearer local-dev-token" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-code-auto","max_tokens":256,"messages":[{"role":"user","content":"Crie um dashboard React bonito"}]}' | jq
+  -d '{"model":"claude-code-pro","max_tokens":256,"messages":[{"role":"user","content":"Crie um dashboard React bonito"}]}' | jq
 ```

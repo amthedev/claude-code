@@ -302,7 +302,7 @@ async def cowork_gateway(
     task: str,
     project_context: str = "",
     mode: str = "pair_programming",
-    model: str = "claude-code-auto",
+    model: str = "claude-code-pro",
     max_tokens: int = 1600,
 ) -> dict[str, Any]:
     return await ask_gateway(
@@ -415,7 +415,7 @@ def build_mcp_server() -> Any:
         task: str,
         project_context: str = "",
         mode: str = "pair_programming",
-        model: str = "claude-code-auto",
+        model: str = "claude-code-pro",
         max_tokens: int = 1600,
     ) -> dict[str, Any]:
         """Run a coworking-style coding session through this project's API."""

@@ -107,11 +107,11 @@ class Settings:
     public_trial_daily_limit: int = 1_200_000
     public_trial_label: str = "Teste grátis 24h"
 
-    economy_public_model: str = "local-model"
-    pro_public_model: str = "local-model"
-    ultra_public_model: str = "local-model"
-    ui_public_model: str = "local-model"
-    auto_public_model: str = "local-model"
+    economy_public_model: str = "claude-code-pro"
+    pro_public_model: str = "claude-code-pro"
+    ultra_public_model: str = "claude-code-pro"
+    ui_public_model: str = "claude-code-pro"
+    auto_public_model: str = "claude-code-pro"
 
     router_agent: str = "tencent/hy3-preview"
     cheap_code_agent: str = "deepseek/deepseek-v4-flash"
@@ -143,13 +143,13 @@ class Settings:
                 "auto_public_model",
             ):
                 if getattr(self, name) == "local-model":
-                    setattr(self, name, self.vps_model_id)
+                    setattr(self, name, "claude-code-pro")
 
     @classmethod
     def from_env(cls) -> "Settings":
         _load_dotenv()
         vps_model_id = os.getenv("VPS_MODEL_ID", "local-model")
-        public_model_id = os.getenv("PUBLIC_MODEL_ID", vps_model_id)
+        public_model_id = os.getenv("PUBLIC_MODEL_ID", "claude-code-pro")
         return cls(
             gateway_api_keys=_csv_env("GATEWAY_API_KEYS", "local-dev-token"),
             allow_unauthenticated=_bool_env("ALLOW_UNAUTHENTICATED", False),

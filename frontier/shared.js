@@ -17,18 +17,18 @@ const ClaudeApp = (() => {
 
   const models = {
     haiku: {
-      publicModel: "qwen-14b",
-      label: "qwen-14b",
+      publicModel: "claude-code-pro",
+      label: "Claude Sonnet 4.5",
       usdPerToken: 0.000000224,
     },
     sonnet: {
-      publicModel: "qwen-14b",
-      label: "qwen-14b",
+      publicModel: "claude-code-pro",
+      label: "Claude Sonnet 4.5",
       usdPerToken: 0.00000087,
     },
     opus: {
-      publicModel: "qwen-14b",
-      label: "qwen-14b",
+      publicModel: "claude-code-pro",
+      label: "Claude Sonnet 4.5",
       usdPerToken: 0.00000087,
     },
   };
@@ -122,15 +122,14 @@ const ClaudeApp = (() => {
 
   function normalizePublicModel(publicModel) {
     const value = String(publicModel || "").toLowerCase();
-    if (value === "qwen-14b" || value.includes("qwen")) return models.opus.publicModel;
-    if (value.includes("claude-code-economy")) return models.haiku.publicModel;
-    if (value.includes("claude-code-pro")) return models.sonnet.publicModel;
-    if (value.includes("claude-code-ultra")) return models.opus.publicModel;
-    if (value.includes("opus")) return models.opus.publicModel;
-    if (value.includes("haiku")) return models.haiku.publicModel;
-    if (value.includes("economy")) return models.haiku.publicModel;
-    if (value.includes("ultra")) return models.opus.publicModel;
-    return models.opus.publicModel;
+    if (value === "qwen-14b" || value.includes("qwen")) return models.sonnet.publicModel;
+    if (value.includes("claude-code")) return models.sonnet.publicModel;
+    if (value.includes("opus")) return models.sonnet.publicModel;
+    if (value.includes("haiku")) return models.sonnet.publicModel;
+    if (value.includes("sonnet")) return models.sonnet.publicModel;
+    if (value.includes("economy")) return models.sonnet.publicModel;
+    if (value.includes("ultra")) return models.sonnet.publicModel;
+    return models.sonnet.publicModel;
   }
 
   function apiSettings() {
@@ -369,11 +368,7 @@ const ClaudeApp = (() => {
   }
 
   function allowedPublicModelsForAccount(account) {
-    if (!account?.active) return [models.haiku.publicModel];
-    const key = normalizeModelKey(account?.modelKey);
-    if (key === "haiku") return [models.haiku.publicModel];
-    if (key === "sonnet") return [models.haiku.publicModel, models.sonnet.publicModel];
-    return [models.haiku.publicModel, models.sonnet.publicModel, models.opus.publicModel];
+    return [models.sonnet.publicModel];
   }
 
   function modelOptionsForAccount(account, selectedPublicModel) {

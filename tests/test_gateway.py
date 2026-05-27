@@ -505,7 +505,7 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
-        self.assertEqual(model_ids, {"qwen-14b"})
+        self.assertEqual(model_ids, {"claude-code-pro"})
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
         self.assertNotIn("localhost", response.headers["content-security-policy"])
@@ -913,7 +913,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "qwen-14b")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
         self.assertIn("Configuração aplicada", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
@@ -936,8 +936,8 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["requested_model"], "qwen-14b")
-        self.assertEqual(data["public_model"], "qwen-14b")
+        self.assertEqual(data["requested_model"], "claude-code-pro")
+        self.assertEqual(data["public_model"], "claude-code-pro")
         self.assertEqual(data["web_search_policy"], "off")
 
     def test_account_prompt_commands_are_saved_as_api_preferences(self) -> None:
@@ -972,11 +972,11 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(first.status_code, 200)
-            self.assertEqual(first.json()["requested_model"], "qwen-14b")
+            self.assertEqual(first.json()["requested_model"], "claude-code-pro")
 
             accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
             stored = next(item for item in accounts if item["id"] == account["id"])
-            self.assertEqual(stored["preferredModel"], "qwen-14b")
+            self.assertEqual(stored["preferredModel"], "claude-code-pro")
             self.assertEqual(stored["preferredReasoning"], "strong")
 
             second = client.post(
@@ -989,7 +989,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(second.status_code, 200)
-            self.assertEqual(second.json()["requested_model"], "qwen-14b")
+            self.assertEqual(second.json()["requested_model"], "claude-code-pro")
 
     def test_admin_ip_check_reports_detected_proxy_ip(self) -> None:
         settings = make_settings()
@@ -1248,7 +1248,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(debug.status_code, 200)
-            self.assertEqual(debug.json()["public_model"], "qwen-14b")
+            self.assertEqual(debug.json()["public_model"], "claude-code-pro")
 
     def test_public_trial_promotes_existing_free_accounts_and_expires_to_free(self) -> None:
         with TemporaryDirectory() as directory:
@@ -1592,7 +1592,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "qwen-14b")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
 
     def test_simple_pro_request_uses_single_fast_call_and_smaller_default_output(self) -> None:
@@ -1648,7 +1648,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "qwen-14b")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
         called_models = [model for model, _payload in self.app.state.openrouter.calls]
         self.assertGreaterEqual(len(called_models), 6)
         self.assertNotIn("anthropic/claude-sonnet-4.6", called_models)
@@ -1728,7 +1728,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["public_model"], "qwen-14b")
+        self.assertEqual(data["public_model"], "claude-code-pro")
         self.assertEqual(data["web_search_policy"], "off")
         self.assertFalse(data["web_search_should_search"])
         self.assertFalse(data["use_orchestration"])
@@ -1946,8 +1946,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "qwen-14b")
-            self.assertEqual(response.json()["public_model"], "qwen-14b")
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_customer_ultra_xstrong_avoids_expensive_models_by_default(self) -> None:
         expensive_models = {
@@ -2018,8 +2018,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "qwen-14b")
-            self.assertEqual(response.json()["public_model"], "qwen-14b")
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_frontend_tool_requests_skip_internal_helpers_for_speed(self) -> None:
         settings = make_settings()
@@ -2255,7 +2255,7 @@ class GatewayTestCase(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["requested_model"], "sonnet")
-            self.assertEqual(response.json()["public_model"], "qwen-14b")
+            self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_admin_can_recharge_account_with_tokens_or_brl(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -2348,8 +2348,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "qwen-14b")
-            self.assertEqual(response.json()["public_model"], "qwen-14b")
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
@@ -2364,7 +2364,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["object"], "response")
-        self.assertEqual(body["model"], "qwen-14b")
+        self.assertEqual(body["model"], "claude-code-pro")
         self.assertEqual(body["output"][0]["content"][0]["type"], "output_text")
 
     def test_openai_chat_completions_endpoint_accepts_gateway_token(self) -> None:
@@ -2380,7 +2380,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["object"], "chat.completion")
-        self.assertEqual(body["model"], "qwen-14b")
+        self.assertEqual(body["model"], "claude-code-pro")
         self.assertEqual(body["choices"][0]["message"]["role"], "assistant")
 
     def test_customer_conversations_are_saved_in_database(self) -> None:
@@ -2752,7 +2752,7 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
-        self.assertIn("qwen-14b", payload["system"])
+        self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
         self.assertIn("Automatic senior skill routing is active", payload["system"])
@@ -2793,7 +2793,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b'"model": "qwen-14b"', body)
+        self.assertIn(b'"model": "Claude Sonnet 4.5"', body)
 
     def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
         response = self.client.post(
@@ -2808,7 +2808,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("qwen-14b", payload["system"])
+        self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 16000)
 
@@ -2842,8 +2842,8 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "qwen-14b")
-        self.assertEqual(response.json()["content"][0]["text"], "qwen-14b")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
+        self.assertEqual(response.json()["content"][0]["text"], "Claude Sonnet 4.5")
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_previous_model_identity_question_does_not_override_next_request(self) -> None:
@@ -2865,7 +2865,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "qwen-14b")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
         self.assertNotIn("modo selecionado neste chat", response.json()["content"][0]["text"])
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 1)
 
@@ -2884,7 +2884,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"qwen-14b", body)
+        self.assertIn(b"Claude Sonnet 4.5", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

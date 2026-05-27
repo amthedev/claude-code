@@ -1,4 +1,4 @@
-# Analise do projeto e deploy Square Cloud
+# Analise do projeto
 
 Data da revisao: 2026-05-17.
 
@@ -53,7 +53,7 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 Voce pode criar clientes fixos em `CUSTOMER_ACCOUNTS` ou deixar o Admin gerar gift cards. Quando o cliente resgata um gift card, o backend gera um token `sk-...` automaticamente.
 
 ```env
-CUSTOMER_ACCOUNTS=sk-live-abc|Cliente|149.90|60000|claude-code-pro|true;sk-live-xyz|Maria|299.90|120000|claude-code-ultra|true
+CUSTOMER_ACCOUNTS=sk-live-abc|Cliente|149.90|60000|claude-code-pro|true;sk-live-xyz|Maria|299.90|120000|claude-code-pro|true
 ```
 
 Formato:
@@ -62,13 +62,9 @@ Formato:
 token|nome|preco_mensal_brl|limite_diario_tokens|modelo_publico_permitido|ativo
 ```
 
-Modelos publicos recomendados:
+Modelo publico disponivel:
 
-- `claude-code-economy`: barato, tarefas simples.
-- `claude-code-pro`: melhor equilibrio para Claude Code.
-- `claude-code-ultra`: raciocinio extra, ainda sem chamar Claude direto.
-- `claude-code-ui`: tarefas de frontend.
-- `claude-code-auto`: roteador automatico.
+- `claude-code-pro`: identidade publica Claude Sonnet 4.5, backed by `VPS_MODEL_ID`.
 
 Para o cliente usar no Claude Code:
 
@@ -76,9 +72,9 @@ Para o cliente usar no Claude Code:
 export ANTHROPIC_BASE_URL="https://SEU-SUBDOMINIO.squareweb.app"
 export ANTHROPIC_AUTH_TOKEN="TOKEN_DO_CLIENTE"
 export ANTHROPIC_API_KEY=""
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
@@ -93,14 +89,9 @@ Model: claude-code-pro
 O gateway expõe `POST /v1/responses` para Codex/Responses API e
 `POST /v1/chat/completions` para clientes que ainda usam Chat Completions.
 
-## Square Cloud
+## Deploy
 
-Arquivos adicionados:
-
-- `requirements.txt`: dependencias que a Square Cloud instala com `pip install`.
-- `squarecloud.app`: configuracao de deploy com `START=uvicorn claude_gateway.main:app --host 0.0.0.0 --port 80`.
-
-Variaveis obrigatorias no painel da Square Cloud:
+Para deploy, configure as seguintes variáveis de ambiente:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -119,10 +110,6 @@ ACCOUNT_DATA_FILE=data/gateway.sqlite3
 QUOTA_DATA_FILE=data/gateway.sqlite3
 CUSTOMER_ACCOUNTS=...
 ```
-
-O painel Admin nao precisa de `ADMIN_PASSWORD` nem `ADMIN_PASSWORD_HASH` na
-Square Cloud. No primeiro acesso a `/admin`, crie o usuario e a senha; o backend
-salva apenas o hash Argon2 no SQLite.
 
 `OPENAI_API_KEY` e opcional. Use quando quiser que o ChatGPT ajude na qualidade das respostas admin. Para liberar tambem em contas de clientes, adicione `OPENAI_HELPER_FOR_CUSTOMERS=true`, sabendo que isso aumenta custo.
 

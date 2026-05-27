@@ -26,14 +26,10 @@ OpenRouter só entra se a VPS falhar, der erro HTTP, retornar resposta inválida
 ## Modelos publicos
 
 ```text
-claude-code-economy
 claude-code-pro
-claude-code-ultra
-claude-code-ui
-claude-code-auto
 ```
 
-A VPS recebe sempre `VPS_MODEL_ID`, independentemente do modelo publico escolhido. Use `VPS_MODEL_API_FORMAT=openai-chat` para RunPod/vLLM/OpenAI-compatible e `anthropic` para `/v1/messages`.
+A VPS recebe sempre `VPS_MODEL_ID`. Use `VPS_MODEL_API_FORMAT=openai-chat` para RunPod/vLLM/OpenAI-compatible e `anthropic` para `/v1/messages`.
 
 ## Variaveis ainda configuraveis
 
@@ -68,11 +64,8 @@ ENABLE_AGENT_ORCHESTRATION=true
 
 ## Regras do roteador
 
-- `claude-code-economy`: mantém identidade e limites do plano economy, mas chama a VPS.
-- `claude-code-pro`: mantém identidade e limites do plano pro, mas chama a VPS.
-- `claude-code-ultra`: mantém identidade e limites do plano ultra, mas chama a VPS.
-- `claude-code-ui`: mantém identidade e limites de UI/frontend, mas chama a VPS.
-- `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
+- `claude-code-pro`: mantém a identidade pública Claude Sonnet 4.5 e chama a VPS.
+- Aliases antigos de modelo continuam aceitos por compatibilidade, mas são normalizados para `claude-code-pro`.
 - Pesquisa web: por padrão fica em `auto`; usa OpenAI Responses API `web_search` somente quando o pedido exige informação atual ou quando `gateway_web_search="required"`.
 
 Para compatibilidade com Claude Code, chamadas com `tools`, `tool_choice`, `tool_use` ou `tool_result` continuam indo direto para um único modelo. Isso é proposital: o ganho de inteligência vem do roteamento e do pipeline quando o pedido é texto puro; a edição real de arquivos precisa preservar o contrato de ferramentas.
@@ -81,7 +74,7 @@ Para compatibilidade com Claude Code, chamadas com `tools`, `tool_choice`, `tool
 
 O gateway injeta um perfil público do Claude em cada chamada, mantendo compatibilidade Anthropic:
 
-- responde usando a identidade pública selecionada (`Claude Haiku 4.5`, `Claude Sonnet 4.6`, `Claude Opus 4.7`, `Claude Code UI` ou `Claude Code Auto`);
+- responde usando a identidade pública `Claude Sonnet 4.5`;
 - preserva compatibilidade com Anthropic Messages API, streaming e tool calls;
 - mantém tom de Claude Code: direto, cuidadoso com código, orientado a arquivos/comandos/testes;
 - evita mencionar provedores internos, roteamento e agentes escondidos, salvo quando o usuário pedir detalhes técnicos.
@@ -94,10 +87,10 @@ Isso deixa a experiência muito próxima no terminal, mas modelos diferentes nã
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 export ANTHROPIC_API_KEY="local-dev-token"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-economy"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-ultra"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
-export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-ultra"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
+export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 export CLAUDE_CODE_ENABLE_AWAY_SUMMARY="0"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 ```

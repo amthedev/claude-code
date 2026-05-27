@@ -15,7 +15,7 @@ O modo padrao chama apenas `/v1/router/debug`. Ele valida:
 - perguntas simples ficam sem pipeline multiagente;
 - pedidos atuais ativam pesquisa web em `Auto`;
 - tool calls continuam sem orquestracao;
-- frontend vai para `claude-code-ui`;
+- frontend continua usando o único modelo público `claude-code-pro`;
 - bugs, arquitetura e tarefas profundas entram no pipeline quando faz sentido;
 - a rota efetiva continua dentro do alvo de custo.
 

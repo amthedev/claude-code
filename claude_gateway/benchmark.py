@@ -34,10 +34,10 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
     BenchmarkCase(
         id="identity_no_upstream",
         label="Identidade sem upstream",
-        model="claude-code-ultra",
+        model="claude-code-pro",
         prompt="qual modelo voce e?",
         live_default=True,
-        expect_mode="ultra",
+        expect_mode="pro",
         expect_web_search=False,
     ),
     BenchmarkCase(
@@ -62,7 +62,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
     BenchmarkCase(
         id="frontend_auto",
         label="Frontend automatico",
-        model="claude-code-auto",
+        model="claude-code-pro",
         prompt="Crie um dashboard React bonito para metricas financeiras.",
         expect_mode="ui",
         expect_task_type="frontend",
@@ -81,9 +81,9 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
     BenchmarkCase(
         id="architecture_ultra",
         label="Arquitetura Ultra",
-        model="claude-code-ultra",
+        model="claude-code-pro",
         prompt="Analise a arquitetura integral de todo o projeto e encontre riscos.",
-        expect_mode="ultra",
+        expect_mode="pro",
         expect_task_type="architecture",
         expect_orchestration=True,
         expect_web_search=False,

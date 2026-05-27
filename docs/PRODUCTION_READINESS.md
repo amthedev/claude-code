@@ -1,11 +1,10 @@
 # Claude Code production readiness
 
-Este checklist prepara o projeto para vender acesso real na Square Cloud sem depender de configuração manual frágil.
+Este checklist prepara o projeto para vender acesso real sem depender de configuração manual frágil.
 
-## Caminho recomendado na Square Cloud
+## Deploy
 
-1. Configure o app com `squarecloud.app`.
-2. Defina variáveis no painel da Square Cloud:
+1. Defina variáveis de ambiente:
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -56,7 +55,7 @@ curl -s https://SEU-SUBDOMINIO.squareweb.app/v1/router/debug \
 curl -s https://SEU-SUBDOMINIO.squareweb.app/v1/messages \
   -H "Authorization: Bearer um-token-admin-forte" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-code-economy","gateway_web_search":"required","max_tokens":256,"messages":[{"role":"user","content":"Pesquise uma notícia atual de tecnologia e cite fontes."}]}' | jq
+  -d '{"model":"claude-code-pro","gateway_web_search":"required","max_tokens":256,"messages":[{"role":"user","content":"Pesquise uma notícia atual de tecnologia e cite fontes."}]}' | jq
 ```
 
 ## Riscos e rollback

@@ -154,34 +154,10 @@ HIGH_COMPLEXITY_KEYWORDS = {
 def model_profiles(settings: Settings) -> list[ModelProfile]:
     profiles = [
         ModelProfile(
-            id=settings.economy_public_model,
-            display_name=settings.economy_public_model,
-            mode="economy",
-            description="Modelo real da VPS para respostas rápidas.",
-        ),
-        ModelProfile(
             id=settings.pro_public_model,
-            display_name=settings.pro_public_model,
+            display_name="Claude Sonnet 4.5",
             mode="pro",
-            description="Modelo real da VPS para código, análise e trabalho diário.",
-        ),
-        ModelProfile(
-            id=settings.ultra_public_model,
-            display_name=settings.ultra_public_model,
-            mode="ultra",
-            description="Modelo real da VPS com raciocínio reforçado quando necessário.",
-        ),
-        ModelProfile(
-            id=settings.ui_public_model,
-            display_name=settings.ui_public_model,
-            mode="ui",
-            description="Modelo real da VPS para frontend, layout e experiência visual.",
-        ),
-        ModelProfile(
-            id=settings.auto_public_model,
-            display_name=settings.auto_public_model,
-            mode="auto",
-            description="Modelo real da VPS com ajuste automático de esforço.",
+            description="Modelo disponível para código, análise e trabalho diário.",
         ),
     ]
     seen: set[str] = set()

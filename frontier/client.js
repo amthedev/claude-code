@@ -525,13 +525,13 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Claude Sonnet 4.6";
+  return option?.textContent || "Claude Sonnet 4.5";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet 4.6";
+    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet 4.5";
   });
 }
 
@@ -711,9 +711,9 @@ GATEWAY_KEYS = {{
     "ANTHROPIC_BASE_URL": BASE_URL,
     "ANTHROPIC_AUTH_TOKEN": API_TOKEN,
     "ANTHROPIC_API_KEY": API_TOKEN,
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": SELECTED_MODEL,
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
     "CLAUDE_CODE_SUBAGENT_MODEL": SELECTED_MODEL,
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
@@ -795,9 +795,9 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_AUTH_TOKEN": api_token,
         "ANTHROPIC_API_KEY": api_token,
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
         "ANTHROPIC_DEFAULT_SONNET_MODEL": selected_model,
-        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
         "CLAUDE_CODE_SUBAGENT_MODEL": selected_model,
         "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
@@ -822,9 +822,9 @@ function terminalCommand(config) {
       ANTHROPIC_BASE_URL: config.baseUrl,
       ANTHROPIC_AUTH_TOKEN: config.token,
       ANTHROPIC_API_KEY: config.token,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-code-economy",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-code-pro",
       ANTHROPIC_DEFAULT_SONNET_MODEL: config.model,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-ultra",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-pro",
       CLAUDE_CODE_SUBAGENT_MODEL: config.model,
       CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "16000",
@@ -851,9 +851,9 @@ env.update({
     "ANTHROPIC_BASE_URL": ${JSON.stringify(config.baseUrl)},
     "ANTHROPIC_AUTH_TOKEN": ${JSON.stringify(config.token)},
     "ANTHROPIC_API_KEY": ${JSON.stringify(config.token)},
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-economy",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(config.model)},
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
     "CLAUDE_CODE_SUBAGENT_MODEL": ${JSON.stringify(config.model)},
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
@@ -973,7 +973,7 @@ function renderApiInstallGuide() {
       </div>
       <div class="api-kv">
         <strong>Comandos no chat</strong>
-        <code>/modelo Claude Code Auto | /modelo Claude Sonnet 4.6 | /modelo Claude Opus 4.7</code>
+        <code>/modelo Claude Sonnet 4.5</code>
         <code>/raciocinio Automatico | Rapido | Normal | Medio | Forte | Extra forte</code>
       </div>
     </section>
@@ -1208,10 +1208,7 @@ function syncCustomerApiToken(current) {
 }
 
 function modelKeyLabel(modelKey) {
-  const key = ClaudeApp.normalizeModelKey(modelKey);
-  if (key === "haiku") return "Claude Haiku 4.5";
-  if (key === "sonnet") return "Claude Sonnet 4.6";
-  return "Claude Opus 4.7";
+  return "Claude Sonnet 4.5";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1236,7 +1233,7 @@ function renderPlanCards() {
       : "";
     const upgradeText =
       highlightedPlanId === "ultra"
-        ? "Claude Opus 4.7 está no plano 30X. Faça upgrade para liberar respostas mais fortes."
+        ? "Claude Sonnet 4.5 está disponível em todos os planos; o 30X libera mais limite."
         : "";
     notice.classList.toggle("hidden", !trialText && !highlightedPlanId);
     notice.textContent = trialText || upgradeText;
@@ -1265,7 +1262,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">${plan.modelKey === "opus" ? "Inclui Claude Opus 4.7 para trabalhos mais pesados." : plan.modelKey === "sonnet" ? "Inclui Claude Sonnet 4.6 para trabalho diário." : "Inclui Claude Haiku 4.5 para tarefas leves."}</p>
+            <p class="plan-model-note">Inclui Claude Sonnet 4.5.</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -3838,18 +3835,16 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
   const item = event.target.closest("[data-model-value]");
   if (!item) return;
   const current = account();
-  const selectedRequiresPlan = item.dataset.modelValue !== "claude-code-economy";
+  const selectedRequiresPlan = false;
   const selectedAllowed =
     current?.active && ClaudeApp.allowedPublicModelsForAccount(current).includes(item.dataset.modelValue);
   if ((!current?.active && selectedRequiresPlan) || (current?.active && !selectedAllowed)) {
     closeFloatingMenus();
-    highlightedPlanId = item.dataset.modelValue === "claude-code-ultra" ? "ultra" : "";
+    highlightedPlanId = "";
     setPanel("plansPanel");
     focusHighlightedPlan();
     showChatNotice(
-      item.dataset.modelValue === "claude-code-ultra"
-        ? "Claude Opus 4.7 está no plano 30X."
-        : "Esse modelo exige upgrade de plano.",
+      "Claude Sonnet 4.5 é o único modelo disponível.",
     );
     return;
   }

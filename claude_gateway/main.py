@@ -371,7 +371,7 @@ def create_app(
         control_answer = _prompt_control_answer(payload, app.state.settings)
         if control_answer:
             message = build_text_message(
-                decision.public_model,
+                _public_model_label(decision.public_model, app.state.settings),
                 control_answer,
                 usage={"input_tokens": 0, "output_tokens": len(control_answer.split())},
             )
@@ -394,7 +394,7 @@ def create_app(
         if identity_answer:
             app.state.usage.record_request(decision)
             message = build_text_message(
-                decision.public_model,
+                _public_model_label(decision.public_model, app.state.settings),
                 identity_answer,
                 usage={"input_tokens": 0, "output_tokens": len(identity_answer.split())},
             )
@@ -424,6 +424,7 @@ def create_app(
                     raise
 
                 _settle_customer_budget(app, reservation, payload, decision, response)
+                response = _with_public_response_model(response, decision.public_model, app.state.settings)
                 return StreamingResponse(
                     _stream_text_message(response),
                     media_type="text/event-stream",
@@ -433,7 +434,7 @@ def create_app(
             return StreamingResponse(
                 _public_model_stream_with_budget_settlement(
                     app.state.model_client.stream_messages(payload, decision.selected_openrouter_model),
-                    decision.public_model,
+                    _public_model_label(decision.public_model, app.state.settings),
                     app=app,
                     reservation=reservation,
                     payload=payload,
@@ -455,6 +456,7 @@ def create_app(
             raise
 
         _settle_customer_budget(app, reservation, payload, decision, response)
+        response = _with_public_response_model(response, decision.public_model, app.state.settings)
         return JSONResponse(response)
 
     @app.post("/v1/auth/signup")
@@ -1691,7 +1693,7 @@ async def _complete_gateway_message(
     if control_answer:
         return (
             build_text_message(
-                decision.public_model,
+                _public_model_label(decision.public_model, app.state.settings),
                 control_answer,
                 usage={"input_tokens": 0, "output_tokens": len(control_answer.split())},
             ),
@@ -1710,7 +1712,7 @@ async def _complete_gateway_message(
         app.state.usage.record_request(decision)
         return (
             build_text_message(
-                decision.public_model,
+                _public_model_label(decision.public_model, app.state.settings),
                 identity_answer,
                 usage={"input_tokens": 0, "output_tokens": len(identity_answer.split())},
             ),
@@ -1733,6 +1735,7 @@ async def _complete_gateway_message(
         _rollback_customer_budget(app, reservation)
         raise
     _settle_customer_budget(app, reservation, payload, decision, response)
+    response = _with_public_response_model(response, decision.public_model, app.state.settings)
     return response, decision.public_model
 
 
@@ -3014,7 +3017,32 @@ def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any
 
 
 def _public_model_label(public_model: str, settings: Settings) -> str:
-    return public_model or settings.vps_model_id
+    public = str(public_model or "").strip()
+    lowered = public.lower()
+    labels = {
+        settings.economy_public_model.lower(): "Claude Sonnet 4.5",
+        settings.pro_public_model.lower(): "Claude Sonnet 4.5",
+        settings.ultra_public_model.lower(): "Claude Sonnet 4.5",
+        settings.ui_public_model.lower(): "Claude Sonnet 4.5",
+        settings.auto_public_model.lower(): "Claude Sonnet 4.5",
+        "claude-code-economy": "Claude Sonnet 4.5",
+        "claude-code-pro": "Claude Sonnet 4.5",
+        "claude-code-ultra": "Claude Sonnet 4.5",
+        "claude-code-ui": "Claude Sonnet 4.5",
+        "claude-code-auto": "Claude Sonnet 4.5",
+        "qwen-14b": "Claude Sonnet 4.5",
+    }
+    if lowered in labels:
+        return labels[lowered]
+    if "qwen" in lowered:
+        return "Claude Sonnet 4.5"
+    return public or settings.vps_model_id
+
+
+def _with_public_response_model(response: dict[str, Any], public_model: str, settings: Settings) -> dict[str, Any]:
+    outgoing = dict(response)
+    outgoing["model"] = _public_model_label(public_model, settings)
+    return outgoing
 
 
 def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:
