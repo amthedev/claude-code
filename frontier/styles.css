@@ -1405,6 +1405,26 @@ code {
   min-width: 0;
 }
 
+.message-thinking {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(142, 128, 98, 0.28);
+  border-radius: 8px;
+  background: rgba(245, 242, 234, 0.62);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.message-thinking summary {
+  cursor: pointer;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+}
+
+.message-thinking > div {
+  margin-top: 8px;
+}
+
 .message.assistant[data-typing="true"] .message-body::after {
   content: "";
   display: inline-block;

@@ -12,8 +12,8 @@ _DUPLICATED_WORD_RE = re.compile(r"\b([^\W_]+)(\s+)\1\b", re.IGNORECASE | re.UNI
 _PREFIX_FRAGMENT_RE = re.compile(r"\b([^\W_]{1,8})(\s+)(\1[^\W_]{2,})\b", re.IGNORECASE | re.UNICODE)
 _MARKDOWN_PAIR_RE = re.compile(r"(\*\*|__|\*|_)\s+\1")
 _BROKEN_TIME_EMPHASIS_RE = re.compile(r"\*(\d+[–-]\d+\s*min)\*\*")
-_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>.*?</think>\s*")
-_OPEN_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>.*\Z")
+_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>(.*?)</think>\s*")
+_OPEN_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>(.*)\Z")
 _THINK_TAG_RE = re.compile(r"(?is)</?think\b[^>]*>\s*")
 _GLUED_REPAIRS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bParaprender\b", re.IGNORECASE), "Para aprender"),
@@ -130,6 +130,33 @@ def clean_model_text(text: str, *, strip: bool = True) -> str:
     if not value:
         return value
     value = _strip_thinking_text(value)
+    return _clean_visible_text(value, strip=strip)
+
+
+def split_thinking_text(text: str, *, strip: bool = True) -> tuple[str, str]:
+    value = str(text or "")
+    if not value:
+        return "", value
+
+    thinking_parts = [match.group(1) for match in _THINK_BLOCK_RE.finditer(value)]
+    visible = _THINK_BLOCK_RE.sub("", value)
+    open_match = _OPEN_THINK_BLOCK_RE.search(visible)
+    if open_match:
+        thinking_parts.append(open_match.group(1))
+        visible = visible[: open_match.start()]
+    visible = _THINK_TAG_RE.sub("", visible)
+
+    thinking = "\n\n".join(
+        _clean_visible_text(part, strip=True)
+        for part in thinking_parts
+        if str(part or "").strip()
+    )
+    return thinking, _clean_visible_text(visible, strip=strip)
+
+
+def _clean_visible_text(value: str, *, strip: bool = True) -> str:
+    if not value:
+        return value
 
     chunks = re.split(r"(```[\s\S]*?```)", value)
     cleaned = [

@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from .anthropic import clean_model_text
+from .anthropic import clean_model_text, split_thinking_text
 from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
@@ -329,7 +329,11 @@ class VPSAnthropicClient:
         content: list[dict[str, Any]] = []
         text = message.get("content")
         if isinstance(text, str) and text:
-            content.append({"type": "text", "text": clean_model_text(text)})
+            thinking_text, visible_text = split_thinking_text(text)
+            if thinking_text:
+                content.append({"type": "thinking", "thinking": thinking_text})
+            if visible_text:
+                content.append({"type": "text", "text": visible_text})
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
             for tool_call in tool_calls:
@@ -414,7 +418,7 @@ class VPSAnthropicClient:
         yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"'
         yield target.model_id.encode("utf-8")
         yield b'","role":"assistant","content":[]}}\n\n'
-        yield b'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
+        state = _QwenThinkingStreamState()
 
         buffer = ""
         async for chunk in chunks:
@@ -423,22 +427,17 @@ class VPSAnthropicClient:
                 event, buffer = buffer.split("\n\n", 1)
                 text_delta = self._openai_text_delta(event)
                 if text_delta:
-                    yield (
-                        "event: content_block_delta\n"
-                        f"data: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text_delta}})}"
-                        "\n\n"
-                    ).encode("utf-8")
+                    for outgoing in state.feed(text_delta):
+                        yield outgoing
 
         if buffer:
             text_delta = self._openai_text_delta(buffer)
             if text_delta:
-                yield (
-                    "event: content_block_delta\n"
-                    f"data: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text_delta}})}"
-                    "\n\n"
-                ).encode("utf-8")
+                for outgoing in state.feed(text_delta):
+                    yield outgoing
 
-        yield b'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+        for outgoing in state.finish():
+            yield outgoing
         yield b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":0}}\n\n'
         yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
@@ -465,6 +464,104 @@ class VPSAnthropicClient:
             return ""
         content = delta.get("content")
         return content if isinstance(content, str) else ""
+
+
+class _QwenThinkingStreamState:
+    def __init__(self) -> None:
+        self.raw_text = ""
+        self.thinking_text = ""
+        self.visible_text = ""
+        self.thinking_started = False
+        self.thinking_stopped = False
+        self.text_started = False
+
+    def feed(self, delta: str) -> list[bytes]:
+        self.raw_text += str(delta or "")
+        next_thinking, next_visible = split_thinking_text(self.raw_text, strip=False)
+        events: list[bytes] = []
+
+        if next_thinking and not self.thinking_started:
+            events.append(
+                _anthropic_sse(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "thinking", "thinking": ""},
+                    },
+                )
+            )
+            self.thinking_started = True
+
+        thinking_delta = _next_delta(self.thinking_text, next_thinking)
+        if thinking_delta:
+            events.append(
+                _anthropic_sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "thinking_delta", "thinking": thinking_delta},
+                    },
+                )
+            )
+            self.thinking_text = next_thinking
+
+        if next_visible and self.thinking_started and not self.thinking_stopped:
+            events.append(_anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": 0}))
+            self.thinking_stopped = True
+
+        text_index = 1 if self.thinking_started else 0
+        if next_visible and not self.text_started:
+            events.append(
+                _anthropic_sse(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": text_index,
+                        "content_block": {"type": "text", "text": ""},
+                    },
+                )
+            )
+            self.text_started = True
+
+        visible_delta = _next_delta(self.visible_text, next_visible)
+        if visible_delta:
+            events.append(
+                _anthropic_sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": text_index,
+                        "delta": {"type": "text_delta", "text": visible_delta},
+                    },
+                )
+            )
+            self.visible_text = next_visible
+
+        return events
+
+    def finish(self) -> list[bytes]:
+        events: list[bytes] = []
+        if self.thinking_started and not self.thinking_stopped:
+            events.append(_anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": 0}))
+            self.thinking_stopped = True
+        if self.text_started:
+            text_index = 1 if self.thinking_started else 0
+            events.append(_anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": text_index}))
+        return events
+
+
+def _next_delta(previous: str, current: str) -> str:
+    if not current or current == previous:
+        return ""
+    if current.startswith(previous):
+        return current[len(previous) :]
+    return current
+
+
+def _anthropic_sse(event: str, payload: dict[str, Any]) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
 
 
 class EmergencyFallbackModelClient:

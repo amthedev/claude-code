@@ -408,7 +408,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response["content"], [{"type": "text", "text": "Olá!"}])
         self.assertEqual(response["usage"], {"input_tokens": 7, "output_tokens": 3})
 
-    def test_vps_openai_chat_response_hides_qwen_thinking_text(self) -> None:
+    def test_vps_openai_chat_response_separates_qwen_thinking_text(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
         settings.vps_model_api_format = "openai-chat"
@@ -427,7 +427,13 @@ class GatewayTestCase(unittest.TestCase):
             }
         )
 
-        self.assertEqual(response["content"], [{"type": "text", "text": "Resposta limpa."}])
+        self.assertEqual(
+            response["content"],
+            [
+                {"type": "thinking", "thinking": "rascunho interno"},
+                {"type": "text", "text": "Resposta limpa."},
+            ],
+        )
 
     def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
         settings = make_settings()
@@ -445,6 +451,25 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"text": "Ol"', body)
         self.assertIn(b'"text": "a"', body)
         self.assertIn(b"event: message_stop", body)
+
+    def test_vps_openai_chat_stream_separates_qwen_thinking_sse(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"<think>ras"}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"content":"cunho</think>Resposta"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
+
+        self.assertIn(b'"content_block": {"type": "thinking", "thinking": ""}', body)
+        self.assertIn(b'"delta": {"type": "thinking_delta", "thinking": "ras"', body)
+        self.assertIn(b'"delta": {"type": "thinking_delta", "thinking": "cunho"', body)
+        self.assertIn(b'"content_block": {"type": "text", "text": ""}', body)
+        self.assertIn(b'"delta": {"type": "text_delta", "text": "Resposta"', body)
 
     def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
         settings = make_settings()

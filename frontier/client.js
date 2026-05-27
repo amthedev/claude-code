@@ -1857,7 +1857,15 @@ function renderMessageNode(node, role, text, options = {}) {
     const messageIndex = node.dataset.messageIndex || "";
     const isPending = !text || text === "Pensando...";
     const isTyping = Boolean(options.isTyping);
+    const thinkingText = node.dataset.thinkingText || "";
+    const thinkingHtml = thinkingText
+      ? `<details class="message-thinking" ${isTyping ? "open" : ""}>
+          <summary>Pensamento</summary>
+          <div>${renderAssistantMarkdown(thinkingText)}</div>
+        </details>`
+      : "";
     node.innerHTML = `
+      ${thinkingHtml}
       <div class="message-body">${renderAssistantMarkdown(text)}</div>
       <div class="message-actions ${isPending || isTyping ? "hidden" : ""}">
         <button type="button" class="message-copy-button" data-copy-message-index="${ClaudeApp.escapeHtml(messageIndex)}" aria-label="Copiar resposta">
@@ -1877,6 +1885,13 @@ function renderAssistantDisplay(message, displayText, isTyping = false) {
   message.node.dataset.displayText = displayText || "";
   renderMessageNode(message.node, activeConversation[message.index].role, displayText, { isTyping });
   message.node.scrollIntoView({ block: "end" });
+}
+
+function updateThinkingDisplay(message, thinkingText) {
+  if (message.sessionKey !== activeChatSessionKey) return;
+  if (!activeConversation[message.index]) return;
+  message.node.dataset.thinkingText = thinkingText || "";
+  renderAssistantDisplay(message, activeConversation[message.index].content || "", true);
 }
 
 function addMessage(role, text) {
@@ -2284,7 +2299,7 @@ async function openConversation(conversationId) {
   }
 }
 
-function parseGatewayStreamChunk(buffer, onText) {
+function parseGatewayStreamChunk(buffer, onText, onThinking = () => {}) {
   const events = buffer.split("\n\n");
   const remainder = events.pop() || "";
 
@@ -2309,8 +2324,16 @@ function parseGatewayStreamChunk(buffer, onText) {
         onText(delta.text);
         return;
       }
+      if (delta.type === "thinking_delta" && typeof delta.thinking === "string" && delta.thinking) {
+        onThinking(delta.thinking);
+        return;
+      }
       if (typeof delta.text === "string" && delta.text) {
         onText(delta.text);
+        return;
+      }
+      if (typeof delta.thinking === "string" && delta.thinking) {
+        onThinking(delta.thinking);
         return;
       }
 
@@ -2383,10 +2406,26 @@ function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMod
   const availableRawTokens = Math.floor(remaining / reasoningTokenMultiplier(mode));
   const availableOutput = availableRawTokens - estimatedInput;
   if (availableOutput <= 0) return 0;
-  return Math.max(1, Math.min(1200, availableOutput));
+  return Math.max(1, Math.min(outputTokenCapForMode(mode), availableOutput));
 }
 
-async function callGateway(selectedModel, messages, onText, maxTokens = 1200, selectedReasoningMode = reasoningMode) {
+function outputTokenCapForMode(mode = reasoningMode) {
+  const normalized = normalizeReasoningMode(mode);
+  if (normalized === "fast") return 1200;
+  if (normalized === "medium") return 3000;
+  if (normalized === "strong") return 4096;
+  if (normalized === "xstrong") return 6000;
+  return 2200;
+}
+
+async function callGateway(
+  selectedModel,
+  messages,
+  onText,
+  maxTokens = 1200,
+  selectedReasoningMode = reasoningMode,
+  onThinking = () => {},
+) {
   const settings = ClaudeApp.apiSettings();
   const searchMode = selectedReasoningMode === "fast" && webSearchMode === "auto" ? "off" : webSearchMode;
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
@@ -2397,7 +2436,10 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200, se
     },
     body: JSON.stringify({
       model: selectedModel,
-      max_tokens: Math.max(1, Math.min(1200, Math.floor(Number(maxTokens) || 1))),
+      max_tokens: Math.max(
+        1,
+        Math.min(outputTokenCapForMode(selectedReasoningMode), Math.floor(Number(maxTokens) || 1)),
+      ),
       stream: true,
       gateway_web_search: searchMode,
       gateway_reasoning_mode: selectedReasoningMode,
@@ -2429,6 +2471,7 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200, se
   const decoder = new TextDecoder();
   let buffer = "";
   let answer = "";
+  let thinking = "";
 
   while (true) {
     const { value, done } = await reader.read();
@@ -2437,6 +2480,9 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200, se
     buffer = parseGatewayStreamChunk(buffer, (text) => {
       answer = mergeStreamText(answer, text);
       onText(answer.trimStart());
+    }, (text) => {
+      thinking = mergeStreamText(thinking, text);
+      onThinking(thinking.trimStart());
     });
   }
 
@@ -2512,7 +2558,10 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
     stopChatProgress();
     updateStreamingMessage(assistantMessage, partialAnswer);
-  }, reservedOutput, selectedReasoningMode);
+  }, reservedOutput, selectedReasoningMode, (partialThinking) => {
+    stopChatProgress();
+    updateThinkingDisplay(assistantMessage, partialThinking);
+  });
   stopChatProgress();
   if (activeChatMode === "code" && promptRequestsTerminal(prompt)) {
     const command = defaultWorkspaceTestCommand();
