@@ -963,12 +963,14 @@ async function runVpsAction(action) {
   try {
     const data = await adminRequest("/v1/admin/vps/actions", {
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, hours: 12 }),
     });
     if (message) {
       message.textContent =
         data.status?.status === "success"
-          ? "Comando enviado para a VPS. Aguarde o vLLM carregar o modelo antes de testar o chat."
+          ? action === "start"
+            ? `VPS ligada por 12h. Desliga automaticamente${data.status.nextTransitionAt ? ` em ${new Date(data.status.nextTransitionAt).toLocaleString("pt-BR")}` : ""}.`
+            : "Comando enviado para desligar a VPS."
           : data.status?.error || "A RunPod não aceitou o comando. Confira RUNPOD_API_KEY e RUNPOD_POD_ID.";
     }
     const fresh = await adminRequest("/v1/admin/vps/schedules");

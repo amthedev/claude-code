@@ -730,7 +730,10 @@ def create_app(
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"status": await app.state.vps_schedules.manual_action(str(payload.get("action") or ""))})
+        action = str(payload.get("action") or "")
+        if action.strip().lower() == "start":
+            return JSONResponse({"status": await app.state.vps_schedules.start_for_hours(int(payload.get("hours") or 12))})
+        return JSONResponse({"status": await app.state.vps_schedules.manual_action(action)})
 
     @app.get("/v1/admin/purchases")
     async def list_purchases(request: Request) -> dict[str, Any]:

@@ -901,7 +901,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertFalse(listed.json()["status"]["configured"])
             self.assertEqual(len(listed.json()["data"]), 1)
 
-    def test_admin_can_start_vps_manually(self) -> None:
+    def test_admin_can_start_vps_for_12_hours(self) -> None:
         with TemporaryDirectory() as directory:
             settings = make_settings()
             settings.account_data_file = f"{directory}/gateway.sqlite3"
@@ -927,7 +927,10 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.json()["status"]["action"], "start")
             self.assertEqual(response.json()["status"]["desiredState"], "on")
             self.assertTrue(response.json()["status"]["runpodApiConfigured"])
-            self.assertIn("vLLM", response.json()["status"]["message"])
+            self.assertIn("12h", response.json()["status"]["message"])
+            self.assertEqual(response.json()["status"]["schedule"]["id"], "manual_12h")
+            self.assertEqual(response.json()["status"]["schedule"]["onHours"], 12)
+            self.assertTrue(response.json()["status"]["nextTransitionAt"])
 
     def test_admin_vps_manual_action_returns_controlled_error(self) -> None:
         with TemporaryDirectory() as directory:

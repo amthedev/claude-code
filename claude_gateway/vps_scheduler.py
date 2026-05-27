@@ -140,6 +140,76 @@ class VPSScheduleStore:
             "message": "RunPod command sent. vLLM can still take a few minutes to finish loading the model.",
         }
 
+    async def start_for_hours(self, hours: int = 12) -> dict[str, Any]:
+        if not self.settings.runpod_api_key or not self.settings.runpod_pod_id:
+            raise HTTPException(status_code=400, detail="RunPod credentials are not configured.")
+        duration_hours = max(1, min(24 * 30, int(hours or 12)))
+        start_at = datetime.now(UTC)
+        schedule = self._upsert_manual_window(start_at, duration_hours)
+        try:
+            await self._runpod("start")
+        except Exception as exc:
+            self._record(schedule["id"], "on", str(exc)[:500])
+            return {
+                "action": "start",
+                "status": "error",
+                **self.status(),
+                "desiredState": "on",
+                "error": str(exc)[:500],
+                "schedule": self._schedule_by_id(schedule["id"]) or schedule,
+            }
+        self._record(schedule["id"], "on", "")
+        schedule = self._schedule_by_id(schedule["id"]) or schedule
+        desired = self._desired_state(schedule)
+        return {
+            "action": "start",
+            "status": "success",
+            **self.status(),
+            "desiredState": "on",
+            "nextTransitionAt": desired.get("nextTransitionAt") or "",
+            "schedule": schedule,
+            "message": f"VPS ligada por {duration_hours}h. Desligamento automático programado.",
+        }
+
+    def _upsert_manual_window(self, start_at: datetime, hours: int) -> dict[str, Any]:
+        schedule = _schedule_from_values(
+            {
+                "id": "manual_12h",
+                "name": "Ligada manualmente por 12h",
+                "startAt": start_at.isoformat(),
+                "days": 1,
+                "onHours": hours,
+                "offHours": 1,
+                "active": True,
+            }
+        )
+        with self._lock, self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO vps_schedules (
+                    id, name, start_at, days, on_hours, off_hours, active,
+                    last_desired_state, last_action_at, last_error, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    start_at = excluded.start_at,
+                    days = excluded.days,
+                    on_hours = excluded.on_hours,
+                    off_hours = excluded.off_hours,
+                    active = excluded.active,
+                    last_desired_state = '',
+                    last_error = ''
+                """,
+                _schedule_values(schedule),
+            )
+            db.commit()
+        return schedule
+
+    def _schedule_by_id(self, schedule_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM vps_schedules WHERE id = ?", (schedule_id,)).fetchone()
+        return _schedule_from_row(row) if row else None
+
     def _desired_state(self, schedule: dict[str, Any]) -> dict[str, str]:
         start_at = _parse_datetime(schedule.get("startAt"))
         if not start_at:
