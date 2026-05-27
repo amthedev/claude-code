@@ -19,7 +19,8 @@ from claude_gateway.accounts import _calculate_limit
 from claude_gateway.config import Settings
 from claude_gateway.customers import _today, daily_cost_budget_usd, estimate_reserved_tokens, parse_customer_accounts
 from claude_gateway.main import _public_model_stream, create_app
-from claude_gateway.openrouter import OpenRouterClient
+from claude_gateway.model_client import VPSAnthropicClient
+from claude_gateway.openrouter import OpenRouterClient, OpenRouterError
 from claude_gateway.research import WebSearchResult, WebSource, parse_web_search_response
 from claude_gateway.skills import SKILL_CATALOG, select_skills
 
@@ -55,6 +56,29 @@ class FakeUsageStreamingOpenRouterClient(FakeOpenRouterClient):
         yield f'data: {{"message": {{"model": "{model}", "provider": "fake"}}}}\n\n'.encode()
         yield b'event: message_delta\ndata: {"type":"message_delta","usage":{"input_tokens":3,"output_tokens":5}}\n\n'
         yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+
+class FakeFailingVPSClient(FakeOpenRouterClient):
+    async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
+        self.calls.append((model, payload))
+        raise OpenRouterError("VPS failed", status_code=502)
+
+    async def stream_messages(self, payload: dict[str, Any], model: str):
+        self.calls.append((model, payload))
+        raise OpenRouterError("VPS stream failed", status_code=502)
+        yield b""
+
+
+class FakeSlowVPSClient(FakeOpenRouterClient):
+    async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
+        self.calls.append((model, payload))
+        await asyncio.sleep(0.05)
+        return await super().complete_messages(payload, model)
+
+    async def stream_messages(self, payload: dict[str, Any], model: str):
+        self.calls.append((model, payload))
+        await asyncio.sleep(0.05)
+        yield b"event: message_start\n"
 
 
 class FakeOpenAIHelper:
@@ -266,6 +290,155 @@ class GatewayTestCase(unittest.TestCase):
         sent_payload = app.state.openrouter.calls[-1][1]
         self.assertEqual(sent_payload["messages"], [{"role": "user", "content": "responda agora"}])
 
+    def test_vps_payload_uses_single_configured_model_and_strips_internal_fields(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "vps-main"
+        settings.vps_model_api_key = ""
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._payload_for_model(
+            {
+                "model": "claude-code-ultra",
+                "__gateway_reasoning": "high",
+                "__gateway_route_decision": object(),
+                "reasoning": {"effort": "high"},
+                "include_reasoning": True,
+                "messages": [{"role": "user", "content": "Oi"}],
+            },
+            "deepseek/deepseek-v4-pro",
+        )
+
+        self.assertEqual(outgoing["model"], "vps-main")
+        self.assertNotIn("__gateway_reasoning", outgoing)
+        self.assertNotIn("__gateway_route_decision", outgoing)
+        self.assertNotIn("reasoning", outgoing)
+        self.assertNotIn("include_reasoning", outgoing)
+        self.assertNotIn("Authorization", client._headers())
+
+        settings.vps_model_api_key = "vps-secret"
+        self.assertEqual(client._headers()["Authorization"], "Bearer vps-secret")
+
+    def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
+        settings = make_settings()
+        app = create_app(
+            settings=settings,
+            client_factory=FakeFailingVPSClient,
+            openrouter_fallback_factory=FakeOpenRouterClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Diga oi"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.model_client.fallback_uses, 1)
+        self.assertEqual(len(app.state.model_client.primary.calls), 1)
+        self.assertEqual(len(app.state.model_client.fallback.calls), 1)
+
+    def test_slow_vps_uses_openrouter_emergency_fallback_before_first_response(self) -> None:
+        settings = make_settings()
+        settings.vps_model_slow_fallback_seconds = 0.01
+        app = create_app(
+            settings=settings,
+            client_factory=FakeSlowVPSClient,
+            openrouter_fallback_factory=FakeOpenRouterClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Diga oi"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.model_client.fallback_uses, 1)
+        self.assertEqual(len(app.state.model_client.fallback.calls), 1)
+
+    def test_vps_error_without_fallback_returns_error(self) -> None:
+        settings = make_settings()
+        settings.openrouter_emergency_fallback = False
+        app = create_app(
+            settings=settings,
+            client_factory=FakeFailingVPSClient,
+            openrouter_fallback_factory=FakeOpenRouterClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Diga oi"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIsNone(app.state.model_client.fallback)
+
+    def test_vps_error_without_openrouter_key_does_not_try_fallback(self) -> None:
+        settings = make_settings()
+        settings.openrouter_api_key = ""
+        app = create_app(
+            settings=settings,
+            client_factory=FakeFailingVPSClient,
+            openrouter_fallback_factory=FakeOpenRouterClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Diga oi"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIsNone(app.state.model_client.fallback)
+
+    def test_streaming_vps_failure_before_first_chunk_uses_openrouter_fallback(self) -> None:
+        settings = make_settings()
+        app = create_app(
+            settings=settings,
+            client_factory=FakeFailingVPSClient,
+            openrouter_fallback_factory=FakeOpenRouterClient,
+        )
+        client = TestClient(app)
+
+        with client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Diga oi"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"event: message_start", body)
+        self.assertEqual(app.state.model_client.fallback_uses, 1)
+        self.assertEqual(len(app.state.model_client.fallback.calls), 1)
+
     def test_models_requires_auth(self) -> None:
         response = self.client.get("/v1/models")
         self.assertEqual(response.status_code, 401)
@@ -306,8 +479,11 @@ class GatewayTestCase(unittest.TestCase):
 
         admin_response = self.client.get("/v1/admin/health", headers=self.headers)
         self.assertEqual(admin_response.status_code, 200)
-        self.assertTrue(admin_response.json()["openrouter_configured"])
-        self.assertIn("cost_target", admin_response.json())
+        admin_data = admin_response.json()
+        self.assertEqual(admin_data["model_provider"], "vps")
+        self.assertTrue(admin_data["vps_model_configured"])
+        self.assertTrue(admin_data["openrouter_fallback_configured"])
+        self.assertIn("cost_target", admin_data)
 
     def test_admin_benchmark_reports_setup_and_route_results_without_upstream_call(self) -> None:
         response = self.client.post("/v1/admin/benchmark", headers=self.headers, json={})

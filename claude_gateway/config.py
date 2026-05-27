@@ -44,6 +44,12 @@ class Settings:
     allow_unauthenticated: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api"
+    openrouter_emergency_fallback: bool = True
+    vps_model_base_url: str = "http://127.0.0.1:8000"
+    vps_model_id: str = "local-model"
+    vps_model_api_key: str = ""
+    vps_model_timeout_seconds: float = 90.0
+    vps_model_slow_fallback_seconds: float = 25.0
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_helper_model: str = "gpt-5.4-mini"
@@ -131,6 +137,14 @@ class Settings:
             allow_unauthenticated=_bool_env("ALLOW_UNAUTHENTICATED", False),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
+            openrouter_emergency_fallback=_bool_env("OPENROUTER_EMERGENCY_FALLBACK", True),
+            vps_model_base_url=os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000"),
+            vps_model_id=os.getenv("VPS_MODEL_ID", "local-model"),
+            vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
+            vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "90")),
+            vps_model_slow_fallback_seconds=float(
+                os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "25")
+            ),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.4-mini"),

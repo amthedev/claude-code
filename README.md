@@ -1,6 +1,6 @@
 # Claude Code Gateway
 
-FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes local model names like `claude-code-pro`, routes them to OpenRouter models, supports optional OpenAI web search, and keeps Claude Code tool use safe by proxying tool calls directly upstream.
+FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes public model names like `claude-code-pro`, routes them to your Anthropic-compatible VPS model first, supports optional OpenAI web search, and keeps OpenRouter only as an emergency fallback.
 
 ## Quick Start
 
@@ -11,7 +11,15 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENROUTER_API_KEY`.
+Edit `.env` and set your VPS model endpoint:
+
+```env
+VPS_MODEL_BASE_URL=https://sua-vps.example.com
+VPS_MODEL_ID=local-model
+VPS_MODEL_API_KEY=
+```
+
+Optionally set `OPENROUTER_API_KEY` only for emergency fallback.
 
 Run the API:
 
@@ -36,18 +44,31 @@ Open the web app:
 - Client chat: `http://127.0.0.1:8787/app`
 - Admin gift cards: `http://127.0.0.1:8787/admin`
 
+## Provider Setup
+
+The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients pointed at this public API. Internally, the main model call goes to your VPS:
+
+- Primary: `POST {VPS_MODEL_BASE_URL}/v1/messages`
+- Public models: `claude-code-economy`, `claude-code-pro`, `claude-code-ultra`, `claude-code-ui`, `claude-code-auto`
+- Actual VPS model id sent upstream: `VPS_MODEL_ID`
+- Emergency fallback: OpenRouter only when the VPS errors or is too slow before the first response
+
+```env
+VPS_MODEL_BASE_URL=https://sua-vps.example.com
+VPS_MODEL_ID=local-model
+VPS_MODEL_API_KEY=
+VPS_MODEL_TIMEOUT_SECONDS=90
+VPS_MODEL_SLOW_FALLBACK_SECONDS=25
+OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_API_KEY=
+```
+
 ## Coding Combo
 
-The default model combo is tuned for Claude Code terminal work: direct tool calls stay compatible, while text-only coding requests can use a cheap multi-agent plan/test/code/review path.
+The public model combo is tuned for Claude Code terminal work, but the actual generation now uses your configured VPS model. The router still keeps public identity, token limits, tool behavior, and compatibility rules stable.
 
-- `qwen/qwen3-coder-next`: main frontend/backend coder and patch writer.
-- `deepseek/deepseek-v4-flash`: cheap fixes, economy path, and simple frontend corrections.
-- `tencent/hy3-preview`: cheap frontend/router reasoning pass.
-- `deepseek/deepseek-v4-pro`: stronger reasoning and testing planner.
-- `moonshotai/kimi-k2.6`: backend partner and large-project implementation/review pass.
-- `qwen/qwen3-235b-a22b-thinking-2507`: integral project analysis and ultra reasoning.
-- `deepseek/deepseek-r1`: critical deep reasoning only when complexity is high enough.
-- `google/gemini-2.5-flash-lite`: cheap code helper for implementation structure, edge cases, and verification.
+- `VPS_MODEL_ID`: the single upstream model used by default.
+- OpenRouter fallback: emergency only, not the normal route.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
 Every request also receives a Claude public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
@@ -57,17 +78,17 @@ Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark
 
 ## Public Models
 
-- `claude-code-economy`: cheap/default coding path, usually DeepSeek V4 Flash.
-- `claude-code-pro`: stronger code/file-editing path, usually Qwen3 Coder Next plus DeepSeek V4 Pro when reasoning is needed.
-- `claude-code-ultra`: strongest public mode, routed to DeepSeek V4 Pro/Qwen Coder by default without R1, Kimi, or Qwen Thinking.
-- `claude-code-ui`: frontend/UI path, usually Qwen3 Coder Next with Hy3/DeepSeek guidance.
+- `claude-code-economy`: economy public identity, backed by `VPS_MODEL_ID`.
+- `claude-code-pro`: pro public identity, backed by `VPS_MODEL_ID`.
+- `claude-code-ultra`: strongest public identity, backed by `VPS_MODEL_ID`.
+- `claude-code-ui`: frontend/UI public identity, backed by `VPS_MODEL_ID`.
 - `claude-code-auto`: heuristically chooses between the above.
 
-Internal model choices are fixed in code to avoid expensive environment overrides. The defaults were checked against OpenRouter's public model list on 2026-05-26.
+The visible model names stay stable for clients. The VPS receives `VPS_MODEL_ID` regardless of which public model the user selected.
 
 ## Cost Guard
 
-The default architecture targets at least 50% savings versus Claude Opus 4.7. It uses Claude Opus 4.7 as the baseline and rejects known internal models whose blended input/output price is above `MAX_COST_RATIO_VS_CLAUDE`. For multi-agent paths it also sums the internal calls conservatively; if the whole pipeline would exceed the target, the gateway falls back to a single budget-safe proxy call.
+The gateway still enforces daily plan limits before the upstream call. `MAX_COST_RATIO_VS_CLAUDE` remains available for route estimates and compatibility, while the real primary provider is your VPS.
 
 ```bash
 export MAX_COST_RATIO_VS_CLAUDE=0.50
@@ -75,16 +96,7 @@ export ALLOW_PREMIUM_FALLBACK=false
 export ALLOW_DIRECT_EXTERNAL_MODELS=false
 ```
 
-With the default model set, the main paths stay well under that budget:
-
-- DeepSeek V4 Flash: about 1.1% of Claude Opus 4.7 blended token cost.
-- Qwen3 Coder Next: about 3.0% of Claude Opus 4.7 blended token cost.
-- DeepSeek V4 Pro: about 4.4% of Claude Opus 4.7 blended token cost.
-- Tencent Hy3 Preview: about 1.1% of Claude Opus 4.7 blended token cost.
-
-`claude-code-ultra` improves quality through the stronger budget-safe default model instead of calling Claude, R1, Kimi, or Qwen Thinking by default.
-
-External model ids such as `anthropic/claude-opus-4.7` are not used directly by default. They are routed back into the budget-safe internal model set unless `ALLOW_DIRECT_EXTERNAL_MODELS=true` is explicitly enabled.
+`claude-code-ultra` improves quality through the same VPS model and stronger prompting/routing behavior. OpenRouter models are not used unless the emergency fallback activates.
 
 ## Optional ChatGPT Helper
 
@@ -342,7 +354,11 @@ uvicorn claude_gateway.main:app --host 0.0.0.0 --port 80
 Set these environment variables in Square Cloud:
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-...
+VPS_MODEL_BASE_URL=https://your-vps.example.com
+VPS_MODEL_ID=local-model
+VPS_MODEL_API_KEY=
+OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_API_KEY=
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
 OPENROUTER_SITE_URL=https://your-subdomain.squareweb.app
@@ -360,12 +376,12 @@ See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_RE
 
 Claude Code relies heavily on streaming and tool calls. For that reason:
 
-- simple `stream: true` requests are proxied directly to one selected OpenRouter model;
+- simple `stream: true` requests are proxied directly to the VPS model;
 - deep text-only streaming requests may use the internal pipeline and then stream the final answer;
 - requests with `tools`, `tool_choice`, `tool_use`, or `tool_result` are proxied directly;
 - text-only requests use the multi-agent pipeline only when the router sees real depth, such as debugging, architecture, review, file edits, testing, or frontend work.
 
-This keeps the gateway compatible with Claude Code while still supporting agent debate for normal API calls.
+This keeps the gateway compatible with Claude Code, Cursor, Windsurf, and OpenAI-compatible clients while still supporting agent debate for normal API calls.
 
 ## Useful Endpoints
 

@@ -1,35 +1,42 @@
 # Combo de modelos para Claude Code no terminal
 
-Este preset foi montado em 2026-05-18 para priorizar código, edição de arquivos e uso no terminal, mantendo o custo bem abaixo de Claude Opus 4.7. A ideia é simples: deixar o Claude Code enxergar nomes familiares, mas rotear por trás para modelos baratos e fortes em papéis diferentes.
+Este preset agora prioriza a IA rodando na sua VPS. A ideia é simples: deixar Claude Code, Cursor, Windsurf e clientes OpenAI-compatible enxergarem nomes familiares, mas rotear por trás para um único provedor principal Anthropic-compatible.
 
-## Preset fixo no codigo
+## Provedor principal
 
-Os modelos internos ficam travados em `claude_gateway/config.py`. Variaveis de ambiente antigas como `DEEP_REASONING_AGENT`, `BACKEND_PARTNER_AGENT`, `PROJECT_REASONING_AGENT`, `PREMIUM_FALLBACK`, `ULTRA_FALLBACK` e `ENABLE_GEMINI_CODE_HELPER` sao ignoradas para evitar custo alto acidental.
+```env
+VPS_MODEL_BASE_URL=https://sua-vps.example.com
+VPS_MODEL_ID=local-model
+VPS_MODEL_API_KEY=
+VPS_MODEL_TIMEOUT_SECONDS=90
+VPS_MODEL_SLOW_FALLBACK_SECONDS=25
+```
+
+## OpenRouter somente emergencia
+
+```env
+OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_API_KEY=
+OPENROUTER_BASE_URL=https://openrouter.ai/api
+```
+
+OpenRouter só entra se a VPS falhar, der erro HTTP, retornar resposta inválida ou demorar mais que `VPS_MODEL_SLOW_FALLBACK_SECONDS` antes da primeira resposta.
+
+## Modelos publicos
 
 ```text
-ROUTER_AGENT: tencent/hy3-preview
-CHEAP_CODE_AGENT: deepseek/deepseek-v4-flash
-CODE_AGENT: qwen/qwen3-coder-next
-REASONING_AGENT: deepseek/deepseek-v4-pro
-UI_AGENT: qwen/qwen3-coder-next
-FAST_AGENT: deepseek/deepseek-v4-flash
-PREMIUM_FALLBACK: deepseek/deepseek-v4-pro
-ULTRA_FALLBACK: qwen/qwen3-coder-next
-FRONTEND_CODER_AGENT: qwen/qwen3-coder-next
-FRONTEND_FIX_AGENT: deepseek/deepseek-v4-flash
-FRONTEND_REASONING_AGENT: tencent/hy3-preview
-BACKEND_PARTNER_AGENT: deepseek/deepseek-v4-pro
-PROJECT_REASONING_AGENT: deepseek/deepseek-v4-pro
-DEEP_REASONING_AGENT: deepseek/deepseek-v4-pro
-GEMINI_CODE_HELPER_AGENT: google/gemini-2.5-flash-lite
-ENABLE_GEMINI_CODE_HELPER: false
-OPENAI_HELPER_FOR_CUSTOMERS: false
+claude-code-economy
+claude-code-pro
+claude-code-ultra
+claude-code-ui
+claude-code-auto
 ```
+
+A VPS recebe sempre `VPS_MODEL_ID`, independentemente do modelo publico escolhido. Os nomes publicos continuam existindo para compatibilidade, planos, limites e identidade.
 
 ## Variaveis ainda configuraveis
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-...
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
 
@@ -54,23 +61,16 @@ ENABLE_AGENT_ORCHESTRATION=true
 
 | Papel | Modelo | Uso |
 | --- | --- | --- |
-| Economy | `deepseek/deepseek-v4-flash` | tarefas simples, explicações, baixo custo |
-| Pro coder | `qwen/qwen3-coder-next` | frontend/backend, edição de arquivos, patches, refatoração curta, uso no terminal |
-| Reasoning | `deepseek/deepseek-v4-pro` | plano técnico, bugs difíceis, testes e arquitetura |
-| UI fix | `deepseek/deepseek-v4-flash` | consertos simples de frontend e baixo custo |
-| UI reasoning | `tencent/hy3-preview` | raciocínio barato sobre layout e estrutura de frontend |
-| Backend partner | `moonshotai/kimi-k2.6` | backend, projetos grandes, revisão e alternativa independente |
-| Project reasoning | `qwen/qwen3-235b-a22b-thinking-2507` | análise integral de projeto e arquitetura |
-| Deep reasoning | `deepseek/deepseek-r1` | somente tarefas críticas que pedem raciocínio profundo |
-| Gemini code helper | `google/gemini-2.5-flash-lite` | ajuda barata para estrutura, edge cases e verificação de código |
+| VPS model | `VPS_MODEL_ID` | resposta principal para todos os modos publicos |
+| OpenRouter fallback | modelos internos seguros | emergencia quando a VPS falha ou fica lenta antes da primeira resposta |
 | OpenAI helper | `gpt-5.4-mini` | escolhe defaults, reduz perguntas desnecessárias e revisa/design director em frontend e modo forte |
 
 ## Regras do roteador
 
-- `claude-code-economy`: força o caminho barato.
-- `claude-code-pro`: usa Qwen3 Coder Next e, quando não houver tools e o pedido realmente precisar de raciocínio profundo, faz pipeline com DeepSeek/Kimi/Gemini.
-- `claude-code-ultra`: adiciona Qwen Thinking, Kimi, Gemini e revisão DeepSeek Pro; só sobe para DeepSeek R1 em tarefas críticas.
-- `claude-code-ui`: usa Qwen3 Coder Next para construir frontend, DeepSeek Flash para correções simples e Hy3 para raciocínio de UI.
+- `claude-code-economy`: mantém identidade e limites do plano economy, mas chama a VPS.
+- `claude-code-pro`: mantém identidade e limites do plano pro, mas chama a VPS.
+- `claude-code-ultra`: mantém identidade e limites do plano ultra, mas chama a VPS.
+- `claude-code-ui`: mantém identidade e limites de UI/frontend, mas chama a VPS.
 - `claude-code-auto`: detecta frontend, bug, teste, arquitetura, terminal e edição de arquivos.
 - Pesquisa web: por padrão fica em `auto`; usa OpenAI Responses API `web_search` somente quando o pedido exige informação atual ou quando `gateway_web_search="required"`.
 
@@ -103,6 +103,6 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 
 ## Fontes usadas
 
-- OpenRouter Models API, consultada em 2026-05-22: IDs e preços para Qwen3 Coder Next, DeepSeek V4 Flash/Pro, DeepSeek R1, Hy3 Preview, Kimi K2.6, Gemini 2.5 Flash Lite e Qwen3 235B Thinking.
-- OpenAI docs: o helper usa Responses API com reasoning effort baixo e modelo configurável; o preset usa `gpt-5.4-mini` por custo.
+- Configuracao da VPS: API Anthropic-compatible em `/v1/messages`.
+- OpenRouter: mantido somente como fallback de emergencia quando a VPS falha ou fica lenta antes da primeira resposta.
 - Anthropic Claude Code docs: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` e `ANTHROPIC_BASE_URL` são os pontos corretos para mapear aliases/modelos no Claude Code.

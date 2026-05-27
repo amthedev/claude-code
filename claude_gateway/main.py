@@ -46,6 +46,7 @@ from .openai_compat import (
     response_to_sse,
     responses_to_anthropic,
 )
+from .model_client import AnthropicModelClient, VPSAnthropicClient, default_model_client
 from .openrouter import OpenRouterClient, OpenRouterError
 from .orchestrator import MessageOrchestrator
 from .research import (
@@ -98,7 +99,8 @@ Caso contrário, responda diretamente em até 5 frases, com tom calmo e prático
 
 def create_app(
     settings: Settings | None = None,
-    client_factory: Callable[[Settings], OpenRouterClient] | None = None,
+    client_factory: Callable[[Settings], AnthropicModelClient] | None = None,
+    openrouter_fallback_factory: Callable[[Settings], AnthropicModelClient] | None = None,
     openai_helper_factory: Callable[[Settings], OpenAIHelperClient] | None = None,
     web_search_factory: Callable[[Settings], WebSearchClient] | None = None,
 ) -> FastAPI:
@@ -120,8 +122,21 @@ def create_app(
     app.state.code_workspaces = CodeWorkspaceStore(resolved_settings)
     app.state.support_store = SupportStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
-    factory = client_factory or OpenRouterClient
-    app.state.openrouter = factory(resolved_settings)
+    if client_factory is None:
+        app.state.model_client = default_model_client(
+            resolved_settings,
+            primary_factory=VPSAnthropicClient,
+            fallback_factory=openrouter_fallback_factory or OpenRouterClient,
+        )
+    elif openrouter_fallback_factory is not None:
+        app.state.model_client = default_model_client(
+            resolved_settings,
+            primary_factory=client_factory,
+            fallback_factory=openrouter_fallback_factory,
+        )
+    else:
+        app.state.model_client = client_factory(resolved_settings)
+    app.state.openrouter = app.state.model_client
     helper_factory = openai_helper_factory or OpenAIHelperClient
     app.state.openai_helper = helper_factory(resolved_settings) if resolved_settings.openai_api_key else None
     search_factory = web_search_factory or WebSearchClient
@@ -131,7 +146,7 @@ def create_app(
         else None
     )
     app.state.orchestrator = MessageOrchestrator(
-        app.state.openrouter,
+        app.state.model_client,
         app.state.planner,
         app.state.usage,
         app.state.openai_helper,
@@ -172,18 +187,28 @@ def create_app(
         return _admin_benchmark(app, auth)
 
     def _detailed_health(app: FastAPI) -> dict[str, Any]:
+        settings = app.state.settings
         return {
             "status": "ok",
-            "openrouter_configured": bool(app.state.settings.openrouter_api_key),
-            "openai_helper_configured": bool(app.state.settings.openai_api_key),
-            "web_search": _web_search_status(app.state.settings),
-            "orchestration_enabled": app.state.settings.enable_agent_orchestration,
+            "model_provider": "vps",
+            "vps_model_configured": bool(settings.vps_model_base_url and settings.vps_model_id),
+            "vps_model_base_url": settings.vps_model_base_url,
+            "vps_model_id": settings.vps_model_id,
+            "openrouter_configured": bool(settings.openrouter_api_key),
+            "openrouter_emergency_fallback": settings.openrouter_emergency_fallback,
+            "openrouter_fallback_configured": bool(
+                settings.openrouter_emergency_fallback and settings.openrouter_api_key
+            ),
+            "openrouter_fallback_uses": getattr(app.state.model_client, "fallback_uses", 0),
+            "openai_helper_configured": bool(settings.openai_api_key),
+            "web_search": _web_search_status(settings),
+            "orchestration_enabled": settings.enable_agent_orchestration,
             "production_readiness": _production_readiness(app),
-            "public_trial": public_trial_status(app.state.settings),
+            "public_trial": public_trial_status(settings),
             "cost_target": {
                 "baseline_model": CLAUDE_BASELINE_MODEL,
-                "max_cost_ratio_vs_claude": app.state.settings.max_cost_ratio_vs_claude,
-                "minimum_savings_vs_claude": 1 - app.state.settings.max_cost_ratio_vs_claude,
+                "max_cost_ratio_vs_claude": settings.max_cost_ratio_vs_claude,
+                "minimum_savings_vs_claude": 1 - settings.max_cost_ratio_vs_claude,
             },
         }
 
@@ -382,13 +407,10 @@ def create_app(
                     media_type="text/event-stream",
                 )
 
-            if not app.state.settings.openrouter_api_key:
-                _rollback_customer_budget(app, reservation)
-                raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured.")
             app.state.usage.record_request(decision)
             return StreamingResponse(
                 _public_model_stream_with_budget_settlement(
-                    app.state.openrouter.stream_messages(payload, decision.selected_openrouter_model),
+                    app.state.model_client.stream_messages(payload, decision.selected_openrouter_model),
                     decision.public_model,
                     app=app,
                     reservation=reservation,
@@ -2318,7 +2340,11 @@ def _web_search_status(settings: Settings) -> dict[str, Any]:
 def _production_readiness(app: FastAPI) -> dict[str, Any]:
     settings = app.state.settings
     return {
+        "vps_model": bool(settings.vps_model_base_url and settings.vps_model_id),
         "openrouter": bool(settings.openrouter_api_key),
+        "openrouter_fallback": bool(
+            settings.openrouter_emergency_fallback and settings.openrouter_api_key
+        ),
         "web_search": bool(settings.enable_web_search and settings.openai_api_key),
         "openai_helper": bool(settings.openai_api_key),
         "mercado_pago": bool(settings.mercado_pago_access_token),
@@ -2368,11 +2394,18 @@ def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
     protected_margin = min(max(settings.customer_profit_margin, 0.50), 0.95)
     checks = [
         (
-            "openrouter",
-            "OpenRouter configurado",
-            readiness["openrouter"],
+            "vps_model",
+            "VPS IA configurada",
+            readiness["vps_model"],
             "required",
-            "Sem chave OpenRouter o chat real nao responde.",
+            "Sem VPS_MODEL_BASE_URL e VPS_MODEL_ID o chat real nao responde.",
+        ),
+        (
+            "openrouter_fallback",
+            "OpenRouter emergencia configurado",
+            readiness["openrouter_fallback"],
+            "warning",
+            "Sem OpenRouter o fallback de emergencia fica indisponivel.",
         ),
         (
             "web_search",
