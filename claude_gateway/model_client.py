@@ -15,6 +15,10 @@ from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
 
+OPENAI_CHAT_CONTEXT_TOKENS = 24_576
+OPENAI_CHAT_CONTEXT_MARGIN_TOKENS = 512
+
+
 class AnthropicModelClient(Protocol):
     async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
         ...
@@ -190,16 +194,21 @@ class VPSAnthropicClient:
         messages = self._messages_to_openai(payload)
         if self._should_disable_qwen_thinking(payload, target):
             messages = self._messages_with_no_think(messages)
+        tools = self._tools_to_openai(payload.get("tools"))
+        requested_max_tokens = int(payload.get("max_tokens") or 4096)
         outgoing: dict[str, Any] = {
             "model": target.model_id,
             "messages": messages,
-            "max_tokens": int(payload.get("max_tokens") or 4096),
+            "max_tokens": self._fit_max_tokens_for_openai_chat(
+                messages,
+                tools,
+                requested_max_tokens=requested_max_tokens,
+            ),
             "stream": stream,
         }
         for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "stop"):
             if key in payload:
                 outgoing[key] = payload[key]
-        tools = self._tools_to_openai(payload.get("tools"))
         if tools:
             outgoing["tools"] = tools
             if payload.get("tool_choice"):
@@ -288,6 +297,27 @@ class VPSAnthropicClient:
                 }
             )
         return converted
+
+    def _fit_max_tokens_for_openai_chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        requested_max_tokens: int,
+    ) -> int:
+        estimated_input_tokens = self._estimate_openai_chat_input_tokens(messages, tools)
+        available = OPENAI_CHAT_CONTEXT_TOKENS - estimated_input_tokens - OPENAI_CHAT_CONTEXT_MARGIN_TOKENS
+        return max(1, min(max(1, requested_max_tokens), available))
+
+    def _estimate_openai_chat_input_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> int:
+        serialized = json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False, separators=(",", ":"))
+        char_estimate = len(serialized) / 3.2
+        word_estimate = len(serialized.split()) * 1.35
+        return max(1, int(max(char_estimate, word_estimate)) + (6 * len(messages)) + 32)
 
     def _tool_choice_to_openai(self, tool_choice: Any) -> Any:
         if isinstance(tool_choice, str):

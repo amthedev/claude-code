@@ -371,6 +371,28 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
 
+    def test_vps_openai_chat_caps_output_to_fit_context_window(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "system": "instrucoes longas " * 3000,
+                "max_tokens": 16000,
+                "messages": [{"role": "user", "content": "oi"}],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=False,
+        )
+
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        self.assertLess(outgoing["max_tokens"], 16000)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
+        self.assertEqual(outgoing["tool_choice"], "auto")
+
     def test_vps_openai_chat_format_converts_anthropic_payload(self) -> None:
         settings = make_settings()
         settings.vps_model_base_url = "https://runpod.example/v1"
