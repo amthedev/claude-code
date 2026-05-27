@@ -5,10 +5,12 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
 
+from .anthropic import clean_model_text
 from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
@@ -21,6 +23,14 @@ class AnthropicModelClient(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class VPSTarget:
+    base_url: str
+    model_id: str
+    api_format: str
+    api_key: str
+
+
 class VPSAnthropicClient:
     provider_name = "vps"
 
@@ -29,43 +39,87 @@ class VPSAnthropicClient:
 
     @property
     def messages_url(self) -> str:
-        return self._url("/v1/messages")
+        return self._url("/v1/messages", self._default_target())
 
     @property
     def chat_completions_url(self) -> str:
-        return self._url("/v1/chat/completions")
+        return self._url("/v1/chat/completions", self._default_target())
 
-    def _api_format(self) -> str:
-        value = self.settings.vps_model_api_format.strip().lower().replace("_", "-")
+    def _default_target(self) -> VPSTarget:
+        return VPSTarget(
+            base_url=self.settings.vps_model_base_url,
+            model_id=self.settings.vps_model_id,
+            api_format=self.settings.vps_model_api_format,
+            api_key=self.settings.vps_model_api_key,
+        )
+
+    def _fast_target(self) -> VPSTarget:
+        return VPSTarget(
+            base_url=self.settings.vps_fast_model_base_url or self.settings.vps_model_base_url,
+            model_id=self.settings.vps_fast_model_id or self.settings.vps_model_id,
+            api_format=self.settings.vps_fast_model_api_format or self.settings.vps_model_api_format,
+            api_key=self.settings.vps_fast_model_api_key or self.settings.vps_model_api_key,
+        )
+
+    def _strong_target(self) -> VPSTarget:
+        return VPSTarget(
+            base_url=self.settings.vps_strong_model_base_url or self.settings.vps_model_base_url,
+            model_id=self.settings.vps_strong_model_id or self.settings.vps_model_id,
+            api_format=self.settings.vps_strong_model_api_format or self.settings.vps_model_api_format,
+            api_key=self.settings.vps_strong_model_api_key or self.settings.vps_model_api_key,
+        )
+
+    def _target_for_model(self, model: str | None) -> VPSTarget:
+        if not self.settings.vps_strong_model_id:
+            return self._default_target()
+
+        requested = str(model or "").strip().lower()
+        fast_names = {
+            self.settings.cheap_code_agent.lower(),
+            self.settings.fast_agent.lower(),
+            self.settings.vps_fast_model_id.lower(),
+            self.settings.vps_model_id.lower(),
+        }
+        if requested in fast_names or "flash" in requested or "economy" in requested:
+            return self._fast_target()
+        return self._strong_target()
+
+    def _api_format(self, target: VPSTarget | None = None) -> str:
+        target = target or self._default_target()
+        value = target.api_format.strip().lower().replace("_", "-")
         if value in {"openai", "openai-chat", "chat-completions", "vllm"}:
             return "openai-chat"
         return "anthropic"
 
-    def _url(self, path: str) -> str:
-        base = self.settings.vps_model_base_url.rstrip("/")
+    def _url(self, path: str, target: VPSTarget | None = None) -> str:
+        target = target or self._default_target()
+        base = target.base_url.rstrip("/")
         if base.endswith("/v1") and path.startswith("/v1/"):
             return f"{base}{path[3:]}"
         return f"{base}{path}"
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, target: VPSTarget | None = None) -> dict[str, str]:
+        target = target or self._default_target()
         headers = {"Content-Type": "application/json"}
-        if self.settings.vps_model_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.vps_model_api_key}"
+        if target.api_key:
+            headers["Authorization"] = f"Bearer {target.api_key}"
         return headers
 
     def _payload_for_model(self, payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
+        target = self._target_for_model(model)
         outgoing = deepcopy(payload)
         for key in list(outgoing):
             if key.startswith("__gateway_"):
                 outgoing.pop(key, None)
-        outgoing["model"] = self.settings.vps_model_id
+        outgoing["model"] = target.model_id
         outgoing.pop("include_reasoning", None)
         outgoing.pop("reasoning", None)
         return outgoing
 
     async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
-        if self._api_format() == "openai-chat":
-            return await self._complete_openai_chat(payload)
+        target = self._target_for_model(model)
+        if self._api_format(target) == "openai-chat":
+            return await self._complete_openai_chat(payload, model)
 
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = False
@@ -73,7 +127,11 @@ class VPSAnthropicClient:
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(self.messages_url, headers=self._headers(), json=outgoing)
+                response = await client.post(
+                    self._url("/v1/messages", target),
+                    headers=self._headers(target),
+                    json=outgoing,
+                )
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
@@ -89,8 +147,9 @@ class VPSAnthropicClient:
         return data
 
     async def stream_messages(self, payload: dict[str, Any], model: str) -> AsyncIterator[bytes]:
-        if self._api_format() == "openai-chat":
-            async for chunk in self._stream_openai_chat(payload):
+        target = self._target_for_model(model)
+        if self._api_format(target) == "openai-chat":
+            async for chunk in self._stream_openai_chat(payload, model):
                 yield chunk
             return
 
@@ -106,8 +165,8 @@ class VPSAnthropicClient:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream(
                     "POST",
-                    self.messages_url,
-                    headers=self._headers(),
+                    self._url("/v1/messages", target),
+                    headers=self._headers(target),
                     json=outgoing,
                 ) as response:
                     if response.status_code >= 400:
@@ -120,10 +179,20 @@ class VPSAnthropicClient:
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model stream failed: {exc}", status_code=502) from exc
 
-    def _openai_chat_payload(self, payload: dict[str, Any], *, stream: bool) -> dict[str, Any]:
+    def _openai_chat_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        stream: bool,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        target = self._target_for_model(model)
+        messages = self._messages_to_openai(payload)
+        if self._should_disable_qwen_thinking(payload, target):
+            messages = self._messages_with_no_think(messages)
         outgoing: dict[str, Any] = {
-            "model": self.settings.vps_model_id,
-            "messages": self._messages_to_openai(payload),
+            "model": target.model_id,
+            "messages": messages,
             "max_tokens": int(payload.get("max_tokens") or 4096),
             "stream": stream,
         }
@@ -136,6 +205,24 @@ class VPSAnthropicClient:
             if payload.get("tool_choice"):
                 outgoing["tool_choice"] = payload["tool_choice"]
         return outgoing
+
+    def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
+        if str(payload.get("__gateway_reasoning") or "").strip().lower() != "none":
+            return False
+        model_id = target.model_id.lower()
+        return "qwen3" in model_id or "qwen/qwen3" in model_id
+
+    def _messages_with_no_think(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        copied = deepcopy(messages)
+        for message in copied:
+            if message.get("role") != "user":
+                continue
+            content = str(message.get("content") or "")
+            if not content.lstrip().startswith("/no_think"):
+                message["content"] = f"/no_think\n\n{content}"
+            return copied
+        copied.append({"role": "user", "content": "/no_think"})
+        return copied
 
     def _messages_to_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
@@ -202,15 +289,16 @@ class VPSAnthropicClient:
             )
         return converted
 
-    async def _complete_openai_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        outgoing = self._openai_chat_payload(payload, stream=False)
+    async def _complete_openai_chat(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
+        target = self._target_for_model(model)
+        outgoing = self._openai_chat_payload(payload, stream=False, model=model)
         timeout = httpx.Timeout(self.settings.vps_model_timeout_seconds)
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
-                    self.chat_completions_url,
-                    headers=self._headers(),
+                    self._url("/v1/chat/completions", target),
+                    headers=self._headers(target),
                     json=outgoing,
                 )
         except httpx.HTTPError as exc:
@@ -224,9 +312,14 @@ class VPSAnthropicClient:
             raise OpenRouterError("VPS model returned invalid JSON.", status_code=502) from exc
         if not isinstance(data, dict):
             raise OpenRouterError("VPS model returned an invalid response object.", status_code=502)
-        return self._anthropic_from_openai_chat(data)
+        return self._anthropic_from_openai_chat(data, model=model)
 
-    def _anthropic_from_openai_chat(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _anthropic_from_openai_chat(
+        self,
+        data: dict[str, Any],
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        target = self._target_for_model(model)
         choices = data.get("choices")
         choice = choices[0] if isinstance(choices, list) and choices else {}
         message = choice.get("message") if isinstance(choice, dict) else {}
@@ -236,7 +329,7 @@ class VPSAnthropicClient:
         content: list[dict[str, Any]] = []
         text = message.get("content")
         if isinstance(text, str) and text:
-            content.append({"type": "text", "text": text})
+            content.append({"type": "text", "text": clean_model_text(text)})
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
             for tool_call in tool_calls:
@@ -261,7 +354,7 @@ class VPSAnthropicClient:
             "id": str(data.get("id") or "msg_vps"),
             "type": "message",
             "role": "assistant",
-            "model": self.settings.vps_model_id,
+            "model": target.model_id,
             "content": content,
             "stop_reason": "tool_use" if any(block.get("type") == "tool_use" for block in content) else "end_turn",
             "stop_sequence": None,
@@ -282,8 +375,9 @@ class VPSAnthropicClient:
             return parsed if isinstance(parsed, dict) else {}
         return {}
 
-    async def _stream_openai_chat(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-        outgoing = self._openai_chat_payload(payload, stream=True)
+    async def _stream_openai_chat(self, payload: dict[str, Any], model: str) -> AsyncIterator[bytes]:
+        target = self._target_for_model(model)
+        outgoing = self._openai_chat_payload(payload, stream=True, model=model)
         timeout = httpx.Timeout(
             connect=30.0,
             read=self.settings.vps_model_timeout_seconds,
@@ -294,23 +388,31 @@ class VPSAnthropicClient:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream(
                     "POST",
-                    self.chat_completions_url,
-                    headers=self._headers(),
+                    self._url("/v1/chat/completions", target),
+                    headers=self._headers(target),
                     json=outgoing,
                 ) as response:
                     if response.status_code >= 400:
                         body = await response.aread()
                         raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
-                    async for chunk in self._openai_sse_to_anthropic(response.aiter_bytes()):
+                    async for chunk in self._openai_sse_to_anthropic(
+                        response.aiter_bytes(),
+                        model=model,
+                    ):
                         yield chunk
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model stream failed: {exc}", status_code=502) from exc
 
-    async def _openai_sse_to_anthropic(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    async def _openai_sse_to_anthropic(
+        self,
+        chunks: AsyncIterator[bytes],
+        model: str | None = None,
+    ) -> AsyncIterator[bytes]:
+        target = self._target_for_model(model)
         yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"'
-        yield self.settings.vps_model_id.encode("utf-8")
+        yield target.model_id.encode("utf-8")
         yield b'","role":"assistant","content":[]}}\n\n'
         yield b'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n'
 

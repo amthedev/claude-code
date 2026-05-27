@@ -49,6 +49,14 @@ class Settings:
     vps_model_id: str = "local-model"
     vps_model_api_format: str = "anthropic"
     vps_model_api_key: str = ""
+    vps_fast_model_base_url: str = ""
+    vps_fast_model_id: str = ""
+    vps_fast_model_api_format: str = ""
+    vps_fast_model_api_key: str = ""
+    vps_strong_model_base_url: str = ""
+    vps_strong_model_id: str = ""
+    vps_strong_model_api_format: str = ""
+    vps_strong_model_api_key: str = ""
     vps_model_timeout_seconds: float = 90.0
     vps_model_slow_fallback_seconds: float = 25.0
     runpod_api_key: str = ""
@@ -160,6 +168,14 @@ class Settings:
             vps_model_id=vps_model_id,
             vps_model_api_format=os.getenv("VPS_MODEL_API_FORMAT", "anthropic"),
             vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
+            vps_fast_model_base_url=os.getenv("VPS_FAST_MODEL_BASE_URL", ""),
+            vps_fast_model_id=os.getenv("VPS_FAST_MODEL_ID", ""),
+            vps_fast_model_api_format=os.getenv("VPS_FAST_MODEL_API_FORMAT", ""),
+            vps_fast_model_api_key=os.getenv("VPS_FAST_MODEL_API_KEY", ""),
+            vps_strong_model_base_url=os.getenv("VPS_STRONG_MODEL_BASE_URL", ""),
+            vps_strong_model_id=os.getenv("VPS_STRONG_MODEL_ID", ""),
+            vps_strong_model_api_format=os.getenv("VPS_STRONG_MODEL_API_FORMAT", ""),
+            vps_strong_model_api_key=os.getenv("VPS_STRONG_MODEL_API_KEY", ""),
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "90")),
             vps_model_slow_fallback_seconds=float(
                 os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "25")

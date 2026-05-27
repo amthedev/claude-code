@@ -12,6 +12,9 @@ _DUPLICATED_WORD_RE = re.compile(r"\b([^\W_]+)(\s+)\1\b", re.IGNORECASE | re.UNI
 _PREFIX_FRAGMENT_RE = re.compile(r"\b([^\W_]{1,8})(\s+)(\1[^\W_]{2,})\b", re.IGNORECASE | re.UNICODE)
 _MARKDOWN_PAIR_RE = re.compile(r"(\*\*|__|\*|_)\s+\1")
 _BROKEN_TIME_EMPHASIS_RE = re.compile(r"\*(\d+[–-]\d+\s*min)\*\*")
+_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>.*?</think>\s*")
+_OPEN_THINK_BLOCK_RE = re.compile(r"(?is)<think\b[^>]*>.*\Z")
+_THINK_TAG_RE = re.compile(r"(?is)</?think\b[^>]*>\s*")
 _GLUED_REPAIRS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bParaprender\b", re.IGNORECASE), "Para aprender"),
     (re.compile(r"\bdentendimento\b", re.IGNORECASE), "de entendimento"),
@@ -122,6 +125,7 @@ def clean_model_text(text: str, *, strip: bool = True) -> str:
     value = str(text or "")
     if not value:
         return value
+    value = _strip_thinking_text(value)
 
     chunks = re.split(r"(```[\s\S]*?```)", value)
     cleaned = [
@@ -130,6 +134,12 @@ def clean_model_text(text: str, *, strip: bool = True) -> str:
     ]
     result = "".join(cleaned)
     return result.strip() if strip else result
+
+
+def _strip_thinking_text(text: str) -> str:
+    without_closed_blocks = _THINK_BLOCK_RE.sub("", text)
+    without_open_block = _OPEN_THINK_BLOCK_RE.sub("", without_closed_blocks)
+    return _THINK_TAG_RE.sub("", without_open_block)
 
 
 def _clean_response_content(response: dict[str, Any]) -> None:

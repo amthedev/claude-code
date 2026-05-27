@@ -214,6 +214,13 @@ def create_app(
             "vps_model_configured": bool(settings.vps_model_base_url and settings.vps_model_id),
             "vps_model_base_url": settings.vps_model_base_url,
             "vps_model_id": settings.vps_model_id,
+            "vps_fast_model_base_url": settings.vps_fast_model_base_url or settings.vps_model_base_url,
+            "vps_fast_model_id": settings.vps_fast_model_id or settings.vps_model_id,
+            "vps_strong_model_configured": bool(
+                settings.vps_strong_model_base_url and settings.vps_strong_model_id
+            ),
+            "vps_strong_model_base_url": settings.vps_strong_model_base_url,
+            "vps_strong_model_id": settings.vps_strong_model_id,
             "openrouter_configured": bool(settings.openrouter_api_key),
             "openrouter_emergency_fallback": settings.openrouter_emergency_fallback,
             "openrouter_fallback_configured": bool(
@@ -2425,6 +2432,9 @@ def _production_readiness(app: FastAPI) -> dict[str, Any]:
     settings = app.state.settings
     return {
         "vps_model": bool(settings.vps_model_base_url and settings.vps_model_id),
+        "vps_strong_model": bool(
+            settings.vps_strong_model_base_url and settings.vps_strong_model_id
+        ),
         "openrouter": bool(settings.openrouter_api_key),
         "openrouter_fallback": bool(
             settings.openrouter_emergency_fallback and settings.openrouter_api_key

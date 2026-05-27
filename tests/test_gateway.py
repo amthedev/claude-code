@@ -323,6 +323,54 @@ class GatewayTestCase(unittest.TestCase):
         settings.vps_model_api_key = "vps-secret"
         self.assertEqual(client._headers()["Authorization"], "Bearer vps-secret")
 
+    def test_vps_routes_fast_and_strong_models_when_configured(self) -> None:
+        settings = make_settings()
+        settings.vps_model_base_url = "https://runpod.example/v1"
+        settings.vps_model_id = "qwen-14b"
+        settings.vps_model_api_format = "openai-chat"
+        settings.vps_model_api_key = "shared-secret"
+        settings.vps_fast_model_base_url = "https://runpod.example/v1"
+        settings.vps_fast_model_id = "qwen-14b"
+        settings.vps_strong_model_base_url = "https://runpod-strong.example/v1"
+        settings.vps_strong_model_id = "qwen3-32b"
+        client = VPSAnthropicClient(settings)
+
+        fast = client._openai_chat_payload(
+            {"messages": [{"role": "user", "content": "Oi"}]},
+            stream=False,
+            model=settings.fast_agent,
+        )
+        strong = client._openai_chat_payload(
+            {"messages": [{"role": "user", "content": "Corrija este bug de producao"}]},
+            stream=False,
+            model=settings.code_agent,
+        )
+
+        self.assertEqual(fast["model"], "qwen-14b")
+        self.assertEqual(strong["model"], "qwen3-32b")
+        strong_target = client._target_for_model(settings.code_agent)
+        self.assertEqual(
+            client._url("/v1/chat/completions", strong_target),
+            "https://runpod-strong.example/v1/chat/completions",
+        )
+
+    def test_vps_openai_chat_adds_no_think_for_fast_qwen3_requests(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_reasoning": "none",
+                "messages": [{"role": "user", "content": "Responda rapido."}],
+            },
+            stream=False,
+            model=settings.fast_agent,
+        )
+
+        self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
+
     def test_vps_openai_chat_format_converts_anthropic_payload(self) -> None:
         settings = make_settings()
         settings.vps_model_base_url = "https://runpod.example/v1"
@@ -359,6 +407,27 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response["model"], "qwen-14b")
         self.assertEqual(response["content"], [{"type": "text", "text": "Olá!"}])
         self.assertEqual(response["usage"], {"input_tokens": 7, "output_tokens": 3})
+
+    def test_vps_openai_chat_response_hides_qwen_thinking_text(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_test",
+                "choices": [
+                    {
+                        "message": {"content": "<think>\n\nrascunho interno\n</think>\n\nResposta limpa."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+            }
+        )
+
+        self.assertEqual(response["content"], [{"type": "text", "text": "Resposta limpa."}])
 
     def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
         settings = make_settings()
@@ -605,6 +674,17 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(text, "How to become fluent in English")
 
+    def test_public_stream_hides_qwen_thinking_tags(self) -> None:
+        payloads = [
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "<think>"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "\n\nanalisando"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "</think>\n\nResposta final."}},
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(text, "Resposta final.")
+
     def test_clean_model_text_repairs_fragmented_duplicate_words(self) -> None:
         broken = (
             "AAquiqui está está um um ** **plplanoano real realistaista e e pratic praticoo "
@@ -620,6 +700,11 @@ class GatewayTestCase(unittest.TestCase):
         broken = "Oi! Como posOi! Como Posso ajudar você hoje?"
 
         self.assertEqual(clean_model_text(broken), "Oi! Como Posso ajudar você hoje?")
+
+    def test_clean_model_text_removes_qwen_thinking_blocks(self) -> None:
+        broken = "<think>\n\nvou pensar escondido\n</think>\n\nOi, Allan."
+
+        self.assertEqual(clean_model_text(broken), "Oi, Allan.")
 
     def test_clean_model_text_repairs_glued_words_without_dropping_spaces(self) -> None:
         broken = (
