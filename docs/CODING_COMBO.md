@@ -7,6 +7,7 @@ Este preset agora prioriza a IA rodando na sua VPS. A ideia é simples: deixar C
 ```env
 VPS_MODEL_BASE_URL=https://sua-vps.example.com
 VPS_MODEL_ID=local-model
+VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
 VPS_MODEL_TIMEOUT_SECONDS=90
 VPS_MODEL_SLOW_FALLBACK_SECONDS=25
@@ -32,7 +33,7 @@ claude-code-ui
 claude-code-auto
 ```
 
-A VPS recebe sempre `VPS_MODEL_ID`, independentemente do modelo publico escolhido. Os nomes publicos continuam existindo para compatibilidade, planos, limites e identidade.
+A VPS recebe sempre `VPS_MODEL_ID`, independentemente do modelo publico escolhido. Use `VPS_MODEL_API_FORMAT=openai-chat` para RunPod/vLLM/OpenAI-compatible e `anthropic` para `/v1/messages`.
 
 ## Variaveis ainda configuraveis
 
@@ -103,6 +104,6 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 
 ## Fontes usadas
 
-- Configuracao da VPS: API Anthropic-compatible em `/v1/messages`.
+- Configuracao da VPS: API Anthropic-compatible em `/v1/messages` ou OpenAI-compatible em `/v1/chat/completions`.
 - OpenRouter: mantido somente como fallback de emergencia quando a VPS falha ou fica lenta antes da primeira resposta.
 - Anthropic Claude Code docs: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` e `ANTHROPIC_BASE_URL` são os pontos corretos para mapear aliases/modelos no Claude Code.

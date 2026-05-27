@@ -47,6 +47,7 @@ class Settings:
     openrouter_emergency_fallback: bool = True
     vps_model_base_url: str = "http://127.0.0.1:8000"
     vps_model_id: str = "local-model"
+    vps_model_api_format: str = "anthropic"
     vps_model_api_key: str = ""
     vps_model_timeout_seconds: float = 90.0
     vps_model_slow_fallback_seconds: float = 25.0
@@ -140,6 +141,7 @@ class Settings:
             openrouter_emergency_fallback=_bool_env("OPENROUTER_EMERGENCY_FALLBACK", True),
             vps_model_base_url=os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000"),
             vps_model_id=os.getenv("VPS_MODEL_ID", "local-model"),
+            vps_model_api_format=os.getenv("VPS_MODEL_API_FORMAT", "anthropic"),
             vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "90")),
             vps_model_slow_fallback_seconds=float(

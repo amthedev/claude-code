@@ -229,6 +229,10 @@ async def stream_events(payloads: list[dict[str, Any]]):
         yield f"event: content_block_delta\ndata: {json.dumps(payload)}\n\n".encode()
 
 
+async def _collect_async_bytes(chunks) -> list[bytes]:
+    return [chunk async for chunk in chunks]
+
+
 def make_settings() -> Settings:
     return Settings(
         gateway_api_keys=("test-token",),
@@ -317,6 +321,60 @@ class GatewayTestCase(unittest.TestCase):
 
         settings.vps_model_api_key = "vps-secret"
         self.assertEqual(client._headers()["Authorization"], "Bearer vps-secret")
+
+    def test_vps_openai_chat_format_converts_anthropic_payload(self) -> None:
+        settings = make_settings()
+        settings.vps_model_base_url = "https://runpod.example/v1"
+        settings.vps_model_id = "qwen-14b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "model": "claude-code-ultra",
+                "__gateway_reasoning": "high",
+                "system": "Seja direto.",
+                "max_tokens": 99,
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Oi"}]}],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+            },
+            stream=False,
+        )
+
+        self.assertEqual(client.chat_completions_url, "https://runpod.example/v1/chat/completions")
+        self.assertEqual(outgoing["model"], "qwen-14b")
+        self.assertEqual(outgoing["messages"][0], {"role": "system", "content": "Seja direto."})
+        self.assertEqual(outgoing["messages"][1], {"role": "user", "content": "Oi"})
+        self.assertEqual(outgoing["tools"][0]["function"]["name"], "read_file")
+        self.assertNotIn("__gateway_reasoning", outgoing)
+
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_test",
+                "choices": [{"message": {"content": "Olá!"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+            }
+        )
+        self.assertEqual(response["model"], "qwen-14b")
+        self.assertEqual(response["content"], [{"type": "text", "text": "Olá!"}])
+        self.assertEqual(response["usage"], {"input_tokens": 7, "output_tokens": 3})
+
+    def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen-14b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"Ol"}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"content":"a"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
+        self.assertIn(b"event: message_start", body)
+        self.assertIn(b'"text": "Ol"', body)
+        self.assertIn(b'"text": "a"', body)
+        self.assertIn(b"event: message_stop", body)
 
     def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
         settings = make_settings()

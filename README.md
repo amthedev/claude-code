@@ -16,6 +16,7 @@ Edit `.env` and set your VPS model endpoint:
 ```env
 VPS_MODEL_BASE_URL=https://sua-vps.example.com
 VPS_MODEL_ID=local-model
+VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
 ```
 
@@ -48,7 +49,8 @@ Open the web app:
 
 The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients pointed at this public API. Internally, the main model call goes to your VPS:
 
-- Primary: `POST {VPS_MODEL_BASE_URL}/v1/messages`
+- Primary Anthropic-compatible: `POST {VPS_MODEL_BASE_URL}/v1/messages`
+- Primary OpenAI-compatible/vLLM/RunPod: `POST {VPS_MODEL_BASE_URL}/chat/completions` when `VPS_MODEL_API_FORMAT=openai-chat`
 - Public models: `claude-code-economy`, `claude-code-pro`, `claude-code-ultra`, `claude-code-ui`, `claude-code-auto`
 - Actual VPS model id sent upstream: `VPS_MODEL_ID`
 - Emergency fallback: OpenRouter only when the VPS errors or is too slow before the first response
@@ -56,6 +58,7 @@ The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients p
 ```env
 VPS_MODEL_BASE_URL=https://sua-vps.example.com
 VPS_MODEL_ID=local-model
+VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
 VPS_MODEL_TIMEOUT_SECONDS=90
 VPS_MODEL_SLOW_FALLBACK_SECONDS=25
@@ -356,6 +359,7 @@ Set these environment variables in Square Cloud:
 ```env
 VPS_MODEL_BASE_URL=https://your-vps.example.com
 VPS_MODEL_ID=local-model
+VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
 OPENROUTER_EMERGENCY_FALLBACK=true
 OPENROUTER_API_KEY=
