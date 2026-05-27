@@ -969,7 +969,7 @@ async function runVpsAction(action) {
       message.textContent =
         data.status?.status === "success"
           ? "Comando enviado para a VPS. Aguarde o vLLM carregar o modelo antes de testar o chat."
-          : "Comando processado.";
+          : data.status?.error || "A RunPod não aceitou o comando. Confira RUNPOD_API_KEY e RUNPOD_POD_ID.";
     }
     const fresh = await adminRequest("/v1/admin/vps/schedules");
     vpsScheduleState = fresh;

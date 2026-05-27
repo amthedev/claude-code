@@ -121,7 +121,16 @@ class VPSScheduleStore:
             raise HTTPException(status_code=400, detail="Action must be start or stop.")
         if not self.settings.runpod_api_key or not self.settings.runpod_pod_id:
             raise HTTPException(status_code=400, detail="RunPod credentials are not configured.")
-        await self._runpod(normalized)
+        try:
+            await self._runpod(normalized)
+        except Exception as exc:
+            return {
+                "action": normalized,
+                "status": "error",
+                **self.status(),
+                "desiredState": "on" if normalized == "start" else "off",
+                "error": str(exc)[:500],
+            }
         desired_state = "on" if normalized == "start" else "off"
         return {
             "action": normalized,

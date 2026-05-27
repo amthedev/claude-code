@@ -929,6 +929,30 @@ class GatewayTestCase(unittest.TestCase):
             self.assertTrue(response.json()["status"]["runpodApiConfigured"])
             self.assertIn("vLLM", response.json()["status"]["message"])
 
+    def test_admin_vps_manual_action_returns_controlled_error(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.runpod_api_key = "runpod-token"
+            settings.runpod_pod_id = "pod-123"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            async def fake_runpod(action: str) -> None:
+                raise RuntimeError("RunPod start failed with HTTP 401: unauthorized")
+
+            app.state.vps_schedules._runpod = fake_runpod
+
+            response = client.post(
+                "/v1/admin/vps/actions",
+                headers=self.headers,
+                json={"action": "start"},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"]["status"], "error")
+            self.assertIn("HTTP 401", response.json()["status"]["error"])
+
     def test_prompt_command_only_returns_confirmation_without_model_call(self) -> None:
         response = self.client.post(
             "/v1/messages",
