@@ -313,6 +313,18 @@ p {
   gap: 13px;
 }
 
+.checkbox-field {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.checkbox-field input {
+  width: auto;
+}
+
 .limit-box,
 .explain-grid {
   display: grid;

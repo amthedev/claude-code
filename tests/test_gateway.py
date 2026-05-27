@@ -237,6 +237,7 @@ def make_settings() -> Settings:
     return Settings(
         gateway_api_keys=("test-token",),
         openrouter_api_key="test-openrouter-token",
+        vps_model_id="qwen-14b",
         enable_agent_orchestration=True,
     )
 
@@ -504,7 +505,7 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
-        self.assertIn("claude-code-pro", model_ids)
+        self.assertEqual(model_ids, {"qwen-14b"})
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
         self.assertNotIn("localhost", response.headers["content-security-policy"])
@@ -820,6 +821,86 @@ class GatewayTestCase(unittest.TestCase):
             expired = next(item for item in accounts.json()["data"] if item["id"] == account["id"])
             self.assertFalse(expired["active"])
 
+    def test_admin_can_create_multiple_api_tokens_with_same_manual_limit(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={
+                    "name": "Equipe API",
+                    "price": 50,
+                    "durationHours": 24,
+                    "quantity": 3,
+                    "manualLimit": 123456,
+                },
+            )
+
+            self.assertEqual(created.status_code, 200)
+            accounts = created.json()["accounts"]
+            self.assertEqual(len(accounts), 3)
+            self.assertEqual({account["dailyLimit"] for account in accounts}, {123456})
+            self.assertEqual(len({account["apiToken"] for account in accounts}), 3)
+
+    def test_unlimited_api_token_has_no_daily_cap_but_records_usage(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Ilimitado", "price": 50, "durationHours": 24, "unlimited": True},
+            )
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            self.assertTrue(account["unlimited"])
+            self.assertEqual(account["dailyLimit"], 0)
+
+            response = client.post(
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-ultra",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "Oi"}],
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            usage = client.get("/v1/usage", headers={"Authorization": f"Bearer {account['apiToken']}"})
+            self.assertIsNone(usage.json()["today"]["remaining_tokens"])
+
+    def test_admin_can_create_vps_12h_cycle_schedule(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            start_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+
+            created = client.post(
+                "/v1/admin/vps/schedules",
+                headers=self.headers,
+                json={"name": "Ciclo", "startAt": start_at, "days": 4, "onHours": 12, "offHours": 12},
+            )
+
+            self.assertEqual(created.status_code, 200)
+            schedule = created.json()["schedule"]
+            self.assertEqual(schedule["onHours"], 12)
+            self.assertEqual(schedule["offHours"], 12)
+            listed = client.get("/v1/admin/vps/schedules", headers=self.headers)
+            self.assertEqual(listed.status_code, 200)
+            self.assertFalse(listed.json()["status"]["configured"])
+            self.assertEqual(len(listed.json()["data"]), 1)
+
     def test_prompt_command_only_returns_confirmation_without_model_call(self) -> None:
         response = self.client.post(
             "/v1/messages",
@@ -832,7 +913,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertEqual(response.json()["model"], "qwen-14b")
         self.assertIn("Configuração aplicada", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
@@ -855,8 +936,8 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["requested_model"], "claude-code-pro")
-        self.assertEqual(data["public_model"], "claude-code-pro")
+        self.assertEqual(data["requested_model"], "qwen-14b")
+        self.assertEqual(data["public_model"], "qwen-14b")
         self.assertEqual(data["web_search_policy"], "off")
 
     def test_account_prompt_commands_are_saved_as_api_preferences(self) -> None:
@@ -891,11 +972,11 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(first.status_code, 200)
-            self.assertEqual(first.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(first.json()["requested_model"], "qwen-14b")
 
             accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
             stored = next(item for item in accounts if item["id"] == account["id"])
-            self.assertEqual(stored["preferredModel"], "claude-code-pro")
+            self.assertEqual(stored["preferredModel"], "qwen-14b")
             self.assertEqual(stored["preferredReasoning"], "strong")
 
             second = client.post(
@@ -908,7 +989,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(second.status_code, 200)
-            self.assertEqual(second.json()["requested_model"], "claude-code-pro")
+            self.assertEqual(second.json()["requested_model"], "qwen-14b")
 
     def test_admin_ip_check_reports_detected_proxy_ip(self) -> None:
         settings = make_settings()
@@ -1167,7 +1248,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(debug.status_code, 200)
-            self.assertEqual(debug.json()["public_model"], "claude-code-ultra")
+            self.assertEqual(debug.json()["public_model"], "qwen-14b")
 
     def test_public_trial_promotes_existing_free_accounts_and_expires_to_free(self) -> None:
         with TemporaryDirectory() as directory:
@@ -1511,7 +1592,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "claude-code-pro")
+        self.assertEqual(response.json()["model"], "qwen-14b")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
 
     def test_simple_pro_request_uses_single_fast_call_and_smaller_default_output(self) -> None:
@@ -1567,7 +1648,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertEqual(response.json()["model"], "qwen-14b")
         called_models = [model for model, _payload in self.app.state.openrouter.calls]
         self.assertGreaterEqual(len(called_models), 6)
         self.assertNotIn("anthropic/claude-sonnet-4.6", called_models)
@@ -1647,7 +1728,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["public_model"], "claude-code-economy")
+        self.assertEqual(data["public_model"], "qwen-14b")
         self.assertEqual(data["web_search_policy"], "off")
         self.assertFalse(data["web_search_should_search"])
         self.assertFalse(data["use_orchestration"])
@@ -1865,8 +1946,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-ultra")
-            self.assertEqual(response.json()["public_model"], "claude-code-ultra")
+            self.assertEqual(response.json()["requested_model"], "qwen-14b")
+            self.assertEqual(response.json()["public_model"], "qwen-14b")
 
     def test_customer_ultra_xstrong_avoids_expensive_models_by_default(self) -> None:
         expensive_models = {
@@ -1937,8 +2018,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-economy")
-            self.assertEqual(response.json()["public_model"], "claude-code-economy")
+            self.assertEqual(response.json()["requested_model"], "qwen-14b")
+            self.assertEqual(response.json()["public_model"], "qwen-14b")
 
     def test_frontend_tool_requests_skip_internal_helpers_for_speed(self) -> None:
         settings = make_settings()
@@ -2173,8 +2254,8 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
-            self.assertEqual(response.json()["public_model"], "claude-code-pro")
+            self.assertEqual(response.json()["requested_model"], "sonnet")
+            self.assertEqual(response.json()["public_model"], "qwen-14b")
 
     def test_admin_can_recharge_account_with_tokens_or_brl(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -2267,8 +2348,8 @@ class GatewayTestCase(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "claude-code-economy")
-            self.assertEqual(response.json()["public_model"], "claude-code-economy")
+            self.assertEqual(response.json()["requested_model"], "qwen-14b")
+            self.assertEqual(response.json()["public_model"], "qwen-14b")
 
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
@@ -2283,7 +2364,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["object"], "response")
-        self.assertEqual(body["model"], "claude-code-pro")
+        self.assertEqual(body["model"], "qwen-14b")
         self.assertEqual(body["output"][0]["content"][0]["type"], "output_text")
 
     def test_openai_chat_completions_endpoint_accepts_gateway_token(self) -> None:
@@ -2299,7 +2380,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["object"], "chat.completion")
-        self.assertEqual(body["model"], "claude-code-pro")
+        self.assertEqual(body["model"], "qwen-14b")
         self.assertEqual(body["choices"][0]["message"]["role"], "assistant")
 
     def test_customer_conversations_are_saved_in_database(self) -> None:
@@ -2671,8 +2752,8 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
-        self.assertIn("Claude Opus 4.7", payload["system"])
-        self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
+        self.assertIn("qwen-14b", payload["system"])
+        self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
         self.assertIn("Automatic senior skill routing is active", payload["system"])
 
@@ -2712,7 +2793,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b'"model": "claude-code-pro"', body)
+        self.assertIn(b'"model": "qwen-14b"', body)
 
     def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
         response = self.client.post(
@@ -2727,8 +2808,8 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("Claude Sonnet 4.6", payload["system"])
-        self.assertIn("Keep Anthropic-compatible Claude Code API behavior", payload["system"])
+        self.assertIn("qwen-14b", payload["system"])
+        self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 16000)
 
     def test_public_identity_prompt_includes_current_date_context(self) -> None:
@@ -2761,8 +2842,8 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "claude-code-ultra")
-        self.assertIn("Claude Opus 4.7", response.json()["content"][0]["text"])
+        self.assertEqual(response.json()["model"], "qwen-14b")
+        self.assertEqual(response.json()["content"][0]["text"], "qwen-14b")
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_previous_model_identity_question_does_not_override_next_request(self) -> None:
@@ -2784,7 +2865,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "claude-code-ultra")
+        self.assertEqual(response.json()["model"], "qwen-14b")
         self.assertNotIn("modo selecionado neste chat", response.json()["content"][0]["text"])
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 1)
 
@@ -2803,7 +2884,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"Claude Sonnet 4.6", body)
+        self.assertIn(b"qwen-14b", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

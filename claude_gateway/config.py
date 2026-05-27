@@ -51,6 +51,9 @@ class Settings:
     vps_model_api_key: str = ""
     vps_model_timeout_seconds: float = 90.0
     vps_model_slow_fallback_seconds: float = 25.0
+    runpod_api_key: str = ""
+    runpod_pod_id: str = ""
+    vps_scheduler_interval_seconds: int = 60
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_helper_model: str = "gpt-5.4-mini"
@@ -104,11 +107,11 @@ class Settings:
     public_trial_daily_limit: int = 1_200_000
     public_trial_label: str = "Teste grátis 24h"
 
-    economy_public_model: str = "claude-code-economy"
-    pro_public_model: str = "claude-code-pro"
-    ultra_public_model: str = "claude-code-ultra"
-    ui_public_model: str = "claude-code-ui"
-    auto_public_model: str = "claude-code-auto"
+    economy_public_model: str = "local-model"
+    pro_public_model: str = "local-model"
+    ultra_public_model: str = "local-model"
+    ui_public_model: str = "local-model"
+    auto_public_model: str = "local-model"
 
     router_agent: str = "tencent/hy3-preview"
     cheap_code_agent: str = "deepseek/deepseek-v4-flash"
@@ -130,9 +133,23 @@ class Settings:
     openrouter_site_url: str = "http://localhost:8787"
     openrouter_app_name: str = "Claude Code"
 
+    def __post_init__(self) -> None:
+        if self.vps_model_id and self.vps_model_id != "local-model":
+            for name in (
+                "economy_public_model",
+                "pro_public_model",
+                "ultra_public_model",
+                "ui_public_model",
+                "auto_public_model",
+            ):
+                if getattr(self, name) == "local-model":
+                    setattr(self, name, self.vps_model_id)
+
     @classmethod
     def from_env(cls) -> "Settings":
         _load_dotenv()
+        vps_model_id = os.getenv("VPS_MODEL_ID", "local-model")
+        public_model_id = os.getenv("PUBLIC_MODEL_ID", vps_model_id)
         return cls(
             gateway_api_keys=_csv_env("GATEWAY_API_KEYS", "local-dev-token"),
             allow_unauthenticated=_bool_env("ALLOW_UNAUTHENTICATED", False),
@@ -140,13 +157,16 @@ class Settings:
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
             openrouter_emergency_fallback=_bool_env("OPENROUTER_EMERGENCY_FALLBACK", True),
             vps_model_base_url=os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000"),
-            vps_model_id=os.getenv("VPS_MODEL_ID", "local-model"),
+            vps_model_id=vps_model_id,
             vps_model_api_format=os.getenv("VPS_MODEL_API_FORMAT", "anthropic"),
             vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "90")),
             vps_model_slow_fallback_seconds=float(
                 os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "25")
             ),
+            runpod_api_key=os.getenv("RUNPOD_API_KEY", ""),
+            runpod_pod_id=os.getenv("RUNPOD_POD_ID", ""),
+            vps_scheduler_interval_seconds=int(os.getenv("VPS_SCHEDULER_INTERVAL_SECONDS", "60")),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             openai_helper_model=os.getenv("OPENAI_HELPER_MODEL", "gpt-5.4-mini"),
@@ -198,11 +218,11 @@ class Settings:
             public_trial_plan_id=os.getenv("PUBLIC_TRIAL_PLAN_ID", "ultra"),
             public_trial_daily_limit=int(os.getenv("PUBLIC_TRIAL_DAILY_LIMIT", "1200000")),
             public_trial_label=os.getenv("PUBLIC_TRIAL_LABEL", "Teste grátis 24h"),
-            economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", "claude-code-economy"),
-            pro_public_model=os.getenv("PRO_PUBLIC_MODEL", "claude-code-pro"),
-            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-code-ultra"),
-            ui_public_model=os.getenv("UI_PUBLIC_MODEL", "claude-code-ui"),
-            auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", "claude-code-auto"),
+            economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", public_model_id),
+            pro_public_model=os.getenv("PRO_PUBLIC_MODEL", public_model_id),
+            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", public_model_id),
+            ui_public_model=os.getenv("UI_PUBLIC_MODEL", public_model_id),
+            auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", public_model_id),
             router_agent="tencent/hy3-preview",
             cheap_code_agent="deepseek/deepseek-v4-flash",
             code_agent="qwen/qwen3-coder-next",

@@ -23,8 +23,8 @@ MODEL_LABELS = {
 }
 
 PUBLIC_MODELS_BY_KEY = {
-    "haiku": "claude-code-economy",
-    "sonnet": "claude-code-pro",
+    "haiku": "",
+    "sonnet": "",
     "opus": "*",
 }
 
@@ -163,24 +163,33 @@ class AccountStore:
         return _public_gift_card(card)
 
     def create_api_token(self, values: dict[str, Any]) -> dict[str, Any]:
-        account = _api_only_account_from_values(values, self.settings)
+        return self.create_api_tokens(values)[0]
+
+    def create_api_tokens(self, values: dict[str, Any]) -> list[dict[str, Any]]:
+        quantity = max(1, min(100, int(float(values.get("quantity") or values.get("count") or 1))))
+        accounts = [_api_only_account_from_values(values, self.settings) for _ in range(quantity)]
         with self._lock, self._connect() as db:
-            while self._login_exists(db, account["login"]):
-                account["login"] = _api_only_login()
-            while db.execute("SELECT 1 FROM accounts WHERE api_token = ?", (account["apiToken"],)).fetchone():
-                account["apiToken"] = _generate_api_token()
-            db.execute(
-                """
-                INSERT INTO accounts (
-                    id, api_token, name, display_name, login, password_hash, plan, price,
-                    model_key, manual_limit, active, gift_card_code, used_today, usage_day,
-                    daily_limit, computed_daily_tokens, max_cost_usd, created_at, trial_expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                _account_values(account),
-            )
+            for index, account in enumerate(accounts, start=1):
+                if quantity > 1:
+                    account["name"] = f"{account['name']} {index}"
+                    account["displayName"] = account["name"]
+                while self._login_exists(db, account["login"]):
+                    account["login"] = _api_only_login()
+                while db.execute("SELECT 1 FROM accounts WHERE api_token = ?", (account["apiToken"],)).fetchone():
+                    account["apiToken"] = _generate_api_token()
+                db.execute(
+                    """
+                    INSERT INTO accounts (
+                        id, api_token, name, display_name, login, password_hash, plan, price,
+                        model_key, manual_limit, active, gift_card_code, used_today, usage_day,
+                        daily_limit, computed_daily_tokens, max_cost_usd, is_unlimited,
+                        created_at, trial_expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    _account_values(account),
+                )
             db.commit()
-        return _public_account(account)
+        return [_public_account(account) for account in accounts]
 
     def update_gift_card(self, card_id: str, values: dict[str, Any]) -> dict[str, Any]:
         with self._lock, self._connect() as db:
@@ -231,8 +240,9 @@ class AccountStore:
                 INSERT INTO accounts (
                     id, api_token, name, display_name, login, password_hash, plan, price,
                     model_key, manual_limit, active, gift_card_code, used_today, usage_day,
-                    daily_limit, computed_daily_tokens, max_cost_usd, created_at, trial_expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    daily_limit, computed_daily_tokens, max_cost_usd, is_unlimited,
+                    created_at, trial_expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 _account_values(account),
             )
@@ -369,7 +379,8 @@ class AccountStore:
                        manual_limit = ?,
                        daily_limit = ?,
                        computed_daily_tokens = ?,
-                       max_cost_usd = ?
+                       max_cost_usd = ?,
+                       is_unlimited = ?
                  WHERE id = ?
                 """,
                 (
@@ -381,6 +392,7 @@ class AccountStore:
                     int(account["dailyLimit"]),
                     int(account["computedDailyTokens"]),
                     float(account["maxCostUsd"]),
+                    int(bool(account.get("unlimited"))),
                     account_id,
                 ),
             )
@@ -635,7 +647,7 @@ class AccountStore:
             name=account["name"],
             monthly_price_brl=float(account.get("price") or 0),
             daily_token_limit=int(account.get("dailyLimit") or 0),
-            allowed_model=PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
+            allowed_model=_allowed_model_for_key(account.get("modelKey"), self.settings),
             active=bool(account.get("active")),
             preferred_model=str(account.get("preferredModel") or ""),
             preferred_reasoning=str(account.get("preferredReasoning") or ""),
@@ -693,9 +705,10 @@ class AccountStore:
 
             daily_limit = int(account.get("dailyLimit") or 0)
             used_today = int(account.get("usedToday") or 0)
-            if daily_limit <= 0:
+            unlimited = bool(account.get("unlimited"))
+            if daily_limit <= 0 and not unlimited:
                 raise HTTPException(status_code=402, detail="Account has no daily token limit configured.")
-            if used_today + estimated_tokens > daily_limit:
+            if not unlimited and used_today + estimated_tokens > daily_limit:
                 remaining = max(0, daily_limit - used_today)
                 raise HTTPException(
                     status_code=429,
@@ -756,17 +769,19 @@ class AccountStore:
         daily_limit = int(account.get("dailyLimit") or 0)
         used_today = int(account.get("usedToday") or 0)
         is_api_only = account.get("giftCardCode") == API_ONLY_GIFT_MARKER
+        unlimited = bool(account.get("unlimited"))
         daily_cost_budget_usd = float(account.get("maxCostUsd") or 0)
         if not is_api_only:
             daily_cost_budget_usd = daily_cost_budget_usd / 30
         return {
             "customer": {
                 "name": account["name"],
-                "allowed_model": PUBLIC_MODELS_BY_KEY.get(account.get("modelKey"), self.settings.economy_public_model),
+                "allowed_model": _allowed_model_for_key(account.get("modelKey"), self.settings),
                 "monthly_price_brl": float(account.get("price") or 0),
                 "daily_token_limit": daily_limit,
                 "active": bool(account.get("active")),
                 "api_only": is_api_only,
+                "unlimited": unlimited,
                 "created_at": account.get("createdAt") or "",
                 "expires_at": account.get("trialExpiresAt") if is_api_only else "",
             },
@@ -777,7 +792,7 @@ class AccountStore:
                 "daily_cost_budget_usd": round(daily_cost_budget_usd, 8),
                 "reserved_tokens": used_today,
                 "remaining_cost_usd": None,
-                "remaining_tokens": max(0, daily_limit - used_today),
+                "remaining_tokens": None if unlimited else max(0, daily_limit - used_today),
             },
         }
 
@@ -826,6 +841,7 @@ class AccountStore:
                     daily_limit INTEGER NOT NULL,
                     computed_daily_tokens INTEGER NOT NULL,
                     max_cost_usd REAL NOT NULL,
+                    is_unlimited INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     trial_expires_at TEXT NOT NULL DEFAULT '',
                     preferred_model TEXT NOT NULL DEFAULT '',
@@ -841,6 +857,8 @@ class AccountStore:
                 db.execute("ALTER TABLE accounts ADD COLUMN preferred_model TEXT NOT NULL DEFAULT ''")
             if not _column_exists(db, "accounts", "preferred_reasoning"):
                 db.execute("ALTER TABLE accounts ADD COLUMN preferred_reasoning TEXT NOT NULL DEFAULT ''")
+            if not _column_exists(db, "accounts", "is_unlimited"):
+                db.execute("ALTER TABLE accounts ADD COLUMN is_unlimited INTEGER NOT NULL DEFAULT 0")
             db.execute("UPDATE accounts SET usage_day = ? WHERE usage_day = ''", (_today(),))
             db.execute(
                 """
@@ -1105,7 +1123,15 @@ def _api_only_account_from_values(values: dict[str, Any], settings: Settings) ->
     duration_hours = max(1, min(duration_hours, 24 * 30))
     model_key = _normalize_model_key(values.get("model") or values.get("modelKey") or "opus")
     name = str(values.get("name") or "Fornecedor API").strip() or "Fornecedor API"
+    unlimited = _truthy(values.get("unlimited") or values.get("isUnlimited") or values.get("is_unlimited"))
+    manual_limit = int(float(values.get("manualLimit") or values.get("manual_limit") or values.get("dailyLimit") or 0))
     limit = _calculate_api_only_limit(price, duration_hours, settings)
+    if manual_limit > 0:
+        limit["dailyLimit"] = manual_limit
+        limit["computedDailyTokens"] = manual_limit
+    if unlimited:
+        limit["dailyLimit"] = 0
+        limit["computedDailyTokens"] = 0
     expires_at = (_now_datetime() + timedelta(hours=duration_hours)).isoformat()
     return {
         "id": f"acct_{secrets.token_hex(12)}",
@@ -1114,17 +1140,18 @@ def _api_only_account_from_values(values: dict[str, Any], settings: Settings) ->
         "displayName": name,
         "login": _api_only_login(),
         "passwordHash": hash_password(secrets.token_urlsafe(24)),
-        "plan": f"API avulsa {duration_hours}h",
+        "plan": f"API {'ilimitada' if unlimited else 'avulsa'} {duration_hours}h",
         "price": price,
         "modelKey": model_key,
-        "manualLimit": limit["dailyLimit"],
+        "manualLimit": int(limit["dailyLimit"]),
         "active": True,
         "giftCardCode": API_ONLY_GIFT_MARKER,
         "usedToday": 0,
         "usageDay": _today(),
-        "dailyLimit": limit["dailyLimit"],
-        "computedDailyTokens": limit["computedDailyTokens"],
+        "dailyLimit": int(limit["dailyLimit"]),
+        "computedDailyTokens": int(limit["computedDailyTokens"]),
         "maxCostUsd": limit["maxCostUsd"],
+        "unlimited": unlimited,
         "createdAt": _now(),
         "trialExpiresAt": expires_at,
     }
@@ -1168,6 +1195,7 @@ def _account_from_gift_card(
         "dailyLimit": gift_card["dailyLimit"],
         "computedDailyTokens": gift_card["computedDailyTokens"],
         "maxCostUsd": gift_card["maxCostUsd"],
+        "unlimited": False,
         "createdAt": _now(),
         "trialExpiresAt": "",
     }
@@ -1201,6 +1229,7 @@ def _free_account(name: str, login: str, password: str, settings: Settings) -> d
         "dailyLimit": limit["dailyLimit"],
         "computedDailyTokens": limit["computedDailyTokens"],
         "maxCostUsd": limit["maxCostUsd"],
+        "unlimited": False,
         "createdAt": _now(),
         "trialExpiresAt": "",
     }
@@ -1235,6 +1264,7 @@ def _public_trial_account(
         "dailyLimit": limit["dailyLimit"],
         "computedDailyTokens": limit["computedDailyTokens"],
         "maxCostUsd": limit["maxCostUsd"],
+        "unlimited": False,
         "createdAt": _now(),
         "trialExpiresAt": str(status.get("endAt") or ""),
     }
@@ -1253,6 +1283,7 @@ def _free_account_from_existing(account: dict[str, Any], settings: Settings) -> 
             "dailyLimit": limit["dailyLimit"],
             "computedDailyTokens": limit["computedDailyTokens"],
             "maxCostUsd": limit["maxCostUsd"],
+            "unlimited": False,
             "trialExpiresAt": "",
         }
     )
@@ -1279,6 +1310,7 @@ def _public_trial_account_from_existing(
             "dailyLimit": limit["dailyLimit"],
             "computedDailyTokens": limit["computedDailyTokens"],
             "maxCostUsd": limit["maxCostUsd"],
+            "unlimited": False,
             "trialExpiresAt": str(status.get("endAt") or ""),
         }
     )
@@ -1319,7 +1351,7 @@ def public_trial_status(settings: Settings) -> dict[str, Any]:
         "planName": plan["name"],
         "modelKey": plan["modelKey"],
         "dailyLimit": max(0, daily_limit),
-        "allowedModel": PUBLIC_MODELS_BY_KEY.get(plan["modelKey"], settings.economy_public_model),
+        "allowedModel": _allowed_model_for_key(plan["modelKey"], settings),
     }
 
 
@@ -1330,7 +1362,7 @@ def _public_plan(plan: dict[str, Any], settings: Settings) -> dict[str, Any]:
         "dailyLimit": limit["dailyLimit"],
         "computedDailyTokens": limit["computedDailyTokens"],
         "maxCostUsd": limit["maxCostUsd"],
-        "allowedModel": PUBLIC_MODELS_BY_KEY.get(plan["modelKey"], settings.economy_public_model),
+        "allowedModel": _allowed_model_for_key(plan["modelKey"], settings),
     }
 
 
@@ -1412,6 +1444,7 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     api_only = public.get("giftCardCode") == API_ONLY_GIFT_MARKER
     expires_at = _parse_datetime(str(public.get("trialExpiresAt") or ""))
     public["apiOnly"] = api_only
+    public["unlimited"] = bool(public.get("unlimited"))
     public["expiresAt"] = public.get("trialExpiresAt") if api_only else ""
     public["publicTrialActive"] = bool(not api_only and expires_at and expires_at > _now_datetime())
     return public
@@ -1455,6 +1488,7 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "dailyLimit": row["daily_limit"],
         "computedDailyTokens": row["computed_daily_tokens"],
         "maxCostUsd": row["max_cost_usd"],
+        "unlimited": bool(row["is_unlimited"]) if "is_unlimited" in row.keys() else False,
         "createdAt": row["created_at"],
         "trialExpiresAt": row["trial_expires_at"],
         "preferredModel": row["preferred_model"],
@@ -1524,6 +1558,7 @@ def _account_values(account: dict[str, Any]) -> tuple[Any, ...]:
         account["dailyLimit"],
         account["computedDailyTokens"],
         account["maxCostUsd"],
+        int(bool(account.get("unlimited"))),
         account["createdAt"],
         account.get("trialExpiresAt") or "",
     )
@@ -1560,6 +1595,19 @@ def _normalize_model_key(value: Any) -> str:
     if "opus" in raw or "ultra" in raw:
         return "opus"
     return "sonnet"
+
+
+def _allowed_model_for_key(model_key: Any, settings: Settings) -> str:
+    key = str(model_key or "").strip().lower()
+    if key == "opus":
+        return "*"
+    if key in {"haiku", "sonnet"}:
+        return key
+    return settings.vps_model_id
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on", "sim", "ilimitado"}
 
 
 def _parse_datetime(value: str) -> datetime | None:

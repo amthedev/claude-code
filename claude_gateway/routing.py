@@ -152,38 +152,46 @@ HIGH_COMPLEXITY_KEYWORDS = {
 
 
 def model_profiles(settings: Settings) -> list[ModelProfile]:
-    return [
+    profiles = [
         ModelProfile(
             id=settings.economy_public_model,
-            display_name="Claude Haiku 4.5",
+            display_name=settings.economy_public_model,
             mode="economy",
-            description="Caminho econômico para conversas e tarefas simples.",
+            description="Modelo real da VPS para respostas rápidas.",
         ),
         ModelProfile(
             id=settings.pro_public_model,
-            display_name="Claude Sonnet 4.6",
+            display_name=settings.pro_public_model,
             mode="pro",
-            description="Mais força para código, análise e trabalho diário.",
+            description="Modelo real da VPS para código, análise e trabalho diário.",
         ),
         ModelProfile(
             id=settings.ultra_public_model,
-            display_name="Claude Opus 4.7",
+            display_name=settings.ultra_public_model,
             mode="ultra",
-            description="Rota reforçada para tarefas críticas e projetos maiores.",
+            description="Modelo real da VPS com raciocínio reforçado quando necessário.",
         ),
         ModelProfile(
             id=settings.ui_public_model,
-            display_name="Claude Code UI",
+            display_name=settings.ui_public_model,
             mode="ui",
-            description="Especialista em frontend, layout e experiência visual.",
+            description="Modelo real da VPS para frontend, layout e experiência visual.",
         ),
         ModelProfile(
             id=settings.auto_public_model,
-            display_name="Claude Code Auto",
+            display_name=settings.auto_public_model,
             mode="auto",
-            description="Escolhe automaticamente entre Economy, Pro, Ultra e UI.",
+            description="Modelo real da VPS com ajuste automático de esforço.",
         ),
     ]
+    seen: set[str] = set()
+    unique: list[ModelProfile] = []
+    for profile in profiles:
+        if profile.id in seen:
+            continue
+        seen.add(profile.id)
+        unique.append(profile)
+    return unique
 
 
 def extract_prompt_text(payload: dict[str, Any]) -> str:
@@ -243,7 +251,11 @@ class RoutePlanner:
 
     def plan(self, payload: dict[str, Any], *, force_orchestration: bool = False) -> RouteDecision:
         requested_model = str(payload.get("model") or self.settings.auto_public_model)
-        requested_auto = requested_model == self.settings.auto_public_model or not requested_model.strip()
+        requested_auto = (
+            requested_model == self.settings.auto_public_model
+            or requested_model.lower() in {"auto", "claude-code-auto"}
+            or not requested_model.strip()
+        )
         reasoning_mode = str(payload.get("__gateway_reasoning_mode") or "normal")
         task_text = extract_prompt_text(payload)
         task_type = self._task_type(task_text)
@@ -325,18 +337,26 @@ class RoutePlanner:
         return {profile.id for profile in model_profiles(self.settings)}
 
     def _mode_for_requested_model(self, requested_model: str, task_type: str, complexity: str) -> str:
-        public_to_mode = {profile.id: profile.mode for profile in model_profiles(self.settings)}
+        public_to_mode = {
+            self.settings.economy_public_model: "economy",
+            self.settings.pro_public_model: "pro",
+            self.settings.ultra_public_model: "ultra",
+            self.settings.ui_public_model: "ui",
+            self.settings.auto_public_model: "auto",
+        }
         explicit_mode = public_to_mode.get(requested_model)
         if explicit_mode and explicit_mode != "auto":
             return explicit_mode
 
         lower = requested_model.lower()
-        if "haiku" in lower:
+        if "claude-code-economy" in lower or "haiku" in lower:
             return "economy"
-        if "sonnet" in lower:
+        if "claude-code-pro" in lower or "sonnet" in lower:
             return "pro"
-        if "opus" in lower:
+        if "claude-code-ultra" in lower or "opus" in lower:
             return "ultra"
+        if "claude-code-ui" in lower:
+            return "ui"
 
         if task_type == "frontend":
             return "ui"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import io
 import base64
 import json
@@ -68,6 +70,7 @@ from .security import (
 from .skills import render_skill_prompt, select_skills
 from .support import SupportStore
 from .usage import UsageStore
+from .vps_scheduler import VPSScheduleStore, vps_scheduler_loop
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
 
@@ -121,6 +124,7 @@ def create_app(
     app.state.conversation_store = ConversationStore(resolved_settings)
     app.state.code_workspaces = CodeWorkspaceStore(resolved_settings)
     app.state.support_store = SupportStore(resolved_settings)
+    app.state.vps_schedules = VPSScheduleStore(resolved_settings)
     app.state.planner = RoutePlanner(resolved_settings)
     if client_factory is None:
         app.state.model_client = default_model_client(
@@ -165,6 +169,22 @@ def create_app(
         )
     _mount_frontend(app)
 
+    @app.on_event("startup")
+    async def _start_vps_scheduler() -> None:
+        if not resolved_settings.runpod_api_key or not resolved_settings.runpod_pod_id:
+            app.state.vps_scheduler_task = None
+            return
+        app.state.vps_scheduler_task = asyncio.create_task(vps_scheduler_loop(app.state.vps_schedules))
+
+    @app.on_event("shutdown")
+    async def _stop_vps_scheduler() -> None:
+        task = getattr(app.state, "vps_scheduler_task", None)
+        if not task:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         if not app.state.settings.expose_detailed_health:
@@ -205,6 +225,7 @@ def create_app(
             "orchestration_enabled": settings.enable_agent_orchestration,
             "production_readiness": _production_readiness(app),
             "public_trial": public_trial_status(settings),
+            "vps_scheduler": app.state.vps_schedules.status(),
             "cost_target": {
                 "baseline_model": CLAUDE_BASELINE_MODEL,
                 "max_cost_ratio_vs_claude": settings.max_cost_ratio_vs_claude,
@@ -220,7 +241,8 @@ def create_app(
         )
         profiles = model_profiles(app.state.settings)
         if auth.customer and auth.customer.allowed_model != "*":
-            profiles = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
+            filtered = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
+            profiles = filtered or profiles
         return {
             "data": [
                 {
@@ -650,7 +672,52 @@ def create_app(
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"account": app.state.account_store.create_api_token(payload)})
+        accounts = app.state.account_store.create_api_tokens(payload)
+        return JSONResponse({"account": accounts[0], "accounts": accounts})
+
+    @app.get("/v1/admin/vps/schedules")
+    async def list_vps_schedules(request: Request) -> dict[str, Any]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return {
+            "data": app.state.vps_schedules.list_schedules(),
+            "status": app.state.vps_schedules.status(),
+        }
+
+    @app.post("/v1/admin/vps/schedules")
+    async def create_vps_schedule(
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"schedule": app.state.vps_schedules.create_schedule(payload)})
+
+    @app.patch("/v1/admin/vps/schedules/{schedule_id}")
+    async def update_vps_schedule(
+        schedule_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        return JSONResponse({"schedule": app.state.vps_schedules.update_schedule(schedule_id, payload)})
+
+    @app.delete("/v1/admin/vps/schedules/{schedule_id}")
+    async def delete_vps_schedule(schedule_id: str, request: Request) -> dict[str, str]:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return app.state.vps_schedules.delete_schedule(schedule_id)
+
+    @app.post("/v1/admin/vps/schedules/tick")
+    async def tick_vps_schedule(request: Request) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        return JSONResponse({"status": await app.state.vps_schedules.tick()})
 
     @app.get("/v1/admin/purchases")
     async def list_purchases(request: Request) -> dict[str, Any]:
@@ -2112,9 +2179,9 @@ def _with_public_model_identity(
     label = _public_model_label(public_model, settings)
     today = datetime.now(ZoneInfo("America/Recife")).strftime("%Y-%m-%d")
     prompt = (
-        f"Public Claude profile: the user selected {label} for this chat. "
+        f"Public model: {label}. "
         f"Current date for user-facing and factual work: {today}, timezone America/Recife. "
-        f"Keep Anthropic-compatible Claude Code API behavior while presenting Claude clearly: be helpful, "
+        f"Keep Anthropic-compatible API behavior while being helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
         f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
@@ -2136,9 +2203,9 @@ def _with_public_model_identity(
         f"software versions, company data, sports, weather, or public figures, search or otherwise verify "
         f"fresh information before answering. If no browsing/search tool is available in the current "
         f"environment, say that you cannot verify live data instead of guessing. "
-        f"If the user asks what model you are or what model is being used, answer with {label}. "
+        f"If the user asks what model is being used, answer only with {label}. "
         f"Do not mention internal routing providers or gateway implementation details such as "
-        f"DeepSeek, Kimi, StepFun, Tencent, Qwen, OpenRouter, OpenAI helper, or hidden agents "
+        f"DeepSeek, Kimi, StepFun, Tencent, OpenRouter, OpenAI helper, or hidden agents "
         f"unless the user explicitly asks for technical routing details."
     )
     return _append_system_prompt(payload, prompt)
@@ -2661,7 +2728,7 @@ def _selected_model_identity_answer(
         return None
 
     label = _public_model_label(public_model, settings)
-    return f"Eu sou o {label}, o modo selecionado neste chat."
+    return label
 
 
 def _last_user_message_text(payload: dict[str, Any]) -> str:
@@ -2947,14 +3014,7 @@ def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any
 
 
 def _public_model_label(public_model: str, settings: Settings) -> str:
-    labels = {
-        settings.economy_public_model: "Claude Haiku 4.5",
-        settings.pro_public_model: "Claude Sonnet 4.6",
-        settings.ultra_public_model: "Claude Opus 4.7",
-        settings.ui_public_model: "Claude Code UI",
-        settings.auto_public_model: "Claude Code Auto",
-    }
-    return labels.get(public_model, public_model)
+    return public_model or settings.vps_model_id
 
 
 def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:

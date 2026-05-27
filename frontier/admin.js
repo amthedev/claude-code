@@ -9,6 +9,7 @@ let adminSetupConfigured = true;
 let purchaseState = [];
 let gatewayHealthState = null;
 let benchmarkState = null;
+let vpsScheduleState = { data: [], status: {} };
 
 const adminTabTitles = {
   accountsPanel: "Gift cards e clientes",
@@ -162,16 +163,18 @@ async function adminAuthRequest(path, payload) {
 }
 
 async function refreshFromServer() {
-  const [giftCards, accounts, purchases, health] = await Promise.all([
+  const [giftCards, accounts, purchases, health, vpsSchedules] = await Promise.all([
     adminRequest("/v1/admin/gift-cards"),
     adminRequest("/v1/admin/accounts"),
     adminRequest("/v1/admin/purchases"),
     adminRequest("/v1/admin/health"),
+    adminRequest("/v1/admin/vps/schedules").catch(() => ({ data: [], status: {} })),
   ]);
   ClaudeApp.saveGiftCards(giftCards.data || []);
   ClaudeApp.saveAccounts(accounts.data || []);
   purchaseState = purchases.data || [];
   gatewayHealthState = health;
+  vpsScheduleState = vpsSchedules;
   ClaudeApp.savePurchases(purchaseState);
 }
 
@@ -215,11 +218,56 @@ function renderPreview() {
 
 function renderApiPreview() {
   const values = Object.fromEntries(new FormData(apiTokenForm).entries());
+  if (values.unlimited) {
+    document.querySelector("#apiPreviewProfit").textContent = ClaudeApp.brl.format(Number(values.price || 0) * ClaudeApp.API_ONLY_PROFIT_MARGIN);
+    document.querySelector("#apiPreviewTokens").textContent = "Ilimitado";
+    document.querySelector("#apiPreviewCost").textContent = "Sem teto diário";
+    return;
+  }
   const limit = ClaudeApp.calculateApiOnlyLimit(values.price, values.durationHours);
+  const manual = Number(values.manualLimit || 0);
+  if (manual > 0) {
+    limit.dailyLimit = manual;
+    limit.computedDailyTokens = manual;
+  }
   document.querySelector("#apiPreviewProfit").textContent = ClaudeApp.brl.format(limit.protectedProfitBrl);
   document.querySelector("#apiPreviewTokens").textContent =
     `${ClaudeApp.integer.format(limit.dailyLimit)} tokens/dia`;
   document.querySelector("#apiPreviewCost").textContent = ClaudeApp.usd.format(limit.maxCostUsd);
+}
+
+function renderVpsSchedules() {
+  const table = document.querySelector("#vpsSchedulesTable");
+  const status = document.querySelector("#vpsScheduleStatus");
+  if (!table || !status) return;
+  const state = vpsScheduleState.status || gatewayHealthState?.vps_scheduler || {};
+  status.textContent = state.configured
+    ? `Pod ${state.podId || "-"} · desejado agora: ${state.desiredState || "-"}${state.nextTransitionAt ? ` · próxima troca ${new Date(state.nextTransitionAt).toLocaleString("pt-BR")}` : ""}`
+    : "Configure RUNPOD_API_KEY e RUNPOD_POD_ID no Square para a agenda ligar/desligar a VPS.";
+  const schedules = vpsScheduleState.data || [];
+  if (!schedules.length) {
+    table.innerHTML = `<tr><td colspan="4" class="muted">Nenhuma agenda cadastrada.</td></tr>`;
+    return;
+  }
+  table.innerHTML = schedules
+    .map((schedule) => `
+      <tr>
+        <td>
+          <strong>${ClaudeApp.escapeHtml(schedule.name)}</strong>
+          <div class="muted">Começa ${new Date(schedule.startAt).toLocaleString("pt-BR")}</div>
+          ${schedule.lastError ? `<div class="muted">${ClaudeApp.escapeHtml(schedule.lastError)}</div>` : ""}
+        </td>
+        <td>${schedule.onHours}h ligada / ${schedule.offHours}h desligada<div class="muted">${schedule.days} dia(s)</div></td>
+        <td><span class="badge ${schedule.active ? "ok" : "bad"}">${schedule.active ? "Ativa" : "Pausada"}</span></td>
+        <td>
+          <div class="row-actions">
+            <button data-vps-action="toggle" data-id="${schedule.id}">${schedule.active ? "Pausar" : "Ativar"}</button>
+            <button data-vps-action="delete" data-id="${schedule.id}">Excluir</button>
+          </div>
+        </td>
+      </tr>
+    `)
+    .join("");
 }
 
 function accountRechargePayload(account) {
@@ -544,6 +592,7 @@ function renderAccounts() {
     .map((account) => {
       const remaining = Math.max(0, account.dailyLimit - account.usedToday);
       const isApiOnly = Boolean(account.apiOnly);
+      const unlimited = Boolean(account.unlimited);
       const expiresAt = account.expiresAt || account.trialExpiresAt || "";
       const expirationLabel = expiresAt
         ? new Date(expiresAt).toLocaleString("pt-BR", {
@@ -572,8 +621,8 @@ function renderAccounts() {
           </td>
           <td>
             ${ClaudeApp.integer.format(account.usedToday)} usados
-            <div class="muted">${ClaudeApp.integer.format(remaining)} restantes</div>
-            <div class="muted">${ClaudeApp.integer.format(account.dailyLimit)} por dia</div>
+            <div class="muted">${unlimited ? "Ilimitado" : `${ClaudeApp.integer.format(remaining)} restantes`}</div>
+            <div class="muted">${unlimited ? "Sem teto diário" : `${ClaudeApp.integer.format(account.dailyLimit)} por dia`}</div>
           </td>
           <td>
             <span class="badge ${account.active ? "ok" : "bad"}">
@@ -661,6 +710,7 @@ function renderAll() {
   renderPurchases();
   renderSupportAdmin();
   renderProductionChecklist();
+  renderVpsSchedules();
   renderBenchmark();
 }
 
@@ -848,7 +898,7 @@ apiTokenForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(values),
     });
-    accounts.unshift(data.account);
+    accounts.unshift(...(data.accounts || [data.account]).filter(Boolean));
     ClaudeApp.saveAccounts(accounts);
   } catch (error) {
     document.querySelector("#apiTokenError").textContent = error.fallback ? "API admin indisponível." : error.message;
@@ -858,10 +908,70 @@ apiTokenForm.addEventListener("submit", async (event) => {
   event.currentTarget.reset();
   event.currentTarget.elements.name.value = "Fornecedor API";
   event.currentTarget.elements.price.value = "50.00";
+  event.currentTarget.elements.quantity.value = "1";
+  event.currentTarget.elements.manualLimit.value = "";
   event.currentTarget.elements.durationHours.value = "28";
   event.currentTarget.elements.model.value = "opus";
+  event.currentTarget.elements.unlimited.checked = false;
   renderApiPreview();
   renderAll();
+});
+
+document.querySelector("#vpsScheduleForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = document.querySelector("#vpsScheduleMessage");
+  message.textContent = "";
+  const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+  if (values.startAt) values.startAt = new Date(values.startAt).toISOString();
+  try {
+    const data = await adminRequest("/v1/admin/vps/schedules", {
+      method: "POST",
+      body: JSON.stringify(values),
+    });
+    vpsScheduleState.data = [data.schedule, ...(vpsScheduleState.data || [])];
+    renderVpsSchedules();
+  } catch (error) {
+    message.textContent = error.fallback ? "API admin indisponível." : error.message;
+  }
+});
+
+document.querySelector("#tickVpsSchedule")?.addEventListener("click", async () => {
+  const message = document.querySelector("#vpsScheduleMessage");
+  message.textContent = "";
+  try {
+    const data = await adminRequest("/v1/admin/vps/schedules/tick", { method: "POST", body: JSON.stringify({}) });
+    message.textContent = data.status?.status === "error" ? data.status.error : "Agenda executada.";
+    const fresh = await adminRequest("/v1/admin/vps/schedules");
+    vpsScheduleState = fresh;
+    renderVpsSchedules();
+  } catch (error) {
+    message.textContent = error.fallback ? "API admin indisponível." : error.message;
+  }
+});
+
+document.querySelector("#vpsSchedulesTable")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const id = button.dataset.id;
+  const schedules = vpsScheduleState.data || [];
+  const schedule = schedules.find((item) => item.id === id);
+  if (!schedule) return;
+  try {
+    if (button.dataset.vpsAction === "toggle") {
+      const data = await adminRequest(`/v1/admin/vps/schedules/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: !schedule.active }),
+      });
+      vpsScheduleState.data = schedules.map((item) => (item.id === id ? data.schedule : item));
+    }
+    if (button.dataset.vpsAction === "delete") {
+      await adminRequest(`/v1/admin/vps/schedules/${id}`, { method: "DELETE" });
+      vpsScheduleState.data = schedules.filter((item) => item.id !== id);
+    }
+    renderVpsSchedules();
+  } catch (error) {
+    alert(error.fallback ? "API admin indisponível." : error.message);
+  }
 });
 
 document.querySelector("#giftCardsTable").addEventListener("click", async (event) => {
@@ -1085,6 +1195,13 @@ renderPreview();
 renderApiPreview();
 fillAdminLoginForm();
 fillAdminApiTargetForm();
+(() => {
+  const startInput = document.querySelector("#vpsScheduleForm input[name='startAt']");
+  if (!startInput || startInput.value) return;
+  const next = new Date(Date.now() + 10 * 60 * 1000);
+  next.setSeconds(0, 0);
+  startInput.value = next.toISOString().slice(0, 16);
+})();
 loadAdminSetupStatus();
 
 unlockRememberedAdminDevice().then((unlocked) => {

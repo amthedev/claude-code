@@ -176,6 +176,14 @@
                   <input name="price" type="number" min="1" step="0.01" value="50.00" required />
                 </label>
                 <label>
+                  Quantidade de APIs
+                  <input name="quantity" type="number" min="1" max="100" value="1" required />
+                </label>
+                <label>
+                  Mesmo limite manual
+                  <input name="manualLimit" type="number" min="0" placeholder="Opcional" />
+                </label>
+                <label>
                   Validade em horas
                   <input name="durationHours" type="number" min="1" max="720" value="28" required />
                 </label>
@@ -186,6 +194,10 @@
                     <option value="sonnet">Até Claude Sonnet 4.6</option>
                     <option value="haiku">Claude Haiku 4.5</option>
                   </select>
+                </label>
+                <label class="checkbox-field">
+                  <input name="unlimited" type="checkbox" value="true" />
+                  Ilimitado
                 </label>
               </div>
               <div class="limit-box api-limit-box">
@@ -202,7 +214,7 @@
                   <strong id="apiPreviewCost">US$ 0,00</strong>
                 </div>
               </div>
-              <button class="primary" type="submit">Gerar API 28h</button>
+              <button class="primary" type="submit">Gerar API</button>
               <div id="apiTokenError" class="form-error"></div>
             </form>
 
@@ -331,6 +343,53 @@
                 <h2>Checklist operacional</h2>
               </div>
               <div id="productionChecklist" class="readiness-grid"></div>
+            </section>
+            <section class="readiness-panel">
+              <div class="panel-heading inline">
+                <div>
+                  <span class="overline">Agenda VPS</span>
+                  <h2>Ligar e desligar automaticamente</h2>
+                </div>
+                <button id="tickVpsSchedule" type="button">Executar agora</button>
+              </div>
+              <form id="vpsScheduleForm" class="settings-form">
+                <label>
+                  Nome
+                  <input name="name" value="Ciclo 12h VPS" required />
+                </label>
+                <label>
+                  Começar em
+                  <input name="startAt" type="datetime-local" required />
+                </label>
+                <label>
+                  Dias repetindo
+                  <input name="days" type="number" min="1" max="365" value="7" required />
+                </label>
+                <label>
+                  Horas ligada
+                  <input name="onHours" type="number" min="1" value="12" required />
+                </label>
+                <label>
+                  Horas desligada
+                  <input name="offHours" type="number" min="1" value="12" required />
+                </label>
+                <button type="submit">Salvar agenda</button>
+                <div id="vpsScheduleMessage" class="form-error"></div>
+              </form>
+              <div id="vpsScheduleStatus" class="muted"></div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Agenda</th>
+                      <th>Ciclo</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="vpsSchedulesTable"></tbody>
+                </table>
+              </div>
             </section>
             <section class="readiness-panel benchmark-panel">
               <div class="panel-heading inline">

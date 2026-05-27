@@ -17,18 +17,18 @@ const ClaudeApp = (() => {
 
   const models = {
     haiku: {
-      publicModel: "claude-code-economy",
-      label: "Claude Haiku 4.5",
+      publicModel: "qwen-14b",
+      label: "qwen-14b",
       usdPerToken: 0.000000224,
     },
     sonnet: {
-      publicModel: "claude-code-pro",
-      label: "Claude Sonnet 4.6",
+      publicModel: "qwen-14b",
+      label: "qwen-14b",
       usdPerToken: 0.00000087,
     },
     opus: {
-      publicModel: "claude-code-ultra",
-      label: "Claude Opus 4.7",
+      publicModel: "qwen-14b",
+      label: "qwen-14b",
       usdPerToken: 0.00000087,
     },
   };
@@ -122,6 +122,7 @@ const ClaudeApp = (() => {
 
   function normalizePublicModel(publicModel) {
     const value = String(publicModel || "").toLowerCase();
+    if (value === "qwen-14b" || value.includes("qwen")) return models.opus.publicModel;
     if (value.includes("claude-code-economy")) return models.haiku.publicModel;
     if (value.includes("claude-code-pro")) return models.sonnet.publicModel;
     if (value.includes("claude-code-ultra")) return models.opus.publicModel;
@@ -359,6 +360,7 @@ const ClaudeApp = (() => {
   function modelOptions(selectedPublicModel) {
     const selectedModel = normalizePublicModel(selectedPublicModel);
     return Object.values(models)
+      .filter((model, index, all) => all.findIndex((item) => item.publicModel === model.publicModel) === index)
       .map((model) => {
         const selected = model.publicModel === selectedModel ? "selected" : "";
         return `<option value="${model.publicModel}" ${selected}>${model.label}</option>`;
@@ -378,6 +380,7 @@ const ClaudeApp = (() => {
     const selectedModel = normalizePublicModel(selectedPublicModel);
     const allowed = new Set(allowedPublicModelsForAccount(account));
     return Object.values(models)
+      .filter((model, index, all) => all.findIndex((item) => item.publicModel === model.publicModel) === index)
       .map((model) => {
         const selected = model.publicModel === selectedModel ? "selected" : "";
         const disabled = allowed.has(model.publicModel) ? "" : "disabled";
