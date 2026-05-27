@@ -2934,7 +2934,7 @@ def _merge_stream_text(current: str, incoming: str) -> str:
         if _stream_text_endswith(current, stripped):
             return current
         stripped_overlap = _stream_overlap_length(current, stripped)
-        if stripped_overlap:
+        if stripped_overlap >= 3:
             return current + stripped[stripped_overlap:]
 
     return current + incoming

@@ -685,6 +685,24 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(text, "Resposta final.")
 
+    def test_public_stream_preserves_spaces_when_words_share_one_letter(self) -> None:
+        payloads = [
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Deixe"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " esfriar antes"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " de servir com toque"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " extra ou confeiteiro"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " ou calda."}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " Faça uma"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": " massa simples."}},
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(
+            text,
+            "Deixe esfriar antes de servir com toque extra ou confeiteiro ou calda. Faça uma massa simples.",
+        )
+
     def test_clean_model_text_repairs_fragmented_duplicate_words(self) -> None:
         broken = (
             "AAquiqui está está um um ** **plplanoano real realistaista e e pratic praticoo "
@@ -734,6 +752,14 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Compreensão básica", cleaned)
         self.assertIn("Conversa simples", cleaned)
         self.assertIn("Quer que eu monte", cleaned)
+
+    def test_clean_model_text_repairs_common_recipe_portuguese(self) -> None:
+        broken = "Unte uma forma redonda comanteiga. Adicione os ovos, o leite o óleo. Transfira massa para forma e deixe esfriar por completo antes desenformar."
+
+        self.assertEqual(
+            clean_model_text(broken),
+            "Unte uma forma redonda com manteiga. Adicione os ovos, o leite e o óleo. Transfira a massa para a forma e deixe esfriar por completo antes de desenformar.",
+        )
 
     def test_clean_model_text_recovers_restarted_answer_and_new_typos(self) -> None:
         broken = (

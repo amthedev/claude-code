@@ -1852,13 +1852,14 @@ function renderAssistantMarkdown(text) {
   return html.join("");
 }
 
-function renderMessageNode(node, role, text) {
+function renderMessageNode(node, role, text, options = {}) {
   if (role === "assistant") {
     const messageIndex = node.dataset.messageIndex || "";
     const isPending = !text || text === "Pensando...";
+    const isTyping = Boolean(options.isTyping);
     node.innerHTML = `
       <div class="message-body">${renderAssistantMarkdown(text)}</div>
-      <div class="message-actions ${isPending ? "hidden" : ""}">
+      <div class="message-actions ${isPending || isTyping ? "hidden" : ""}">
         <button type="button" class="message-copy-button" data-copy-message-index="${ClaudeApp.escapeHtml(messageIndex)}" aria-label="Copiar resposta">
           Copiar
         </button>
@@ -1873,7 +1874,8 @@ function renderAssistantDisplay(message, displayText, isTyping = false) {
   if (message.sessionKey !== activeChatSessionKey) return;
   if (!activeConversation[message.index]) return;
   message.node.dataset.typing = isTyping ? "true" : "false";
-  renderMessageNode(message.node, activeConversation[message.index].role, displayText);
+  message.node.dataset.displayText = displayText || "";
+  renderMessageNode(message.node, activeConversation[message.index].role, displayText, { isTyping });
   message.node.scrollIntoView({ block: "end" });
 }
 
@@ -1906,6 +1908,19 @@ function updateMessage(message, text) {
   renderAssistantDisplay(message, nextText, false);
 }
 
+function updateStreamingMessage(message, text) {
+  if (message.sessionKey !== activeChatSessionKey) return;
+  if (!activeConversation[message.index]) return;
+  const previousTimer = messageTypewriterTimers.get(message.node);
+  if (previousTimer) {
+    window.clearInterval(previousTimer);
+    messageTypewriterTimers.delete(message.node);
+  }
+  const nextText = text || "";
+  activeConversation[message.index].content = nextText;
+  renderAssistantDisplay(message, nextText, true);
+}
+
 function animateMessageTo(message, text, options = {}) {
   if (message.sessionKey !== activeChatSessionKey) return;
   if (!activeConversation[message.index]) return;
@@ -1913,7 +1928,7 @@ function animateMessageTo(message, text, options = {}) {
   const previousTimer = messageTypewriterTimers.get(message.node);
   if (previousTimer) window.clearInterval(previousTimer);
   activeConversation[message.index].content = nextText;
-  const currentDisplay = message.node.querySelector(".message-body")?.textContent || "";
+  const currentDisplay = message.node.dataset.displayText || message.node.querySelector(".message-body")?.textContent || "";
   let position = nextText.startsWith(currentDisplay) ? currentDisplay.length : 0;
   if (position === 0) renderAssistantDisplay(message, "", true);
   const step = options.step || Math.max(4, Math.min(24, Math.ceil(nextText.length / 90)));
@@ -2357,10 +2372,10 @@ function mergeStreamText(current, incoming) {
   if (stripped && stripped !== text) {
     if (streamTextEndsWith(current, stripped)) return current;
     const strippedOverlap = overlapLength(current, stripped);
-    if (strippedOverlap > 0) return current + stripped.slice(strippedOverlap);
+    if (strippedOverlap >= 3) return current + stripped.slice(strippedOverlap);
   }
 
-  return repairDuplicatedText(current + text);
+  return current + text;
 }
 
 function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMode) {
@@ -2425,7 +2440,7 @@ async function callGateway(selectedModel, messages, onText, maxTokens = 1200, se
     });
   }
 
-  return repairDuplicatedText(answer).trim() || "Sem resposta.";
+  return answer.trim() || "Sem resposta.";
 }
 
 function defaultWorkspaceTestCommand() {
@@ -2496,7 +2511,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   let answer = "";
   answer = await callGateway(selectedModel, outgoingMessages, (partialAnswer) => {
     stopChatProgress();
-    animateMessageTo(assistantMessage, partialAnswer);
+    updateStreamingMessage(assistantMessage, partialAnswer);
   }, reservedOutput, selectedReasoningMode);
   stopChatProgress();
   if (activeChatMode === "code" && promptRequestsTerminal(prompt)) {
@@ -2511,7 +2526,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
       }
     }
   }
-  animateMessageTo(assistantMessage, answer, { step: 28, intervalMs: 10 });
+  updateMessage(assistantMessage, answer);
 
   await refreshCustomerAccount({ silent: true });
 
