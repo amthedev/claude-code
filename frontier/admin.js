@@ -951,7 +951,7 @@ document.querySelector("#tickVpsSchedule")?.addEventListener("click", async () =
 
 async function runVpsAction(action) {
   const message = document.querySelector("#vpsScheduleMessage");
-  if (message) message.textContent = "";
+  if (message) message.textContent = action === "start" ? "Enviando comando para ligar a VPS..." : "Enviando comando para desligar a VPS...";
   const state = vpsScheduleState.status || gatewayHealthState?.vps_scheduler || {};
   if (!state.configured) {
     if (message) {
@@ -979,8 +979,12 @@ async function runVpsAction(action) {
   }
 }
 
-document.querySelector("#startVpsNow")?.addEventListener("click", () => runVpsAction("start"));
-document.querySelector("#stopVpsNow")?.addEventListener("click", () => runVpsAction("stop"));
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-vps-manual-action]");
+  if (!button) return;
+  event.preventDefault();
+  runVpsAction(button.dataset.vpsManualAction);
+});
 
 document.querySelector("#vpsSchedulesTable")?.addEventListener("click", async (event) => {
   const button = event.target.closest("button");

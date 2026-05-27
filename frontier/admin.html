@@ -349,11 +349,12 @@
                   <h2>Ligar e desligar automaticamente</h2>
                 </div>
                 <div class="row-actions">
-                  <button id="startVpsNow" type="button">Ligar VPS</button>
-                  <button id="stopVpsNow" type="button">Desligar VPS</button>
+                  <button id="startVpsNow" type="button" data-vps-manual-action="start">Ligar VPS</button>
+                  <button id="stopVpsNow" type="button" data-vps-manual-action="stop">Desligar VPS</button>
                   <button id="tickVpsSchedule" type="button">Executar agenda</button>
                 </div>
               </div>
+              <div id="vpsScheduleMessage" class="form-error" aria-live="polite"></div>
               <form id="vpsScheduleForm" class="settings-form">
                 <label>
                   Nome
@@ -376,7 +377,6 @@
                   <input name="offHours" type="number" min="1" value="12" required />
                 </label>
                 <button type="submit">Salvar agenda</button>
-                <div id="vpsScheduleMessage" class="form-error"></div>
               </form>
               <div id="vpsScheduleStatus" class="muted"></div>
               <div class="table-scroll">
@@ -435,7 +435,7 @@
       </section>
     </main>
 
-    <script src="/frontier/shared.js?v=api-command-20260526a"></script>
-    <script src="/frontier/admin.js?v=api-command-20260526a"></script>
+    <script src="/frontier/shared.js?v=vps-control-20260527a"></script>
+    <script src="/frontier/admin.js?v=vps-control-20260527a"></script>
   </body>
 </html>
