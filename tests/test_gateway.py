@@ -386,6 +386,7 @@ class GatewayTestCase(unittest.TestCase):
                 "max_tokens": 99,
                 "messages": [{"role": "user", "content": [{"type": "text", "text": "Oi"}]}],
                 "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
             },
             stream=False,
         )
@@ -395,7 +396,21 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(outgoing["messages"][0], {"role": "system", "content": "Seja direto."})
         self.assertEqual(outgoing["messages"][1], {"role": "user", "content": "Oi"})
         self.assertEqual(outgoing["tools"][0]["function"]["name"], "read_file")
+        self.assertEqual(outgoing["tool_choice"], "auto")
         self.assertNotIn("__gateway_reasoning", outgoing)
+
+        tool_choice = client._openai_chat_payload(
+            {
+                "messages": [{"role": "user", "content": "Use a ferramenta."}],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "tool", "name": "read_file"},
+            },
+            stream=False,
+        )
+        self.assertEqual(
+            tool_choice["tool_choice"],
+            {"type": "function", "function": {"name": "read_file"}},
+        )
 
         response = client._anthropic_from_openai_chat(
             {

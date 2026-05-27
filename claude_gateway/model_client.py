@@ -203,7 +203,7 @@ class VPSAnthropicClient:
         if tools:
             outgoing["tools"] = tools
             if payload.get("tool_choice"):
-                outgoing["tool_choice"] = payload["tool_choice"]
+                outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
         return outgoing
 
     def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
@@ -288,6 +288,30 @@ class VPSAnthropicClient:
                 }
             )
         return converted
+
+    def _tool_choice_to_openai(self, tool_choice: Any) -> Any:
+        if isinstance(tool_choice, str):
+            return {"any": "required"}.get(tool_choice, tool_choice)
+        if not isinstance(tool_choice, dict):
+            return tool_choice
+
+        choice_type = str(tool_choice.get("type") or "").strip().lower()
+        if choice_type in {"auto", "none", "required"}:
+            return choice_type
+        if choice_type == "any":
+            return "required"
+        if choice_type == "tool":
+            name = tool_choice.get("name")
+            if name:
+                return {"type": "function", "function": {"name": str(name)}}
+        if choice_type == "function":
+            function = tool_choice.get("function")
+            if isinstance(function, dict) and function.get("name"):
+                return {"type": "function", "function": {"name": str(function["name"])}}
+            name = tool_choice.get("name")
+            if name:
+                return {"type": "function", "function": {"name": str(name)}}
+        return tool_choice
 
     async def _complete_openai_chat(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
         target = self._target_for_model(model)
