@@ -267,6 +267,7 @@ async def ask_gateway(
     max_tokens: int = 1200,
     reasoning_mode: str = "fast",
     timeout_seconds: float = 30.0,
+    system: str = "",
 ) -> dict[str, Any]:
     body = {
         "model": model,
@@ -275,6 +276,8 @@ async def ask_gateway(
         "thinking": {"type": "disabled"},
         "messages": [{"role": "user", "content": prompt}],
     }
+    if system.strip():
+        body["system"] = system.strip()
     headers = {
         "Authorization": f"Bearer {gateway_token()}",
         "Content-Type": "application/json",
@@ -322,15 +325,36 @@ def build_cowork_prompt(
     }.get(mode, "pair-programming partner")
     context = project_context.strip()
     parts = [
-        f"Act as a {mode_label} inside a coworking session.",
+        f"Modo cowork: {mode_label}.",
+        "Responda em pt-BR, direto ao ponto, sem saudacao generica.",
         "Use fast mode: do not use hidden thinking, long internal analysis, or repeated self-check loops.",
+        "Se pedirem para ler/analisar conversa, use apenas o texto enviado abaixo.",
+        "Se nenhum conteudo da conversa foi enviado em Task ou Project context, diga isso claramente.",
         "Use practical engineering judgment, be concise, and give concrete next steps.",
         "When code changes are needed, mention exact files and patches conceptually.",
     ]
     if context:
-        parts.append(f"Project context:\n{context}")
-    parts.append(f"Task:\n{task.strip()}")
+        parts.append(f"Project context / conteudo recebido:\n{context}")
+    parts.append(f"Task / pedido do usuario:\n{task.strip()}")
     return "\n\n".join(parts)
+
+
+def build_cowork_system_prompt(mode: str = "pair_programming") -> str:
+    mode_label = {
+        "pair_programming": "parceiro de pair programming",
+        "review": "revisor senior de codigo",
+        "debug": "parceiro de debug",
+        "plan": "planejador tecnico",
+    }.get(mode, "parceiro de pair programming")
+    return (
+        f"Voce e um {mode_label} dentro de uma sessao cowork do Claude Desktop. "
+        "Nunca responda com saudacao generica como 'Hello! How can I assist you today?'. "
+        "Nao finja ter lido a conversa se o conteudo nao foi enviado. "
+        "Quando o usuario pedir para ler, resumir ou analisar a conversa, analise somente o texto recebido "
+        "na mensagem do usuario. Se esse texto nao estiver presente, responda em pt-BR que o conteudo da "
+        "conversa nao chegou ao cowork e peca para colar/exportar o trecho. "
+        "Se houver conteudo, entregue a analise diretamente em pt-BR."
+    )
 
 
 async def cowork_gateway(
@@ -340,13 +364,67 @@ async def cowork_gateway(
     model: str = "claude-code-pro",
     max_tokens: int = 900,
 ) -> dict[str, Any]:
-    return await ask_gateway(
+    if not task.strip() and not project_context.strip():
+        return {
+            "status_code": 400,
+            "response": {
+                "detail": (
+                    "O cowork nao recebeu tarefa nem conteudo da conversa. "
+                    "Cole o texto da conversa no campo task ou project_context."
+                )
+            },
+        }
+    result = await ask_gateway(
         prompt=build_cowork_prompt(task=task, project_context=project_context, mode=mode),
         model=model,
         max_tokens=min(max_tokens, 900),
         reasoning_mode="fast",
         timeout_seconds=25.0,
+        system=build_cowork_system_prompt(mode),
     )
+    if _is_generic_cowork_greeting(result):
+        result["response"] = {
+            "id": "msg_cowork_guard",
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Nao recebi o conteudo da conversa para analisar. "
+                        "Cole ou exporte o trecho da conversa no cowork e eu analiso diretamente."
+                    ),
+                }
+            ],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+    return result
+
+
+def _is_generic_cowork_greeting(result: dict[str, Any]) -> bool:
+    response = result.get("response") if isinstance(result, dict) else None
+    text = ""
+    if isinstance(response, dict):
+        content = response.get("content")
+        if isinstance(content, list):
+            text = "\n".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict)
+            )
+        elif isinstance(response.get("text"), str):
+            text = str(response["text"])
+    elif isinstance(response, str):
+        text = response
+    normalized = " ".join(text.strip().lower().split())
+    return normalized in {
+        "hello! how can i assist you today?",
+        "hello, how can i assist you today?",
+        "hello! how can i help you today?",
+        "hi! how can i assist you today?",
+    }
 
 
 async def gateway_models() -> dict[str, Any]:

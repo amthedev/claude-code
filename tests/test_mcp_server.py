@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -106,8 +107,36 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertIn("debugging partner", prompt)
         self.assertIn("fast mode", prompt)
         self.assertIn("do not use hidden thinking", prompt)
+        self.assertIn("sem saudacao generica", prompt)
+        self.assertIn("Se nenhum conteudo da conversa foi enviado", prompt)
         self.assertIn("Frontend lives in frontier/client.js.", prompt)
         self.assertIn("Fix the billing button.", prompt)
+
+    def test_cowork_gateway_replaces_generic_greeting_with_clear_conversation_message(self) -> None:
+        async def fake_ask_gateway(**_kwargs):
+            return {
+                "status_code": 200,
+                "response": {
+                    "content": [{"type": "text", "text": "Hello! How can I assist you today?"}],
+                },
+            }
+
+        with patch.object(mcp_server, "ask_gateway", fake_ask_gateway):
+            result = asyncio.run(
+                mcp_server.cowork_gateway(
+                    task="Leia o conteudo da conversa e resuma.",
+                    project_context="",
+                )
+            )
+
+        text = result["response"]["content"][0]["text"]
+        self.assertIn("Nao recebi o conteudo da conversa", text)
+
+    def test_cowork_gateway_rejects_empty_task_and_context(self) -> None:
+        result = asyncio.run(mcp_server.cowork_gateway(task="", project_context=""))
+
+        self.assertEqual(result["status_code"], 400)
+        self.assertIn("nao recebeu tarefa", result["response"]["detail"])
 
 
 if __name__ == "__main__":
