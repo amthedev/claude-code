@@ -3266,7 +3266,7 @@ def _allow_openai_helper(auth: AuthContext, settings: Settings) -> bool:
 
 def _rate_limit(request: Request, app: FastAPI, namespace: str, limit: int) -> None:
     app.state.rate_limiter.check(
-        rate_limit_key(request, namespace),
+        rate_limit_key(request, namespace, app.state.settings),
         limit=limit,
         window_seconds=app.state.settings.rate_limit_window_seconds,
     )

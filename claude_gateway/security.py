@@ -95,12 +95,28 @@ class InMemoryRateLimiter:
         bucket.append(now)
 
 
-def rate_limit_key(request: Request, namespace: str) -> str:
+def rate_limit_key(request: Request, namespace: str, settings: Settings | None = None) -> str:
     token = request.headers.get("authorization") or request.headers.get("x-api-key") or ""
     if token:
+        scope = str(getattr(settings, "rate_limit_token_scope", "token_ip") or "token_ip").strip().lower()
+        if scope in {"token_ip", "token+ip", "token-ip", "token_and_ip"}:
+            return f"{namespace}:token-ip:{token[:96]}:{_rate_limit_ip(request, settings)}"
         return f"{namespace}:token:{token[:96]}"
-    host = request.client.host if request.client else "unknown"
+    host = _rate_limit_ip(request, settings)
     return f"{namespace}:ip:{host}"
+
+
+def _rate_limit_ip(request: Request, settings: Settings | None = None) -> str:
+    if settings and settings.trust_proxy_headers:
+        for header in ("cf-connecting-ip", "true-client-ip", "x-real-ip", "x-client-ip"):
+            value = request.headers.get(header, "").strip()
+            if value:
+                return value[:96]
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        first_ip = forwarded_for.split(",", 1)[0].strip()
+        if first_ip:
+            return first_ip[:96]
+    return request.client.host if request.client else "unknown"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

@@ -294,6 +294,65 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_api_rate_limit_defaults_to_shared_token_per_client_ip(self) -> None:
+        settings = make_settings()
+        settings.api_rate_limit = 1
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Diga oi"}],
+        }
+
+        first = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer test-token", "X-Forwarded-For": "203.0.113.10"},
+            json=payload,
+        )
+        blocked_same_ip = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer test-token", "X-Forwarded-For": "203.0.113.10"},
+            json=payload,
+        )
+        allowed_other_ip = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer test-token", "X-Forwarded-For": "203.0.113.11"},
+            json=payload,
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(blocked_same_ip.status_code, 429)
+        self.assertEqual(allowed_other_ip.status_code, 200)
+
+    def test_api_rate_limit_can_be_forced_to_token_only_scope(self) -> None:
+        settings = make_settings()
+        settings.api_rate_limit = 1
+        settings.rate_limit_token_scope = "token"
+        settings.trust_proxy_headers = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Diga oi"}],
+        }
+
+        first = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer test-token", "X-Forwarded-For": "203.0.113.10"},
+            json=payload,
+        )
+        blocked_other_ip = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer test-token", "X-Forwarded-For": "203.0.113.11"},
+            json=payload,
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(blocked_other_ip.status_code, 429)
+
     def test_large_old_context_is_trimmed_instead_of_rejected(self) -> None:
         settings = make_settings()
         settings.max_request_input_chars = 1000
