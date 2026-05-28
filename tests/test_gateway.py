@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import io
 import json
 import os
@@ -248,6 +250,7 @@ async def _collect_async_bytes(chunks) -> list[bytes]:
 def make_settings() -> Settings:
     return Settings(
         gateway_api_keys=("test-token",),
+        allow_admin_model_access=True,
         openrouter_api_key="test-openrouter-token",
         vps_model_id="qwen-14b",
         enable_agent_orchestration=True,
@@ -295,6 +298,64 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
+    def test_admin_token_is_blocked_from_model_generation_by_default(self) -> None:
+        settings = make_settings()
+        settings.allow_admin_model_access = False
+        settings.customer_accounts = "customer-token|Cliente|65|60000|claude-code-pro|true"
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Diga oi"}],
+        }
+
+        admin_response = client.post("/v1/messages", headers=self.headers, json=payload)
+        customer_response = client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer customer-token"},
+            json=payload,
+        )
+
+        self.assertEqual(admin_response.status_code, 403)
+        self.assertEqual(admin_response.json()["detail"], "Customer API token required.")
+        self.assertEqual(customer_response.status_code, 200)
+
+    def test_admin_can_purge_accounts_and_old_api_tokens_stop_working(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24},
+            )
+            self.assertEqual(created.status_code, 200)
+            old_token = created.json()["account"]["apiToken"]
+            before = client.get("/v1/admin/accounts", headers=self.headers)
+            self.assertEqual(len(before.json()["data"]), 1)
+
+            purged = client.post("/v1/admin/accounts/purge", headers=self.headers, json={})
+            after = client.get("/v1/admin/accounts", headers=self.headers)
+            old_token_response = client.post(
+                "/v1/messages",
+                headers={"Authorization": f"Bearer {old_token}"},
+                json={
+                    "model": "claude-code-pro",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "Diga oi"}],
+                },
+            )
+
+            self.assertEqual(purged.status_code, 200)
+            self.assertEqual(purged.json()["accounts"], 1)
+            self.assertEqual(after.json()["data"], [])
+            self.assertEqual(old_token_response.status_code, 403)
 
     def test_api_rate_limit_defaults_to_shared_token_per_client_ip(self) -> None:
         settings = make_settings()
@@ -1315,9 +1376,11 @@ class GatewayTestCase(unittest.TestCase):
         admin_response = self.client.get("/v1/admin/health", headers=self.headers)
         self.assertEqual(admin_response.status_code, 200)
         admin_data = admin_response.json()
-        self.assertEqual(admin_data["model_provider"], "vps")
-        self.assertTrue(admin_data["vps_model_configured"])
-        self.assertFalse(admin_data["openrouter_fallback_configured"])
+        self.assertEqual(admin_data["public_model"], "Claude Sonnet 4.5")
+        self.assertTrue(admin_data["model_backend_configured"])
+        self.assertFalse(admin_data["external_fallback_configured"])
+        self.assertNotIn("vps_model_id", admin_data)
+        self.assertNotIn("vps_model_base_url", admin_data)
         self.assertIn("cost_target", admin_data)
 
     def test_admin_benchmark_reports_setup_and_route_results_without_upstream_call(self) -> None:
@@ -1339,6 +1402,9 @@ class GatewayTestCase(unittest.TestCase):
         self.assertFalse(rows["tool_contract"]["orchestration"])
         self.assertEqual(rows["architecture_ultra"]["status"], "OK")
         self.assertLessEqual(rows["architecture_ultra"]["cost_ratio"], 0.4)
+        serialized = json.dumps(data).lower()
+        for forbidden in ("qwen", "deepseek", "tencent", "openrouter", "selected_openrouter_model", "agents"):
+            self.assertNotIn(forbidden, serialized)
 
     def test_public_stream_normalizes_overlapping_anthropic_text_deltas(self) -> None:
         payloads = [
@@ -2291,6 +2357,54 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(upgraded["modelKey"], "sonnet")
             self.assertEqual(upgraded["price"], 125)
 
+    def test_mercado_pago_webhook_rejects_invalid_signature_when_secret_configured(self) -> None:
+        settings = make_settings()
+        settings.mercado_pago_access_token = "mp-test-token"
+        settings.mercado_pago_webhook_secret = "mp-webhook-secret"
+        settings.mercado_pago_webhook_tolerance_seconds = 600
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        ts = str(int(time.time() * 1000))
+
+        response = client.post(
+            "/v1/billing/mercadopago/webhook?data.id=123456&type=payment",
+            headers={
+                "X-Request-Id": "req-test",
+                "X-Signature": f"ts={ts},v1=bad-signature",
+            },
+            json={"type": "payment", "data": {"id": "123456"}},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_mercado_pago_webhook_accepts_valid_signature_when_secret_configured(self) -> None:
+        settings = make_settings()
+        settings.mercado_pago_access_token = "mp-test-token"
+        settings.mercado_pago_webhook_secret = "mp-webhook-secret"
+        settings.mercado_pago_webhook_tolerance_seconds = 600
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+        ts = str(int(time.time() * 1000))
+        request_id = "req-test"
+        manifest = f"request-id:{request_id};ts:{ts};"
+        signature = hmac.new(
+            settings.mercado_pago_webhook_secret.encode(),
+            manifest.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+        response = client.post(
+            "/v1/billing/mercadopago/webhook?type=payment",
+            headers={
+                "X-Request-Id": request_id,
+                "X-Signature": f"ts={ts},v1={signature}",
+            },
+            json={"type": "payment"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ignored"})
+
     def test_cors_allows_local_admin_origin_when_configured(self) -> None:
         settings = make_settings()
         settings.cors_allowed_origins = ("http://127.0.0.1:8787",)
@@ -2308,14 +2422,16 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "http://127.0.0.1:8787")
 
-    def test_cors_allows_production_origin_by_default(self) -> None:
-        app = create_app(settings=make_settings(), client_factory=FakeOpenRouterClient)
+    def test_cors_allows_configured_production_origin(self) -> None:
+        settings = make_settings()
+        settings.cors_allowed_origins = ("https://your-subdomain.squareweb.app",)
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
         client = TestClient(app)
 
         response = client.options(
             "/v1/messages",
             headers={
-                "Origin": "https://claude-code-api.squareweb.app",
+                "Origin": "https://your-subdomain.squareweb.app",
                 "Access-Control-Request-Method": "POST",
                 "Access-Control-Request-Headers": "authorization,content-type",
             },
@@ -2323,7 +2439,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.headers["access-control-allow-origin"],
-            "https://claude-code-api.squareweb.app",
+            "https://your-subdomain.squareweb.app",
         )
 
     def test_trusted_admin_ip_does_not_bypass_non_admin_routes(self) -> None:
@@ -2353,14 +2469,17 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["mode"], "ui")
-        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-next")
-        self.assertEqual(data["agents"]["reasoning"], "tencent/hy3-preview")
-        self.assertEqual(data["agents"]["review"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
+        self.assertNotIn("selected_openrouter_model", data)
+        self.assertNotIn("agents", data)
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
         self.assertLessEqual(
             data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"],
             0.5,
         )
+        serialized = json.dumps(data).lower()
+        for forbidden in ("qwen", "deepseek", "tencent", "openrouter", "selected_openrouter_model", "agents"):
+            self.assertNotIn(forbidden, serialized)
 
     def test_auto_routes_short_simple_messages_to_economy(self) -> None:
         response = self.client.post(
@@ -2377,7 +2496,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "explanation")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertFalse(data["use_orchestration"])
 
     def test_default_reasoning_mode_is_auto(self) -> None:
@@ -2410,7 +2529,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "ui")
         self.assertEqual(data["task_type"], "frontend")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-flash")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
 
     def test_integral_project_analysis_avoids_expensive_thinking_defaults(self) -> None:
         response = self.client.post(
@@ -2431,10 +2550,8 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "ultra")
         self.assertEqual(data["task_type"], "architecture")
-        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-pro")
-        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-v4-pro")
-        self.assertEqual(data["agents"]["coding"], "qwen/qwen3-coder-next")
-        self.assertEqual(data["agents"]["premium_review"], "deepseek/deepseek-v4-pro")
+        self.assertNotIn("selected_openrouter_model", data)
+        self.assertNotIn("agents", data)
         self.assertLessEqual(data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"], 0.2)
 
     def test_critical_ultra_reasoning_avoids_r1_by_default(self) -> None:
@@ -2456,8 +2573,8 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "ultra")
         self.assertEqual(data["complexity"], "critical")
-        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-pro")
-        self.assertEqual(data["agents"]["reasoning"], "deepseek/deepseek-v4-pro")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
+        self.assertNotIn("agents", data)
 
     def test_tool_calls_are_proxied_without_orchestration(self) -> None:
         response = self.client.post(
@@ -2494,7 +2611,8 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "pro")
         self.assertEqual(data["task_type"], "file_edit")
-        self.assertEqual(data["selected_openrouter_model"], "qwen/qwen3-coder-next")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
+        self.assertNotIn("selected_openrouter_model", data)
         self.assertFalse(data["use_orchestration"])
 
     def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
@@ -2578,7 +2696,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertFalse(data["allow_premium_fallback"])
         self.assertIn("web_search", data)
         self.assertEqual(data["web_search"]["model"], "gpt-5.5")
-        for model in data["models"].values():
+        for model in data["model_roles"].values():
             self.assertTrue(model["within_budget"], model)
             self.assertLessEqual(model["cost_ratio_vs_claude"], 0.5)
 
@@ -2803,7 +2921,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertNotEqual(data["selected_openrouter_model"], "anthropic/claude-sonnet-4.6")
+        self.assertNotIn("selected_openrouter_model", data)
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
 
     def test_external_model_request_is_budget_routed_by_default(self) -> None:
@@ -2819,7 +2937,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertNotEqual(data["mode"], "direct")
-        self.assertNotEqual(data["selected_openrouter_model"], "anthropic/claude-opus-4.7")
+        self.assertNotIn("selected_openrouter_model", data)
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
 
     def test_direct_external_model_can_be_enabled_for_admin(self) -> None:
@@ -2839,7 +2957,8 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["mode"], "direct")
-        self.assertEqual(data["selected_openrouter_model"], "anthropic/claude-opus-4.7")
+        self.assertNotIn("selected_openrouter_model", data)
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
 
     def test_customer_token_forces_allowed_model_and_reports_own_usage(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -2928,8 +3047,9 @@ class GatewayTestCase(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             data = response.json()
-            used_models = {data["selected_openrouter_model"], *data["agents"].values()}
-            self.assertTrue(expensive_models.isdisjoint(used_models), used_models)
+            serialized = json.dumps(data).lower()
+            for model in expensive_models:
+                self.assertNotIn(model, serialized)
             self.assertFalse(data["use_orchestration"])
 
     def test_customer_wildcard_model_downgrades_when_daily_tokens_are_low(self) -> None:

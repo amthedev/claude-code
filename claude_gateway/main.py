@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import io
 import base64
 import json
@@ -214,23 +216,17 @@ def create_app(
         settings = app.state.settings
         return {
             "status": "ok",
-            "model_provider": "vps",
-            "vps_model_configured": bool(settings.vps_model_base_url and settings.vps_model_id),
-            "vps_model_base_url": settings.vps_model_base_url,
-            "vps_model_id": settings.vps_model_id,
-            "vps_fast_model_base_url": settings.vps_fast_model_base_url or settings.vps_model_base_url,
-            "vps_fast_model_id": settings.vps_fast_model_id or settings.vps_model_id,
-            "vps_strong_model_configured": bool(
+            "public_model": _public_model_label(settings.auto_public_model, settings),
+            "model_backend_configured": bool(settings.vps_model_base_url and settings.vps_model_id),
+            "fast_backend_configured": bool(settings.vps_fast_model_base_url or settings.vps_model_base_url),
+            "strong_backend_configured": bool(
                 settings.vps_strong_model_base_url and settings.vps_strong_model_id
             ),
-            "vps_strong_model_base_url": settings.vps_strong_model_base_url,
-            "vps_strong_model_id": settings.vps_strong_model_id,
-            "openrouter_configured": bool(settings.openrouter_api_key),
-            "openrouter_emergency_fallback": settings.openrouter_emergency_fallback,
-            "openrouter_fallback_configured": bool(
+            "external_fallback_enabled": settings.openrouter_emergency_fallback,
+            "external_fallback_configured": bool(
                 settings.openrouter_emergency_fallback and settings.openrouter_api_key
             ),
-            "openrouter_fallback_uses": getattr(app.state.model_client, "fallback_uses", 0),
+            "external_fallback_uses": getattr(app.state.model_client, "fallback_uses", 0),
             "openai_helper_configured": bool(settings.openai_api_key),
             "web_search": _web_search_status(settings),
             "orchestration_enabled": settings.enable_agent_orchestration,
@@ -286,7 +282,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
-        require_gateway_auth(request, app.state.settings)
+        _require_model_access(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
@@ -307,7 +303,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
-        require_gateway_auth(request, app.state.settings)
+        _require_model_access(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
@@ -324,11 +320,11 @@ def create_app(
 
     @app.get("/v1/budget")
     async def budget(request: Request) -> dict[str, Any]:
-        require_gateway_auth(request, app.state.settings)
+        _require_admin(request, app.state.settings)
         cost_policy = CostPolicy(
             max_ratio_vs_claude=app.state.settings.max_cost_ratio_vs_claude,
         )
-        models = {
+        internal_models = {
             "router_agent": app.state.settings.router_agent,
             "cheap_code_agent": app.state.settings.cheap_code_agent,
             "code_agent": app.state.settings.code_agent,
@@ -358,15 +354,16 @@ def create_app(
             },
             "web_search": _web_search_status(app.state.settings),
             "max_request_output_tokens": app.state.settings.max_request_output_tokens,
-            "models": {
-                role: cost_policy.estimate(model).to_dict() for role, model in models.items()
+            "model_roles": {
+                role: _public_cost_estimate(cost_policy.estimate(model).to_dict())
+                for role, model in internal_models.items()
             },
         }
 
     @app.post("/v1/messages")
     async def messages(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
-        auth = require_gateway_auth(request, app.state.settings)
+        auth = _require_model_access(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
@@ -432,7 +429,7 @@ def create_app(
                     )
                 except OpenRouterError as exc:
                     _rollback_customer_budget(app, reservation)
-                    raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+                    _raise_public_upstream_error(exc)
                 except Exception:
                     _rollback_customer_budget(app, reservation)
                     raise
@@ -460,7 +457,7 @@ def create_app(
             )
         except OpenRouterError as exc:
             _rollback_customer_budget(app, reservation)
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            _raise_public_upstream_error(exc)
         except Exception:
             _rollback_customer_budget(app, reservation)
             raise
@@ -574,6 +571,7 @@ def create_app(
     async def mercado_pago_webhook(request: Request) -> dict[str, str]:
         if not app.state.settings.mercado_pago_access_token:
             raise HTTPException(status_code=503, detail="Mercado Pago is not configured.")
+        await _verify_mercado_pago_webhook_signature(request, app.state.settings)
         payload = {}
         try:
             payload = await request.json()
@@ -686,6 +684,18 @@ def create_app(
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
         accounts = app.state.account_store.create_api_tokens(payload)
         return JSONResponse({"account": accounts[0], "accounts": accounts})
+
+    @app.post("/v1/admin/accounts/purge")
+    async def purge_accounts(
+        request: Request,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if payload is not None and not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        include_gift_cards = bool((payload or {}).get("includeGiftCards"))
+        return JSONResponse(app.state.account_store.purge_accounts(include_gift_cards=include_gift_cards))
 
     @app.get("/v1/admin/vps/schedules")
     async def list_vps_schedules(request: Request) -> dict[str, Any]:
@@ -1022,7 +1032,7 @@ def create_app(
         auth = require_gateway_auth(request, app.state.settings)
         if auth.customer:
             return _customer_usage_snapshot(app, auth)
-        return app.state.usage.snapshot()
+        return _public_usage_snapshot(app.state.usage.snapshot())
 
     @app.post("/v1/router/debug")
     async def router_debug(
@@ -1033,10 +1043,10 @@ def create_app(
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
-        decision = app.state.planner.plan(payload).to_dict()
+        decision = app.state.planner.plan(payload)
         web_search = _web_search_debug(payload, app.state.settings, auth)
         return {
-            **decision,
+            **_public_route_decision(decision),
             "web_search_policy": web_search["policy"],
             "web_search_reason": web_search["reason"],
             "web_search_enabled": web_search["enabled"],
@@ -1049,7 +1059,7 @@ def create_app(
         payload: dict[str, Any] = Body(...),
     ) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
-        auth = require_gateway_auth(request, app.state.settings)
+        auth = _require_model_access(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
         if payload.get("stream"):
@@ -1069,12 +1079,12 @@ def create_app(
             )
         except OpenRouterError as exc:
             _rollback_customer_budget(app, reservation)
-            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+            _raise_public_upstream_error(exc)
         except Exception:
             _rollback_customer_budget(app, reservation)
             raise
 
-        return JSONResponse({"decision": decision.to_dict(), "response": response})
+        return JSONResponse({"decision": _public_route_decision(decision), "response": response})
 
     return app
 
@@ -1148,6 +1158,51 @@ def _mercado_pago_error_detail(response: httpx.Response) -> str:
         parts.append(str(cause))
 
     return " · ".join(dict.fromkeys(parts))[:500] or f"HTTP {response.status_code}"
+
+
+async def _verify_mercado_pago_webhook_signature(request: Request, settings: Settings) -> None:
+    secret = settings.mercado_pago_webhook_secret.strip()
+    if not secret:
+        return
+
+    signature_header = request.headers.get("x-signature", "")
+    request_id = request.headers.get("x-request-id", "")
+    signature_parts = _parse_signature_header(signature_header)
+    ts = signature_parts.get("ts", "")
+    received_hash = signature_parts.get("v1", "")
+    if not ts or not received_hash:
+        raise HTTPException(status_code=403, detail="Invalid Mercado Pago webhook signature.")
+
+    data_id = request.query_params.get("data.id") or request.query_params.get("id") or ""
+    manifest_parts = []
+    if data_id:
+        manifest_parts.append(f"id:{data_id};")
+    if request_id:
+        manifest_parts.append(f"request-id:{request_id};")
+    manifest_parts.append(f"ts:{ts};")
+    manifest = "".join(manifest_parts)
+    expected_hash = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, received_hash):
+        raise HTTPException(status_code=403, detail="Invalid Mercado Pago webhook signature.")
+
+    tolerance_seconds = settings.mercado_pago_webhook_tolerance_seconds
+    if tolerance_seconds > 0:
+        try:
+            sent_at_ms = int(ts)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="Invalid Mercado Pago webhook signature timestamp.") from exc
+        now_ms = int(time.time() * 1000)
+        if abs(now_ms - sent_at_ms) > tolerance_seconds * 1000:
+            raise HTTPException(status_code=403, detail="Expired Mercado Pago webhook signature.")
+
+
+def _parse_signature_header(value: str) -> dict[str, str]:
+    parts: dict[str, str] = {}
+    for raw_part in value.split(","):
+        key, separator, raw_value = raw_part.partition("=")
+        if separator:
+            parts[key.strip()] = raw_value.strip()
+    return parts
 
 
 async def _download_github_zip(repo_url: str, ref: str, github_token: str) -> tuple[bytes, str]:
@@ -1711,7 +1766,7 @@ async def _complete_gateway_message(
     app: FastAPI,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
-    auth = require_gateway_auth(request, app.state.settings)
+    auth = _require_model_access(request, app.state.settings)
     if _is_claude_code_request(request, payload):
         payload = {**payload, "__gateway_client": "claude-code"}
     payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
@@ -1771,7 +1826,7 @@ async def _complete_gateway_message(
         )
     except OpenRouterError as exc:
         _rollback_customer_budget(app, reservation)
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+        _raise_public_upstream_error(exc)
     except Exception:
         _rollback_customer_budget(app, reservation)
         raise
@@ -2228,6 +2283,9 @@ def _with_public_model_identity(
         f"Keep Anthropic-compatible API behavior while being helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"When the request includes tools for reading files, editing files, running commands, or inspecting "
+        f"a workspace, use those tools to do the work instead of only describing what should be done. "
+        f"Do not claim that code was changed unless the provided tool results confirm it. "
         f"Use polished Markdown for user-facing explanations: short bold section titles, useful bullets, "
         f"tables when they make comparison easier, blockquote callouts for important highlights, and a "
         f"warmer practical voice with concrete next steps. For plans, comparisons, timelines, diagnostics, "
@@ -2454,17 +2512,18 @@ def _web_search_status(settings: Settings) -> dict[str, Any]:
 def _production_readiness(app: FastAPI) -> dict[str, Any]:
     settings = app.state.settings
     return {
-        "vps_model": bool(settings.vps_model_base_url and settings.vps_model_id),
-        "vps_strong_model": bool(
+        "model_backend": bool(settings.vps_model_base_url and settings.vps_model_id),
+        "strong_backend": bool(
             settings.vps_strong_model_base_url and settings.vps_strong_model_id
         ),
-        "openrouter": bool(settings.openrouter_api_key),
-        "openrouter_fallback": bool(
+        "external_gateway": bool(settings.openrouter_api_key),
+        "external_fallback": bool(
             settings.openrouter_emergency_fallback and settings.openrouter_api_key
         ),
         "web_search": bool(settings.enable_web_search and settings.openai_api_key),
         "openai_helper": bool(settings.openai_api_key),
         "mercado_pago": bool(settings.mercado_pago_access_token),
+        "mercado_pago_webhook_secret": bool(settings.mercado_pago_webhook_secret),
         "admin_password": bool(
             settings.admin_password or settings.admin_password_hash or app.state.account_store.admin_configured()
         ),
@@ -2472,8 +2531,6 @@ def _production_readiness(app: FastAPI) -> dict[str, Any]:
         "trusted_hosts_restricted": settings.trusted_hosts != ("*",),
         "openapi_private": not settings.expose_openapi,
         "persistent_storage": settings.account_data_file == settings.quota_data_file,
-        "account_data_file": settings.account_data_file,
-        "quota_data_file": settings.quota_data_file,
     }
 
 
@@ -2511,18 +2568,18 @@ def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
     protected_margin = min(max(settings.customer_profit_margin, 0.50), 0.95)
     checks = [
         (
-            "vps_model",
-            "VPS IA configurada",
-            readiness["vps_model"],
+            "model_backend",
+            "Backend de IA configurado",
+            readiness["model_backend"],
             "required",
-            "Sem VPS_MODEL_BASE_URL e VPS_MODEL_ID o chat real nao responde.",
+            "Configure o backend de IA antes de vender acesso.",
         ),
         (
-            "openrouter_fallback",
-            "OpenRouter desativado",
-            not readiness["openrouter_fallback"],
+            "external_fallback",
+            "Fallback externo desativado",
+            not readiness["external_fallback"],
             "warning",
-            "OpenRouter deve permanecer desativado para evitar consumo de creditos.",
+            "Fallback externo deve permanecer desativado para evitar consumo inesperado.",
         ),
         (
             "web_search",
@@ -2537,6 +2594,13 @@ def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
             readiness["mercado_pago"],
             "required",
             "Necessario para vender upgrades pagos.",
+        ),
+        (
+            "mercado_pago_webhook_secret",
+            "Webhook Mercado Pago assinado",
+            readiness["mercado_pago_webhook_secret"],
+            "required",
+            "Configure MERCADO_PAGO_WEBHOOK_SECRET para validar x-signature.",
         ),
         (
             "admin_password",
@@ -2603,7 +2667,8 @@ def _benchmark_route_rows(app: FastAPI, auth: AuthContext) -> list[dict[str, Any
     for case in BENCHMARK_CASES:
         started = time.perf_counter()
         payload = _prepare_payload(benchmark_payload(case), app.state.settings, auth, app.state.account_store)
-        decision = app.state.planner.plan(payload).to_dict()
+        decision_obj = app.state.planner.plan(payload)
+        decision = _public_route_decision(decision_obj)
         web_search = _web_search_debug(payload, app.state.settings, auth)
         elapsed_ms = (time.perf_counter() - started) * 1000
         data = {
@@ -2626,7 +2691,7 @@ def _benchmark_route_rows(app: FastAPI, auth: AuthContext) -> list[dict[str, Any
                 "mode": data.get("mode"),
                 "task_type": data.get("task_type"),
                 "complexity": data.get("complexity"),
-                "selected_model": data.get("selected_openrouter_model"),
+                "selected_model": data.get("model_label"),
                 "public_model": data.get("public_model"),
                 "orchestration": data.get("use_orchestration"),
                 "web_search": data.get("web_search_should_search"),
@@ -3187,7 +3252,7 @@ def _public_model_label(public_model: str, settings: Settings) -> str:
         return labels[lowered]
     if "qwen" in lowered:
         return "Claude Sonnet 4.5"
-    return public or settings.vps_model_id
+    return public if public.startswith("claude-code-") else "Claude Sonnet 4.5"
 
 
 def _with_public_response_model(response: dict[str, Any], public_model: str, settings: Settings) -> dict[str, Any]:
@@ -3266,6 +3331,55 @@ def _customer_usage_snapshot(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
     return app.state.customer_usage.snapshot_for(auth.customer)
 
 
+def _public_usage_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    total = snapshot.get("total") if isinstance(snapshot, dict) else {}
+    modes: dict[str, int] = {}
+    if isinstance(total, dict) and isinstance(total.get("modes"), dict):
+        modes = {str(key): int(value or 0) for key, value in total["modes"].items()}
+    return {
+        "total": {
+            "requests": int(total.get("requests") or 0) if isinstance(total, dict) else 0,
+            "input_tokens": int(total.get("input_tokens") or 0) if isinstance(total, dict) else 0,
+            "output_tokens": int(total.get("output_tokens") or 0) if isinstance(total, dict) else 0,
+            "modes": modes,
+        }
+    }
+
+
+def _public_route_decision(decision: RouteDecision) -> dict[str, Any]:
+    effective_path = (decision.cost_estimate.get("effective_path") or {}) if decision.cost_estimate else {}
+    pipeline = (decision.cost_estimate.get("pipeline") or {}) if decision.cost_estimate else {}
+    return {
+        "requested_model": decision.requested_model,
+        "public_model": decision.public_model,
+        "model_label": "Claude Sonnet 4.5",
+        "mode": decision.mode,
+        "task_type": decision.task_type,
+        "complexity": decision.complexity,
+        "use_orchestration": decision.use_orchestration,
+        "reason": decision.reason,
+        "cost_estimate": {
+            "effective_path": _public_cost_estimate(effective_path),
+            "pipeline": _public_cost_estimate(pipeline),
+        },
+    }
+
+
+def _public_cost_estimate(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cost_ratio_vs_claude": value.get("cost_ratio_vs_claude"),
+        "within_budget": value.get("within_budget"),
+    }
+
+
+def _raise_public_upstream_error(exc: OpenRouterError) -> None:
+    status_code = exc.status_code if 400 <= int(exc.status_code or 502) < 600 else 502
+    raise HTTPException(
+        status_code=status_code,
+        detail="Model backend request failed. Try again shortly.",
+    ) from exc
+
+
 def _allow_openai_helper(auth: AuthContext, settings: Settings) -> bool:
     if not settings.openai_api_key:
         return False
@@ -3298,6 +3412,13 @@ def _require_admin(request: Request, settings: Settings) -> AuthContext:
     auth = require_gateway_auth(request, settings)
     if auth.kind != "admin":
         raise HTTPException(status_code=403, detail="Admin token required.")
+    return auth
+
+
+def _require_model_access(request: Request, settings: Settings) -> AuthContext:
+    auth = require_gateway_auth(request, settings)
+    if auth.kind == "admin" and not settings.allow_admin_model_access:
+        raise HTTPException(status_code=403, detail="Customer API token required.")
     return auth
 
 

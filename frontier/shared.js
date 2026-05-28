@@ -107,6 +107,10 @@ const ClaudeApp = (() => {
     save(ACCOUNTS_KEY, value.map(recalculateAccount));
   }
 
+  function clearAccounts() {
+    localStorage.removeItem(ACCOUNTS_KEY);
+  }
+
   function normalizeModelKey(modelKey) {
     const aliases = {
       economy: "haiku",
@@ -143,9 +147,11 @@ const ClaudeApp = (() => {
       model: models.sonnet.publicModel,
     });
     const storedBaseUrl = String(settings.baseUrl || "");
+    const hostedSquare = /\.squareweb\.app$/i.test(window.location.hostname || "");
+    const storedSquare = /\.squareweb\.app$/i.test((storedBaseUrl || "").replace(/^https?:\/\//i, "").split("/")[0]);
     const shouldUseSameOrigin =
       sameOriginApi !== "http://127.0.0.1:8787" &&
-      (storedBaseUrl.includes("127.0.0.1") || storedBaseUrl.includes("localhost"));
+      (hostedSquare || storedSquare || storedBaseUrl.includes("127.0.0.1") || storedBaseUrl.includes("localhost"));
     return {
       ...settings,
       baseUrl: shouldUseSameOrigin ? sameOriginApi : settings.baseUrl || sameOriginApi,
@@ -400,6 +406,7 @@ const ClaudeApp = (() => {
     CLIENT_SESSION_KEY,
     accounts,
     saveAccounts,
+    clearAccounts,
     apiSettings,
     saveApiSettings,
     history,

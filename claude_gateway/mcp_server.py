@@ -24,7 +24,7 @@ DEFAULT_ALLOWED_COMMANDS = (
     "npm test",
     "npm run test",
 )
-HOSTED_GATEWAY_BASE_URL = "https://claude-code-api.squareweb.app"
+HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-subdomain.squareweb.app")
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
 
 

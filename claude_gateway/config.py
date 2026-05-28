@@ -42,6 +42,7 @@ def _load_dotenv() -> None:
 class Settings:
     gateway_api_keys: tuple[str, ...] = ("local-dev-token",)
     allow_unauthenticated: bool = False
+    allow_admin_model_access: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api"
     openrouter_emergency_fallback: bool = False
@@ -107,13 +108,14 @@ class Settings:
     admin_trusted_ips: tuple[str, ...] = ()
     trust_proxy_headers: bool = False
     cors_allowed_origins: tuple[str, ...] = (
-        "https://claude-code-api.squareweb.app",
         "http://127.0.0.1:8787",
         "http://localhost:8787",
     )
     expose_openapi: bool = False
     expose_detailed_health: bool = False
     mercado_pago_access_token: str = ""
+    mercado_pago_webhook_secret: str = ""
+    mercado_pago_webhook_tolerance_seconds: int = 600
     mercado_pago_public_url: str = ""
     public_trial_enabled: bool = False
     public_trial_end_at: str = ""
@@ -167,6 +169,7 @@ class Settings:
         return cls(
             gateway_api_keys=_csv_env("GATEWAY_API_KEYS", "local-dev-token"),
             allow_unauthenticated=_bool_env("ALLOW_UNAUTHENTICATED", False),
+            allow_admin_model_access=_bool_env("ALLOW_ADMIN_MODEL_ACCESS", False),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
             openrouter_emergency_fallback=False,
@@ -235,11 +238,15 @@ class Settings:
             trust_proxy_headers=_bool_env("TRUST_PROXY_HEADERS", False),
             cors_allowed_origins=_csv_env(
                 "CORS_ALLOWED_ORIGINS",
-                "https://claude-code-api.squareweb.app,http://127.0.0.1:8787,http://localhost:8787",
+                "http://127.0.0.1:8787,http://localhost:8787",
             ),
             expose_openapi=_bool_env("EXPOSE_OPENAPI", False),
             expose_detailed_health=_bool_env("EXPOSE_DETAILED_HEALTH", False),
             mercado_pago_access_token=os.getenv("MERCADO_PAGO_ACCESS_TOKEN", ""),
+            mercado_pago_webhook_secret=os.getenv("MERCADO_PAGO_WEBHOOK_SECRET", ""),
+            mercado_pago_webhook_tolerance_seconds=int(
+                os.getenv("MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS", "600")
+            ),
             mercado_pago_public_url=os.getenv("MERCADO_PAGO_PUBLIC_URL", ""),
             public_trial_enabled=_bool_env("PUBLIC_TRIAL_ENABLED", False),
             public_trial_end_at=os.getenv("PUBLIC_TRIAL_END_AT", ""),

@@ -171,7 +171,9 @@ async function refreshFromServer() {
     adminRequest("/v1/admin/vps/schedules").catch(() => ({ data: [], status: {} })),
   ]);
   ClaudeApp.saveGiftCards(giftCards.data || []);
-  ClaudeApp.saveAccounts(accounts.data || []);
+  const serverAccounts = accounts.data || [];
+  if (!serverAccounts.length) ClaudeApp.clearAccounts();
+  ClaudeApp.saveAccounts(serverAccounts);
   purchaseState = purchases.data || [];
   gatewayHealthState = health;
   vpsScheduleState = vpsSchedules;
@@ -391,13 +393,13 @@ function renderProductionChecklist() {
   const webSearch = gatewayHealthState.web_search || {};
   const publicTrial = gatewayHealthState.public_trial || {};
   const items = [
-    ["OpenRouter", readiness.openrouter, "Chave principal para respostas do modelo."],
+    ["Backend externo", readiness.external_gateway, "Chave principal para respostas do modelo."],
     ["Pesquisa web", readiness.web_search, `${webSearch.model || "gpt-5.5"} / ${webSearch.context_size || "low"}`],
     ["Mercado Pago", readiness.mercado_pago, "Checkout e webhook para upgrades."],
     ["Senha admin", readiness.admin_password, "Login protegido por senha/hash no backend."],
     ["CORS restrito", readiness.cors_restricted, "Origens liberadas para o navegador."],
     ["OpenAPI privado", readiness.openapi_private, "Docs públicas fechadas por padrão."],
-    ["Banco persistente", readiness.persistent_storage, readiness.account_data_file || "SQLite configurado"],
+    ["Banco persistente", readiness.persistent_storage, "SQLite persistente configurado"],
     ["Hosts restritos", readiness.trusted_hosts_restricted, "Use domínio explícito em produção."],
   ];
   if (publicTrial.configured || publicTrial.enabled || publicTrial.active) {
@@ -871,12 +873,8 @@ giftCardForm.addEventListener("submit", async (event) => {
     cards.unshift(data.giftCard);
     ClaudeApp.saveGiftCards(cards);
   } catch (error) {
-    if (!error.fallback) {
-      document.querySelector("#giftCardError").textContent = error.message;
-      return;
-    }
-    cards.unshift(uniqueGiftCard(values));
-    ClaudeApp.saveGiftCards(cards);
+    document.querySelector("#giftCardError").textContent = error.fallback ? "API admin indisponível." : error.message;
+    return;
   }
 
   event.currentTarget.reset();
@@ -1034,17 +1032,14 @@ document.querySelector("#giftCardsTable").addEventListener("click", async (event
   if (button.dataset.action === "toggle" && !cards[index].usedByAccountId) {
     const nextActive = !cards[index].active;
     try {
-      const data = await adminRequest(`/v1/admin/gift-cards/${cards[index].id}`, {
+    const data = await adminRequest(`/v1/admin/gift-cards/${cards[index].id}`, {
         method: "PATCH",
         body: JSON.stringify({ active: nextActive }),
       });
       cards[index] = data.giftCard;
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      cards[index].active = nextActive;
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
@@ -1054,11 +1049,8 @@ document.querySelector("#giftCardsTable").addEventListener("click", async (event
       await adminRequest(`/v1/admin/gift-cards/${cards[index].id}`, { method: "DELETE" });
       cards.splice(index, 1);
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      cards.splice(index, 1);
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
@@ -1093,11 +1085,8 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
       });
       accounts[index] = data.account;
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      accounts[index].active = nextActive;
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
@@ -1109,11 +1098,8 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
       });
       accounts[index] = data.account;
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      accounts[index].usedToday = 0;
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
@@ -1127,15 +1113,8 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
       });
       accounts[index] = data.account;
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      const addTokens = payload.addTokens || ClaudeApp.calculateApiOnlyLimit(payload.rechargeBrl, 24).dailyLimit;
-      accounts[index].dailyLimit += addTokens;
-      accounts[index].computedDailyTokens += addTokens;
-      accounts[index].manualLimit = accounts[index].dailyLimit;
-      if (payload.rechargeBrl) accounts[index].price += payload.rechargeBrl;
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
@@ -1145,16 +1124,29 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
       await adminRequest(`/v1/admin/accounts/${accounts[index].id}`, { method: "DELETE" });
       accounts.splice(index, 1);
     } catch (error) {
-      if (!error.fallback) {
-        alert(error.message);
-        return;
-      }
-      accounts.splice(index, 1);
+      alert(error.fallback ? "API admin indisponível." : error.message);
+      return;
     }
   }
 
   ClaudeApp.saveAccounts(accounts);
   renderAll();
+});
+
+document.querySelector("#purgeAccounts").addEventListener("click", async () => {
+  const confirmation = prompt('Digite APAGAR para remover todas as contas e API tokens.');
+  if (confirmation !== "APAGAR") return;
+  try {
+    await adminRequest("/v1/admin/accounts/purge", {
+      method: "POST",
+      body: JSON.stringify({ includeGiftCards: false }),
+    });
+    ClaudeApp.clearAccounts();
+    await refreshFromServer();
+    renderAll();
+  } catch (error) {
+    alert(error.fallback ? "API admin indisponível." : error.message);
+  }
 });
 
 document.querySelector("#purchasesTable").addEventListener("click", async (event) => {

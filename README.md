@@ -190,14 +190,14 @@ patches, run allowed tests, and ask this gateway for extra reasoning.
 The Square Cloud hosted API for this project is:
 
 ```text
-https://claude-code-api.squareweb.app
+https://your-subdomain.squareweb.app
 ```
 
 For Claude Desktop on this machine, install the local stdio MCP bridge:
 
 ```bash
 python3 scripts/install_claude_desktop_mcp.py \
-  --gateway-url "https://claude-code-api.squareweb.app" \
+  --gateway-url "https://your-subdomain.squareweb.app" \
   --gateway-token "replace-with-a-real-gateway-or-account-token"
 ```
 
@@ -216,7 +216,7 @@ Streamable HTTP endpoint:
 
 ```bash
 export MCP_WORKSPACE_ROOT="$PWD"
-export MCP_GATEWAY_BASE_URL="https://claude-code-api.squareweb.app"
+export MCP_GATEWAY_BASE_URL="https://your-subdomain.squareweb.app"
 export MCP_GATEWAY_TOKEN="replace-with-a-real-gateway-or-account-token"
 export MCP_TRANSPORT="streamable-http"
 export MCP_HOST="127.0.0.1"
@@ -265,6 +265,7 @@ Then configure the operational security settings:
 
 ```env
 GATEWAY_API_KEYS=replace-with-a-long-random-emergency-token
+ALLOW_ADMIN_MODEL_ACCESS=false
 TRUSTED_HOSTS=your-domain.example
 TRUST_PROXY_HEADERS=true
 CORS_ALLOWED_ORIGINS=https://your-domain.example
@@ -281,13 +282,18 @@ public hosted URL. Keep the token only on the server:
 
 ```env
 MERCADO_PAGO_ACCESS_TOKEN=APP_USR-...
+MERCADO_PAGO_WEBHOOK_SECRET=secret-from-mercado-pago-webhooks-panel
+MERCADO_PAGO_WEBHOOK_TOLERANCE_SECONDS=600
 MERCADO_PAGO_PUBLIC_URL=https://your-domain.example
 ```
 
 The customer app creates a Mercado Pago checkout preference for the plan and
 redirects the user to pay. Mercado Pago calls
 `/v1/billing/mercadopago/webhook`; when the payment status is `approved`, the
-backend upgrades the account automatically. Current app plans are:
+backend validates `x-signature` when `MERCADO_PAGO_WEBHOOK_SECRET` is set, then
+upgrades the account automatically. Register the HTTPS webhook URL in Mercado
+Pago's Webhooks panel and store the generated secret as an environment variable;
+do not hardcode it or pass it through the browser. Current app plans are:
 
 ```text
 Pro         R$ 65,00   claude-code-pro
@@ -404,6 +410,9 @@ OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
+MERCADO_PAGO_ACCESS_TOKEN=APP_USR-...
+MERCADO_PAGO_WEBHOOK_SECRET=secret-from-mercado-pago-webhooks-panel
+MERCADO_PAGO_PUBLIC_URL=https://your-subdomain.squareweb.app
 OPENROUTER_SITE_URL=https://your-subdomain.squareweb.app
 OPENROUTER_APP_NAME=Claude Code
 ENABLE_WEB_SEARCH=true
@@ -412,6 +421,11 @@ ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
 CUSTOMER_ACCOUNTS=...
 ```
+
+For authorized deploy without adding Square Cloud tokens to GitHub, connect this
+repository through Square Cloud's GitHub integration and select the `main`
+branch in the Square Cloud dashboard. GitHub Actions stays as CI only; runtime
+secrets remain in Square Cloud environment variables.
 
 See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) for the full architecture and launch checklist.
 

@@ -634,6 +634,34 @@ class AccountStore:
                 raise HTTPException(status_code=404, detail="Account not found.")
         return {"status": "deleted"}
 
+    def purge_accounts(self, *, include_gift_cards: bool = False) -> dict[str, int | str]:
+        with self._lock, self._connect() as db:
+            counts = {
+                "accounts": db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0],
+                "purchases": db.execute("SELECT COUNT(*) FROM purchases").fetchone()[0],
+                "customer_usage": db.execute("SELECT COUNT(*) FROM customer_usage").fetchone()[0],
+                "conversations": db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0],
+                "code_workspaces": db.execute("SELECT COUNT(*) FROM code_workspaces").fetchone()[0],
+                "support_tickets": db.execute("SELECT COUNT(*) FROM support_tickets").fetchone()[0],
+                "support_messages": db.execute("SELECT COUNT(*) FROM support_messages").fetchone()[0],
+                "admin_sessions": db.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0],
+                "gift_cards": db.execute("SELECT COUNT(*) FROM gift_cards").fetchone()[0] if include_gift_cards else 0,
+            }
+            db.execute("PRAGMA secure_delete=ON")
+            db.execute("DELETE FROM support_messages")
+            db.execute("DELETE FROM support_tickets")
+            db.execute("DELETE FROM code_workspaces")
+            db.execute("DELETE FROM conversations")
+            db.execute("DELETE FROM customer_usage")
+            db.execute("DELETE FROM purchases")
+            db.execute("DELETE FROM admin_sessions")
+            db.execute("DELETE FROM accounts")
+            if include_gift_cards:
+                db.execute("DELETE FROM gift_cards")
+            db.commit()
+            db.execute("VACUUM")
+        return {"status": "purged", **counts}
+
     def customer_plan_for_token(self, token: str) -> CustomerPlan | None:
         with self._lock, self._connect() as db:
             self._reset_stale_usage(db)
