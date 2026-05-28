@@ -294,10 +294,7 @@ def create_app(
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
         openai_response = anthropic_to_response(response, payload, public_model)
         if stream:
-            return StreamingResponse(
-                _iter_bytes(response_to_sse(openai_response)),
-                media_type="text/event-stream",
-            )
+            return _sse_response(_iter_bytes(response_to_sse(openai_response)))
         return JSONResponse(openai_response)
 
     @app.post("/v1/chat/completions")
@@ -318,10 +315,7 @@ def create_app(
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
         completion = anthropic_to_chat_completion(response, payload, public_model)
         if stream:
-            return StreamingResponse(
-                _iter_bytes(chat_to_sse(completion)),
-                media_type="text/event-stream",
-            )
+            return _sse_response(_iter_bytes(chat_to_sse(completion)))
         return JSONResponse(completion)
 
     @app.get("/v1/budget")
@@ -385,10 +379,7 @@ def create_app(
                 usage={"input_tokens": 0, "output_tokens": len(control_answer.split())},
             )
             if payload.get("stream"):
-                return StreamingResponse(
-                    _stream_text_message(message),
-                    media_type="text/event-stream",
-                )
+                return _sse_response(_stream_text_message(message))
             return JSONResponse(message)
 
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
@@ -408,10 +399,7 @@ def create_app(
                 usage={"input_tokens": 0, "output_tokens": len(identity_answer.split())},
             )
             if payload.get("stream"):
-                return StreamingResponse(
-                    _stream_text_message(message),
-                    media_type="text/event-stream",
-                )
+                return _sse_response(_stream_text_message(message))
             return JSONResponse(message)
 
         payload = await _with_openai_execution_guidance(app, auth, payload, decision)
@@ -434,13 +422,10 @@ def create_app(
 
                 _settle_customer_budget(app, reservation, payload, decision, response)
                 response = _with_public_response_model(response, decision.public_model, app.state.settings)
-                return StreamingResponse(
-                    _stream_text_message(response),
-                    media_type="text/event-stream",
-                )
+                return _sse_response(_stream_text_message(response))
 
             app.state.usage.record_request(decision)
-            return StreamingResponse(
+            return _sse_response(
                 _public_model_stream_with_budget_settlement(
                     app.state.model_client.stream_messages(payload, decision.selected_openrouter_model),
                     _public_model_label(decision.public_model, app.state.settings),
@@ -448,8 +433,7 @@ def create_app(
                     reservation=reservation,
                     payload=payload,
                     decision=decision,
-                ),
-                media_type="text/event-stream",
+                )
             )
 
         try:
@@ -1804,7 +1788,7 @@ def _prepare_payload(
     elif reasoning_value is None and auth.customer and auth.customer.preferred_reasoning:
         reasoning_value = auth.customer.preferred_reasoning
     if reasoning_value is None:
-        reasoning_value = "normal"
+        reasoning_value = "auto"
     limited["__gateway_reasoning_mode"] = normalize_reasoning_mode(reasoning_value)
     policy_value = limited.pop("gateway_web_search", None)
     if policy_value is None:
@@ -1935,7 +1919,7 @@ def _prompt_control_answer(payload: dict[str, Any], settings: Settings) -> str |
     if controls.get("model"):
         parts.append(f"modelo {_public_model_label(str(payload.get('model') or settings.auto_public_model), settings)}")
     if controls.get("reasoning"):
-        parts.append(f"raciocínio {_reasoning_label(str(payload.get('__gateway_reasoning_mode') or 'normal'))}")
+        parts.append(f"raciocínio {_reasoning_label(str(payload.get('__gateway_reasoning_mode') or 'auto'))}")
     if not parts:
         return None
     return f"Configuração aplicada: {', '.join(parts)}. Pode mandar a próxima mensagem."
@@ -2830,6 +2814,17 @@ async def _stream_text_message(message: dict[str, Any]):
 async def _iter_bytes(chunks: list[bytes]):
     for chunk in chunks:
         yield chunk
+
+
+def _sse_response(chunks: Any) -> StreamingResponse:
+    return StreamingResponse(
+        chunks,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _public_model_stream(chunks: Any, public_model: str, on_usage: Callable[[dict[str, int]], None] | None = None):

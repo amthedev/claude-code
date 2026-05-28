@@ -420,7 +420,8 @@ See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_RE
 Claude Code relies heavily on streaming and tool calls. For that reason:
 
 - simple `stream: true` requests are proxied directly to the VPS model;
-- deep text-only streaming requests may use the internal pipeline and then stream the final answer;
+- `stream: true` requests use the direct VPS path by default so terminal output starts faster;
+- set `ENABLE_STREAM_AGENT_ORCHESTRATION=true` only if you prefer slower streamed answers with the internal multi-agent pipeline;
 - requests with `tools`, `tool_choice`, `tool_use`, or `tool_result` are proxied directly;
 - text-only requests use the multi-agent pipeline only when the router sees real depth, such as debugging, architecture, review, file edits, testing, or frontend work.
 

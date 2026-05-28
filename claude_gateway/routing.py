@@ -55,15 +55,24 @@ FILE_EDIT_KEYWORDS = {
     "apply_patch",
     "alterar arquivo",
     "alterar arquivos",
+    "arquivo",
+    "arquivos",
     "commit",
     "diff",
     "edit file",
     "editar arquivo",
     "edite o arquivo",
+    "file",
+    "files",
+    "leia",
+    "ler",
     "mexer no arquivo",
     "mexer nos arquivos",
     "modifique o arquivo",
     "patch",
+    "read",
+    "rode",
+    "rodar",
     "shell",
     "terminal",
     "workspace",
@@ -133,6 +142,28 @@ LOW_COMPLEXITY_KEYWORDS = {
     "simples",
     "one file",
     "typo",
+}
+
+QUICK_REPLY_KEYWORDS = {
+    "bom dia",
+    "boa noite",
+    "boa tarde",
+    "defina",
+    "hello",
+    "hey",
+    "oi",
+    "ola",
+    "olá",
+    "obrigado",
+    "obrigada",
+    "qual",
+    "quando",
+    "quanto",
+    "quem",
+    "responda rapido",
+    "responda rápido",
+    "traduza",
+    "valeu",
 }
 
 HIGH_COMPLEXITY_KEYWORDS = {
@@ -232,12 +263,14 @@ class RoutePlanner:
             or requested_model.lower() in {"auto", "claude-code-auto"}
             or not requested_model.strip()
         )
-        reasoning_mode = str(payload.get("__gateway_reasoning_mode") or "normal")
+        reasoning_mode = str(payload.get("__gateway_reasoning_mode") or "auto")
         task_text = extract_prompt_text(payload)
         task_type = self._task_type(task_text)
         complexity = self._complexity(task_text)
 
         mode = self._mode_for_requested_model(requested_model, task_type, complexity)
+        if requested_auto and reasoning_mode in {"auto", "normal"}:
+            mode = self._automatic_mode_for_task(task_type, complexity)
         if requested_auto and reasoning_mode == "fast":
             mode = "economy"
         elif requested_auto and reasoning_mode == "strong":
@@ -275,6 +308,7 @@ class RoutePlanner:
         )
         can_orchestrate = (
             self.settings.enable_agent_orchestration
+            and (not is_streaming or self.settings.enable_stream_agent_orchestration)
             and not customer_power_tier
             and not has_tool_contract
             and mode in {"pro", "ultra", "ui"}
@@ -334,6 +368,9 @@ class RoutePlanner:
         if "claude-code-ui" in lower:
             return "ui"
 
+        return self._automatic_mode_for_task(task_type, complexity)
+
+    def _automatic_mode_for_task(self, task_type: str, complexity: str) -> str:
         if task_type == "frontend":
             return "ui"
         if task_type in {"file_edit", "testing", "debugging"} and complexity != "critical":
@@ -485,6 +522,8 @@ class RoutePlanner:
             return "debugging"
         if _contains_any(task_text, ARCHITECTURE_KEYWORDS):
             return "architecture"
+        if _is_quick_reply(task_text):
+            return "explanation"
         if _contains_any(task_text, LOW_COMPLEXITY_KEYWORDS):
             return "explanation"
         return "simple_code"
@@ -492,6 +531,8 @@ class RoutePlanner:
     def _complexity(self, task_text: str) -> str:
         if _contains_any(task_text, HIGH_COMPLEXITY_KEYWORDS):
             return "critical"
+        if _is_quick_reply(task_text):
+            return "low"
         if _contains_any(task_text, LOW_COMPLEXITY_KEYWORDS) and _contains_any(
             task_text,
             FRONTEND_KEYWORDS,
@@ -519,6 +560,8 @@ class RoutePlanner:
                 details.append("streaming proxy")
         if has_tool_contract:
             details.append("tool contract proxy")
+        if is_streaming and not self.settings.enable_stream_agent_orchestration:
+            details.append("streaming direct")
         return ", ".join(details)
 
     def _needs_deep_reasoning(self, task_type: str, complexity: str) -> bool:
@@ -542,3 +585,23 @@ def _contains_keyword(text: str, keyword: str) -> bool:
     if keyword.replace("-", "").replace("_", "").isalnum():
         return re.search(rf"(?<![\w-]){escaped}(?![\w-])", text) is not None
     return keyword in text
+
+
+def _is_quick_reply(text: str) -> bool:
+    compact = " ".join(str(text or "").split())
+    if not compact:
+        return True
+    if _contains_any(
+        compact,
+        FRONTEND_KEYWORDS
+        | FILE_EDIT_KEYWORDS
+        | DEBUG_KEYWORDS
+        | TEST_KEYWORDS
+        | REVIEW_KEYWORDS
+        | ARCHITECTURE_KEYWORDS
+        | HIGH_COMPLEXITY_KEYWORDS,
+    ):
+        return False
+    if _contains_any(compact, QUICK_REPLY_KEYWORDS):
+        return True
+    return len(compact) <= 80 and "\n" not in text

@@ -79,6 +79,7 @@ class Settings:
     web_search_blocked_domains: tuple[str, ...] = ()
     request_timeout_seconds: float = 120.0
     enable_agent_orchestration: bool = True
+    enable_stream_agent_orchestration: bool = False
     max_cost_ratio_vs_claude: float = 0.50
     allow_premium_fallback: bool = False
     allow_direct_external_models: bool = False
@@ -200,6 +201,7 @@ class Settings:
             web_search_blocked_domains=_csv_env("WEB_SEARCH_BLOCKED_DOMAINS", ""),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
+            enable_stream_agent_orchestration=_bool_env("ENABLE_STREAM_AGENT_ORCHESTRATION", False),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),
             allow_premium_fallback=_bool_env("ALLOW_PREMIUM_FALLBACK", False),
             allow_direct_external_models=_bool_env("ALLOW_DIRECT_EXTERNAL_MODELS", False),

@@ -105,7 +105,7 @@ def estimate_reserved_tokens(
     if payload_has_tool_contract(payload):
         return base_tokens
     return base_tokens * reasoning_token_multiplier(
-        str(payload.get("__gateway_reasoning_mode") or "normal"),
+        str(payload.get("__gateway_reasoning_mode") or "auto"),
         decision,
     )
 
@@ -125,7 +125,7 @@ def actual_reserved_tokens_from_response(
     if payload_has_tool_contract(payload) or (decision and decision.use_orchestration):
         return actual_tokens
     return actual_tokens * reasoning_token_multiplier(
-        str(payload.get("__gateway_reasoning_mode") or "normal"),
+        str(payload.get("__gateway_reasoning_mode") or "auto"),
         decision,
     )
 

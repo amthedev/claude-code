@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -19,6 +20,20 @@ OPENAI_CHAT_CONTEXT_TOKENS = 24_576
 OPENAI_CHAT_CONTEXT_MARGIN_TOKENS = 512
 OPENAI_CHAT_INPUT_BUDGET_TOKENS = 18_000
 OPENAI_CHAT_MIN_TRIMMED_CHARS = 1_200
+CLAUDE_CODE_AGENT_PROMPT = (
+    "Claude Code agent behavior override for this local model: when the user asks you to inspect, analyze, "
+    "list, read, fix, test, or start work in the project, immediately use the available tools instead of "
+    "asking for permission or asking if you should begin. Ask a question only if a required detail is truly "
+    "missing and no reasonable first action exists. Do not stop after saying what you will do; take the next "
+    "tool action, then summarize what you found. For project analysis, inspect the repository root first, "
+    "ignore dependency/cache folders such as .venv, .git, node_modules, __pycache__, and site-packages unless "
+    "the user specifically asks about them, then read likely manifest or entry files before answering. Never "
+    "end with permission questions like 'posso comecar?' or 'deseja que eu leia?'. If a tool fails or the "
+    "workspace is incomplete, explain what you can infer and what failed, without asking for permission to "
+    "continue. Use enough tokens to finish the requested task."
+)
+CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
+CLAUDE_CODE_SESSION_RE = re.compile(r"(?is)<session>.*?</session>")
 
 
 class AnthropicModelClient(Protocol):
@@ -217,6 +232,8 @@ class VPSAnthropicClient:
             outgoing["tools"] = tools
             if payload.get("tool_choice"):
                 outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
+            elif self._is_claude_code_action_request(payload):
+                outgoing["tool_choice"] = "required"
         return outgoing
 
     def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
@@ -225,10 +242,117 @@ class VPSAnthropicClient:
             return False
         if str(payload.get("__gateway_reasoning") or "").strip().lower() == "none":
             return True
-        if str(payload.get("__gateway_client") or "").strip().lower() == "claude-code":
-            return True
         # Claude Code/tool-heavy requests can otherwise stream only hidden thinking blocks.
         return bool(payload.get("tools") or payload.get("tool_choice"))
+
+    def _is_claude_code_client(self, payload: dict[str, Any]) -> bool:
+        return str(payload.get("__gateway_client") or "").strip().lower() == "claude-code"
+
+    def _is_claude_code_action_request(self, payload: dict[str, Any]) -> bool:
+        if not self._is_claude_code_client(payload):
+            return False
+        if self._payload_has_tool_result(payload):
+            return False
+        text = self._current_user_request_text(payload).lower()
+        if not text:
+            return False
+        action_terms = (
+            "analis",
+            "analise",
+            "analyze",
+            "estrutura",
+            "project",
+            "projeto",
+            "arquivo",
+            "arquivos",
+            "alterar",
+            "altere",
+            "aplicar patch",
+            "build",
+            "commit",
+            "corrija",
+            "corrigir",
+            "crie",
+            "debug",
+            "edite",
+            "editar",
+            "file",
+            "files",
+            "fix",
+            "implemente",
+            "implement",
+            "listar",
+            "list",
+            "ler",
+            "leia",
+            "modifique",
+            "read",
+            "rode",
+            "rodar",
+            "test",
+            "teste",
+            "tests",
+            "verificar",
+            "inspect",
+            "começar",
+            "comecar",
+            "fassa",
+            "faça",
+        )
+        return any(term in text for term in action_terms)
+
+    def _payload_has_tool_result(self, payload: dict[str, Any]) -> bool:
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and any(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in content
+            ):
+                return True
+        return False
+
+    def _last_user_text(self, payload: dict[str, Any]) -> str:
+        for message in reversed(payload.get("messages") or []):
+            if isinstance(message, dict) and str(message.get("role") or "").lower() == "user":
+                return self._content_to_text(message.get("content"))
+        return ""
+
+    def _current_user_request_text(self, payload: dict[str, Any]) -> str:
+        text = self._last_user_text(payload)
+        if not text:
+            return ""
+        text = CLAUDE_CODE_SYSTEM_REMINDER_RE.sub("\n", text)
+        text = CLAUDE_CODE_SESSION_RE.sub("\n", text)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return ""
+        current: list[str] = []
+        for line in lines:
+            if current and self._looks_like_embedded_context(line):
+                break
+            current.append(line)
+            if len(current) >= 3:
+                break
+        return "\n".join(current).strip()
+
+    def _looks_like_embedded_context(self, line: str) -> bool:
+        lowered = line.lower()
+        prefixes = (
+            "from __future__",
+            "import ",
+            "class ",
+            "def ",
+            "const ",
+            "let ",
+            "var ",
+            "function ",
+            "```",
+            "traceback ",
+            "allanm",
+        )
+        return lowered.startswith(prefixes)
 
     def _messages_with_no_think(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         copied = deepcopy(messages)
@@ -245,6 +369,8 @@ class VPSAnthropicClient:
     def _messages_to_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         system_text = self._content_to_text(payload.get("system"))
+        if self._is_claude_code_action_request(payload):
+            system_text = f"{system_text}\n\n{CLAUDE_CODE_AGENT_PROMPT}" if system_text else CLAUDE_CODE_AGENT_PROMPT
         if system_text:
             messages.append({"role": "system", "content": system_text})
 
@@ -256,7 +382,27 @@ class VPSAnthropicClient:
                 role = "user"
             messages.append({"role": role, "content": self._content_to_text(message.get("content"))})
 
+        if self._is_claude_code_action_request(payload):
+            messages = self._messages_with_claude_code_agent_nudge(messages)
+
         return messages or [{"role": "user", "content": ""}]
+
+    def _messages_with_claude_code_agent_nudge(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        copied = deepcopy(messages)
+        reminder = (
+            "<system-reminder>Execute the user's project request now. If tools are available, use them before "
+            "answering. Never ask permission to begin or continue; never end with 'Deseja que eu continue?', "
+            "'posso comecar?', or similar. Ignore .venv, .git, node_modules, __pycache__, and site-packages "
+            "unless explicitly requested. For project analysis, inspect root files and likely manifests/source "
+            "files, then give the answer.</system-reminder>"
+        )
+        for message in reversed(copied):
+            if message.get("role") == "user":
+                content = str(message.get("content") or "")
+                message["content"] = f"{content}\n\n{reminder}" if content else reminder
+                return copied
+        copied.append({"role": "user", "content": reminder})
+        return copied
 
     def _content_to_text(self, content: Any) -> str:
         if isinstance(content, str):

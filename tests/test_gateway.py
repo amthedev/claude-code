@@ -418,6 +418,90 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda no terminal.")
+        self.assertNotIn("tool_choice", outgoing)
+
+    def test_vps_openai_chat_guides_claude_code_to_use_tools_without_asking(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "system": "You are a Claude agent.",
+                "messages": [{"role": "user", "content": "Analise meu projeto."}],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+
+        self.assertIn("immediately use the available tools", outgoing["messages"][0]["content"])
+        self.assertIn("ignore dependency/cache folders", outgoing["messages"][0]["content"])
+        self.assertIn("Never end with permission questions", outgoing["messages"][0]["content"])
+        self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
+        self.assertIn("Never ask permission to begin or continue", outgoing["messages"][-1]["content"])
+        self.assertEqual(outgoing["tool_choice"], "required")
+        self.assertNotIn("stop", outgoing)
+
+        after_tool = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {"role": "user", "content": "Analise meu projeto."},
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "README.md"}],
+                    },
+                ],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertNotIn("tool_choice", after_tool)
+
+        edit_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "Corrija o bug e rode os testes."}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertEqual(edit_request["tool_choice"], "required")
+        self.assertIn("Execute the user's project request now", edit_request["messages"][-1]["content"])
+
+    def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "<system-reminder>arquivo projeto read test</system-reminder>\n\n"
+                            "responda apenas ok\n"
+                            "from __future__ import annotations\n"
+                            "print('historico com projeto e arquivos')"
+                        ),
+                    }
+                ],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+
+        self.assertNotIn("tool_choice", outgoing)
+        self.assertNotIn("Execute the user's project request now", str(outgoing["messages"]))
 
     def test_vps_openai_chat_compacts_large_tool_schemas_to_leave_output_room(self) -> None:
         settings = make_settings()
@@ -783,6 +867,8 @@ class GatewayTestCase(unittest.TestCase):
             },
         ) as response:
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["cache-control"], "no-cache, no-transform")
+            self.assertEqual(response.headers["x-accel-buffering"], "no")
             body = b"".join(response.iter_bytes())
 
         self.assertIn(b"event: message_start", body)
@@ -1876,6 +1962,39 @@ class GatewayTestCase(unittest.TestCase):
             data["cost_estimate"]["effective_path"]["cost_ratio_vs_claude"],
             0.5,
         )
+
+    def test_auto_routes_short_simple_messages_to_economy(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-auto",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Oi"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["mode"], "economy")
+        self.assertEqual(data["task_type"], "explanation")
+        self.assertEqual(data["complexity"], "low")
+        self.assertEqual(data["selected_openrouter_model"], "deepseek/deepseek-v4-flash")
+        self.assertFalse(data["use_orchestration"])
+
+    def test_default_reasoning_mode_is_auto(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Oi"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertEqual(payload["__gateway_reasoning_mode"], "auto")
+        self.assertEqual(payload["__gateway_reasoning"], "none")
 
     def test_simple_frontend_fix_uses_deepseek_flash(self) -> None:
         response = self.client.post(
@@ -3114,7 +3233,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"event: message_start", body)
         self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "high")
 
-    def test_streaming_complex_request_uses_internal_pipeline(self) -> None:
+    def test_streaming_complex_request_uses_direct_proxy_by_default(self) -> None:
         with self.client.stream(
             "POST",
             "/v1/messages",
@@ -3129,9 +3248,34 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
+        self.assertIn(b"event: message_start", body)
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "low")
+
+    def test_streaming_agent_pipeline_can_be_enabled_explicitly(self) -> None:
+        settings = make_settings()
+        settings.enable_stream_agent_orchestration = True
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        with client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "corrija esse bug no projeto"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
         self.assertIn(b"text_delta", body)
-        self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
-        self.assertEqual(self.app.state.openrouter.calls[0][1]["__gateway_reasoning"], "low")
+        self.assertGreaterEqual(len(app.state.openrouter.calls), 5)
+        self.assertEqual(app.state.openrouter.calls[0][1]["__gateway_reasoning"], "low")
 
     def test_streaming_payload_uses_public_model_identity(self) -> None:
         with self.client.stream(
