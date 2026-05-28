@@ -20,6 +20,12 @@ class OpenRouterError(RuntimeError):
 class OpenRouterClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     @property
     def messages_url(self) -> str:
@@ -174,8 +180,12 @@ class OpenRouterClient:
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = False
 
-        async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
-            response = await client.post(self.messages_url, headers=self._headers(), json=outgoing)
+        response = await self._client.post(
+            self.messages_url,
+            headers=self._headers(),
+            json=outgoing,
+            timeout=self.settings.request_timeout_seconds,
+        )
 
         if response.status_code >= 400:
             raise OpenRouterError(response.text, status_code=response.status_code)
@@ -187,16 +197,16 @@ class OpenRouterClient:
         outgoing["stream"] = True
 
         timeout = httpx.Timeout(connect=30.0, read=None, write=30.0, pool=30.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream(
-                "POST",
-                self.messages_url,
-                headers=self._headers(),
-                json=outgoing,
-            ) as response:
-                if response.status_code >= 400:
-                    body = await response.aread()
-                    raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
+        async with self._client.stream(
+            "POST",
+            self.messages_url,
+            headers=self._headers(),
+            json=outgoing,
+            timeout=timeout,
+        ) as response:
+            if response.status_code >= 400:
+                body = await response.aread()
+                raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
 
-                async for chunk in self._filter_reasoning_stream(response.aiter_bytes()):
-                    yield chunk
+            async for chunk in self._filter_reasoning_stream(response.aiter_bytes()):
+                yield chunk

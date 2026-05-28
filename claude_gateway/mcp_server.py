@@ -26,6 +26,16 @@ DEFAULT_ALLOWED_COMMANDS = (
 )
 HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-subdomain.squareweb.app")
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
+_GATEWAY_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+
+def gateway_http_client() -> httpx.AsyncClient:
+    global _GATEWAY_HTTP_CLIENT
+    if _GATEWAY_HTTP_CLIENT is None or _GATEWAY_HTTP_CLIENT.is_closed:
+        _GATEWAY_HTTP_CLIENT = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=40, max_keepalive_connections=20, keepalive_expiry=30.0)
+        )
+    return _GATEWAY_HTTP_CLIENT
 
 
 def workspace_root() -> Path:
@@ -265,8 +275,21 @@ async def ask_gateway(
         "Authorization": f"Bearer {gateway_token()}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(f"{gateway_base_url()}/v1/messages", headers=headers, json=body)
+    try:
+        response = await gateway_http_client().post(
+            f"{gateway_base_url()}/v1/messages",
+            headers=headers,
+            json=body,
+            timeout=httpx.Timeout(connect=10.0, read=55.0, write=20.0, pool=10.0),
+        )
+    except httpx.TimeoutException as exc:
+        return {
+            "status_code": 504,
+            "response": {
+                "detail": "Gateway demorou para responder. Tente uma pergunta menor ou confirme se a URL da API esta online.",
+                "error": str(exc),
+            },
+        }
     try:
         data: Any = response.json()
     except json.JSONDecodeError:
@@ -324,8 +347,11 @@ async def gateway_models() -> dict[str, Any]:
         "Authorization": f"Bearer {gateway_token()}",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(f"{gateway_base_url()}/v1/models", headers=headers)
+    response = await gateway_http_client().get(
+        f"{gateway_base_url()}/v1/models",
+        headers=headers,
+        timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=10.0),
+    )
     try:
         data: Any = response.json()
     except json.JSONDecodeError:
@@ -334,8 +360,10 @@ async def gateway_models() -> dict[str, Any]:
 
 
 async def gateway_health() -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(f"{gateway_base_url()}/health")
+    response = await gateway_http_client().get(
+        f"{gateway_base_url()}/health",
+        timeout=httpx.Timeout(connect=10.0, read=15.0, write=10.0, pool=10.0),
+    )
     try:
         data: Any = response.json()
     except json.JSONDecodeError:

@@ -61,6 +61,12 @@ class VPSAnthropicClient:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     @property
     def messages_url(self) -> str:
@@ -151,12 +157,12 @@ class VPSAnthropicClient:
         timeout = httpx.Timeout(self.settings.vps_model_timeout_seconds)
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    self._url("/v1/messages", target),
-                    headers=self._headers(target),
-                    json=outgoing,
-                )
+            response = await self._client.post(
+                self._url("/v1/messages", target),
+                headers=self._headers(target),
+                json=outgoing,
+                timeout=timeout,
+            )
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
@@ -187,18 +193,18 @@ class VPSAnthropicClient:
             pool=30.0,
         )
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream(
+            async with self._client.stream(
                     "POST",
                     self._url("/v1/messages", target),
                     headers=self._headers(target),
                     json=outgoing,
-                ) as response:
-                    if response.status_code >= 400:
-                        body = await response.aread()
-                        raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
+                    timeout=timeout,
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
+                async for chunk in response.aiter_bytes():
+                    yield chunk
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
@@ -727,12 +733,12 @@ class VPSAnthropicClient:
         timeout = httpx.Timeout(self.settings.vps_model_timeout_seconds)
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    self._url("/v1/chat/completions", target),
-                    headers=self._headers(target),
-                    json=outgoing,
-                )
+            response = await self._client.post(
+                self._url("/v1/chat/completions", target),
+                headers=self._headers(target),
+                json=outgoing,
+                timeout=timeout,
+            )
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
@@ -825,22 +831,22 @@ class VPSAnthropicClient:
             pool=30.0,
         )
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream(
+            async with self._client.stream(
                     "POST",
                     self._url("/v1/chat/completions", target),
                     headers=self._headers(target),
                     json=outgoing,
-                ) as response:
-                    if response.status_code >= 400:
-                        body = await response.aread()
-                        raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
-                    async for chunk in self._openai_sse_to_anthropic(
-                        response.aiter_bytes(),
-                        model=model,
-                        require_tool_call=self._should_force_claude_code_tool_choice(payload),
-                    ):
-                        yield chunk
+                    timeout=timeout,
+            ) as response:
+                if response.status_code >= 400:
+                    body = await response.aread()
+                    raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
+                async for chunk in self._openai_sse_to_anthropic(
+                    response.aiter_bytes(),
+                    model=model,
+                    require_tool_call=self._should_force_claude_code_tool_choice(payload),
+                ):
+                    yield chunk
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
@@ -1327,6 +1333,12 @@ class EmergencyFallbackModelClient:
             and self.settings.openrouter_api_key
             and self.fallback is not None
         )
+
+    async def aclose(self) -> None:
+        for client in (self.primary, self.fallback):
+            close = getattr(client, "aclose", None)
+            if close:
+                await close()
 
     async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
         if not self._can_fallback():

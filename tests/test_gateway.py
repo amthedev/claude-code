@@ -3564,6 +3564,54 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(body["model"], "claude-code-pro")
         self.assertEqual(body["choices"][0]["message"]["role"], "assistant")
 
+    def test_openai_chat_completions_stream_uses_live_sse_proxy(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/chat/completions",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "messages": [{"role": "user", "content": "Explique a função"}],
+                "max_tokens": 128,
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"chat.completion.chunk", body)
+        self.assertIn(b"data: [DONE]", body)
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+        self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
+
+    def test_gateway_trims_long_chat_history_before_upstream(self) -> None:
+        messages = [
+            {"role": "user", "content": f"pergunta {index} " + ("contexto " * 600)}
+            if index % 2 == 0
+            else {"role": "assistant", "content": f"resposta {index} " + ("detalhe " * 600)}
+            for index in range(30)
+        ]
+        messages.append({"role": "user", "content": "Explique a função final"})
+
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "messages": messages,
+                "max_tokens": 128,
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            b"".join(response.iter_bytes())
+
+        sent = self.app.state.openrouter.calls[-1][1]
+        self.assertLessEqual(len(sent["messages"]), 16)
+        self.assertTrue(sent["__gateway_context_trimmed"])
+        self.assertIn("Explique a função final", str(sent["messages"][-1]["content"]))
+
     def test_customer_conversations_are_saved_in_database(self) -> None:
         with TemporaryDirectory() as tmpdir:
             settings = make_settings()

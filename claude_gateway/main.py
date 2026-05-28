@@ -7,6 +7,7 @@ import hmac
 import io
 import base64
 import json
+import logging
 import os
 import re
 import statistics
@@ -47,8 +48,6 @@ from .openai_compat import (
     anthropic_to_chat_completion,
     anthropic_to_response,
     chat_to_anthropic,
-    chat_to_sse,
-    response_to_sse,
     responses_to_anthropic,
 )
 from .model_client import AnthropicModelClient, VPSAnthropicClient, default_model_client
@@ -76,7 +75,11 @@ from .usage import UsageStore
 from .vps_scheduler import VPSScheduleStore, vps_scheduler_loop
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
+LATENCY_LOGGER = logging.getLogger("claude_gateway.latency")
 CUSTOMER_FORCED_FAST_REQUESTS = 10
+FAST_CONTEXT_MAX_CHARS = 36_000
+FAST_CONTEXT_MAX_MESSAGES = 16
+TOOL_CONTEXT_MAX_MESSAGES = 24
 HEAVY_MODE_REQUIRED_TERMS = (
     "auth",
     "autenticacao",
@@ -215,11 +218,16 @@ def create_app(
     @app.on_event("shutdown")
     async def _stop_vps_scheduler() -> None:
         task = getattr(app.state, "vps_scheduler_task", None)
-        if not task:
-            return
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        close_model_client = getattr(app.state.model_client, "aclose", None)
+        if close_model_client:
+            await close_model_client()
+        close_openrouter = getattr(app.state.openrouter, "aclose", None)
+        if close_openrouter and app.state.openrouter is not app.state.model_client:
+            await close_openrouter()
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -320,11 +328,13 @@ def create_app(
         if "gateway_web_search" in payload:
             anthropic_payload["gateway_web_search"] = payload.get("gateway_web_search")
         stream = bool(payload.get("stream"))
+        if stream:
+            anthropic_payload["stream"] = True
+            chunks, public_model = await _stream_gateway_message_chunks(request, app, anthropic_payload)
+            return _sse_response(_anthropic_stream_to_response_sse(chunks, _public_model_label(public_model, app.state.settings)))
         anthropic_payload["stream"] = False
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
         openai_response = anthropic_to_response(response, payload, public_model)
-        if stream:
-            return _sse_response(_iter_bytes(response_to_sse(openai_response)))
         return JSONResponse(openai_response)
 
     @app.post("/v1/chat/completions")
@@ -341,11 +351,13 @@ def create_app(
         if "gateway_web_search" in payload:
             anthropic_payload["gateway_web_search"] = payload.get("gateway_web_search")
         stream = bool(payload.get("stream"))
+        if stream:
+            anthropic_payload["stream"] = True
+            chunks, public_model = await _stream_gateway_message_chunks(request, app, anthropic_payload)
+            return _sse_response(_anthropic_stream_to_chat_sse(chunks, _public_model_label(public_model, app.state.settings)))
         anthropic_payload["stream"] = False
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
         completion = anthropic_to_chat_completion(response, payload, public_model)
-        if stream:
-            return _sse_response(_iter_bytes(chat_to_sse(completion)))
         return JSONResponse(completion)
 
     @app.get("/v1/budget")
@@ -400,8 +412,8 @@ def create_app(
         if _is_claude_code_request(request, payload):
             payload = {**payload, "__gateway_client": "claude-code"}
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
-        payload = _with_customer_latency_policy(payload, app, auth)
-        payload = _with_customer_power_tier(payload, app, auth)
+        payload = await _with_customer_latency_policy(payload, app, auth)
+        payload = await _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         control_answer = _prompt_control_answer(payload, app.state.settings)
         if control_answer:
@@ -430,7 +442,7 @@ def create_app(
         reservation = None
         if not identity_answer:
             payload = _with_simple_response_budget(payload, decision, app.state.settings)
-            reservation = _reserve_customer_budget(app, auth, payload, decision)
+            reservation = await _reserve_customer_budget(app, auth, payload, decision)
             payload = await _with_web_research(app, auth, payload)
         payload = _with_gateway_reasoning(payload, decision)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
@@ -459,13 +471,13 @@ def create_app(
                         allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
                     )
                 except OpenRouterError as exc:
-                    _rollback_customer_budget(app, reservation)
+                    await _rollback_customer_budget(app, reservation)
                     _raise_public_upstream_error(exc)
                 except Exception:
-                    _rollback_customer_budget(app, reservation)
+                    await _rollback_customer_budget(app, reservation)
                     raise
 
-                _settle_customer_budget(app, reservation, payload, decision, response)
+                await _settle_customer_budget(app, reservation, payload, decision, response)
                 response = _with_public_response_model(response, decision.public_model, app.state.settings)
                 return _sse_response(_stream_text_message(response))
 
@@ -487,13 +499,13 @@ def create_app(
                 allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
             )
         except OpenRouterError as exc:
-            _rollback_customer_budget(app, reservation)
+            await _rollback_customer_budget(app, reservation)
             _raise_public_upstream_error(exc)
         except Exception:
-            _rollback_customer_budget(app, reservation)
+            await _rollback_customer_budget(app, reservation)
             raise
 
-        _settle_customer_budget(app, reservation, payload, decision, response)
+        await _settle_customer_budget(app, reservation, payload, decision, response)
         response = _with_public_response_model(response, decision.public_model, app.state.settings)
         return JSONResponse(response)
 
@@ -1074,7 +1086,7 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         if auth.customer:
-            return _customer_usage_snapshot(app, auth)
+            return await _customer_usage_snapshot(app, auth)
         return _public_usage_snapshot(app.state.usage.snapshot())
 
     @app.post("/v1/router/debug")
@@ -1085,8 +1097,8 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
-        payload = _with_customer_latency_policy(payload, app, auth)
-        payload = _with_customer_power_tier(payload, app, auth)
+        payload = await _with_customer_latency_policy(payload, app, auth)
+        payload = await _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         web_search = _web_search_debug(payload, app.state.settings, auth)
         return {
@@ -1105,14 +1117,14 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_model_access(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
-        payload = _with_customer_latency_policy(payload, app, auth)
-        payload = _with_customer_power_tier(payload, app, auth)
+        payload = await _with_customer_latency_policy(payload, app, auth)
+        payload = await _with_customer_power_tier(payload, app, auth)
         if payload.get("stream"):
             payload = {**payload, "stream": False}
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
         payload = _with_simple_response_budget(payload, decision, app.state.settings)
-        reservation = _reserve_customer_budget(app, auth, payload, decision)
+        reservation = await _reserve_customer_budget(app, auth, payload, decision)
         payload = await _with_web_research(app, auth, payload)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
         payload = await _with_openai_execution_guidance(app, auth, payload, decision)
@@ -1123,12 +1135,13 @@ def create_app(
                 allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
             )
         except OpenRouterError as exc:
-            _rollback_customer_budget(app, reservation)
+            await _rollback_customer_budget(app, reservation)
             _raise_public_upstream_error(exc)
         except Exception:
-            _rollback_customer_budget(app, reservation)
+            await _rollback_customer_budget(app, reservation)
             raise
 
+        await _settle_customer_budget(app, reservation, payload, decision, response)
         return JSONResponse({"decision": _public_route_decision(decision), "response": response})
 
     return app
@@ -1811,13 +1824,18 @@ async def _complete_gateway_message(
     app: FastAPI,
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
+    trace_start = time.perf_counter()
+    trace: dict[str, Any] = {"path": request.url.path, "stream": False}
     auth = _require_model_access(request, app.state.settings)
     if _is_claude_code_request(request, payload):
         payload = {**payload, "__gateway_client": "claude-code"}
     payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
-    payload = _with_customer_latency_policy(payload, app, auth)
-    payload = _with_customer_power_tier(payload, app, auth)
+    trace["prepare_ms"] = _elapsed_ms(trace_start)
+    payload = await _with_customer_latency_policy(payload, app, auth)
+    payload = await _with_customer_power_tier(payload, app, auth)
+    trace["policy_ms"] = _elapsed_ms(trace_start)
     decision = app.state.planner.plan(payload)
+    trace["context_trimmed"] = bool(payload.get("__gateway_context_trimmed"))
     control_answer = _prompt_control_answer(payload, app.state.settings)
     if control_answer:
         return (
@@ -1845,7 +1863,7 @@ async def _complete_gateway_message(
     reservation = None
     if not identity_answer:
         payload = _with_simple_response_budget(payload, decision, app.state.settings)
-        reservation = _reserve_customer_budget(app, auth, payload, decision)
+        reservation = await _reserve_customer_budget(app, auth, payload, decision)
         payload = await _with_web_research(app, auth, payload)
     payload = _with_gateway_reasoning(payload, decision)
     payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
@@ -1871,14 +1889,326 @@ async def _complete_gateway_message(
             allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
         )
     except OpenRouterError as exc:
-        _rollback_customer_budget(app, reservation)
+        await _rollback_customer_budget(app, reservation)
         _raise_public_upstream_error(exc)
     except Exception:
-        _rollback_customer_budget(app, reservation)
+        await _rollback_customer_budget(app, reservation)
         raise
-    _settle_customer_budget(app, reservation, payload, decision, response)
+    await _settle_customer_budget(app, reservation, payload, decision, response)
+    trace["total_ms"] = _elapsed_ms(trace_start)
+    _log_latency_trace(trace)
     response = _with_public_response_model(response, decision.public_model, app.state.settings)
     return response, decision.public_model
+
+
+async def _stream_gateway_message_chunks(
+    request: Request,
+    app: FastAPI,
+    payload: dict[str, Any],
+) -> tuple[Any, str]:
+    trace_start = time.perf_counter()
+    trace: dict[str, Any] = {"path": request.url.path, "stream": True}
+    auth = _require_model_access(request, app.state.settings)
+    if _is_claude_code_request(request, payload):
+        payload = {**payload, "__gateway_client": "claude-code"}
+    payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
+    trace["prepare_ms"] = _elapsed_ms(trace_start)
+    payload = await _with_customer_latency_policy(payload, app, auth)
+    payload = await _with_customer_power_tier(payload, app, auth)
+    trace["policy_ms"] = _elapsed_ms(trace_start)
+    decision = app.state.planner.plan(payload)
+    trace["context_trimmed"] = bool(payload.get("__gateway_context_trimmed"))
+
+    control_answer = _prompt_control_answer(payload, app.state.settings)
+    quick_answer = control_answer or _quick_local_answer(payload)
+    identity_answer = None if quick_answer else _selected_model_identity_answer(
+        payload,
+        decision.public_model,
+        app.state.settings,
+    )
+    if quick_answer or identity_answer:
+        app.state.usage.record_request(decision)
+        text = quick_answer or identity_answer or ""
+        return (
+            _stream_text_message(
+                build_text_message(
+                    _public_model_label(decision.public_model, app.state.settings),
+                    text,
+                    usage={"input_tokens": 0 if identity_answer or control_answer else 1, "output_tokens": len(text.split())},
+                )
+            ),
+            decision.public_model,
+        )
+
+    payload = _with_simple_response_budget(payload, decision, app.state.settings)
+    reservation = await _reserve_customer_budget(app, auth, payload, decision)
+    payload = await _with_web_research(app, auth, payload)
+    payload = _with_gateway_reasoning(payload, decision)
+    payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
+    payload = _with_automatic_skills(payload, decision)
+    payload["__gateway_route_decision"] = decision
+    payload = await _with_openai_execution_guidance(app, auth, payload, decision)
+    payload["__gateway_route_decision"] = decision
+    payload = await _with_gemini_code_guidance(app, payload, decision)
+    payload["__gateway_route_decision"] = decision
+
+    if decision.use_orchestration:
+        try:
+            response, _ = await app.state.orchestrator.complete(
+                {**payload, "stream": False},
+                allow_openai_helper=_allow_openai_helper(auth, app.state.settings),
+            )
+        except OpenRouterError as exc:
+            await _rollback_customer_budget(app, reservation)
+            _raise_public_upstream_error(exc)
+        except Exception:
+            await _rollback_customer_budget(app, reservation)
+            raise
+        await _settle_customer_budget(app, reservation, payload, decision, response)
+        response = _with_public_response_model(response, decision.public_model, app.state.settings)
+        return _latency_traced_stream(_stream_text_message(response), trace, trace_start), decision.public_model
+
+    app.state.usage.record_request(decision)
+    return (
+        _latency_traced_stream(
+            _public_model_stream_with_budget_settlement(
+                app.state.model_client.stream_messages(payload, decision.selected_openrouter_model),
+                _public_model_label(decision.public_model, app.state.settings),
+                app=app,
+                reservation=reservation,
+                payload=payload,
+                decision=decision,
+            ),
+            trace,
+            trace_start,
+        ),
+        decision.public_model,
+    )
+
+
+async def _anthropic_stream_to_chat_sse(chunks: Any, model: str):
+    chunk_id = f"chatcmpl-{int(time.time() * 1000)}"
+    created = int(time.time())
+    final_reason = "stop"
+    yielded_final = False
+    yield _chat_sse_chunk(chunk_id, created, model, {"role": "assistant"}, None)
+
+    buffer = ""
+    async for chunk in chunks:
+        buffer += chunk.decode("utf-8", "replace")
+        while "\n\n" in buffer:
+            event, buffer = buffer.split("\n\n", 1)
+            async for outgoing in _chat_sse_from_anthropic_event(event, chunk_id, created, model):
+                if outgoing[0]:
+                    final_reason = outgoing[0]
+                    continue
+                yield outgoing[1]
+            if _anthropic_event_type(event) == "message_stop":
+                yielded_final = True
+                yield _chat_sse_chunk(chunk_id, created, model, {}, final_reason)
+                yield b"data: [DONE]\n\n"
+
+    if buffer:
+        async for outgoing in _chat_sse_from_anthropic_event(buffer, chunk_id, created, model):
+            if outgoing[0]:
+                final_reason = outgoing[0]
+            else:
+                yield outgoing[1]
+    if not yielded_final:
+        yield _chat_sse_chunk(chunk_id, created, model, {}, final_reason)
+        yield b"data: [DONE]\n\n"
+
+
+async def _anthropic_stream_to_response_sse(chunks: Any, model: str):
+    response_id = f"resp_{int(time.time() * 1000)}"
+    item_id = f"msg_{int(time.time() * 1000)}"
+    created = int(time.time())
+    text_started = False
+    final_response = {
+        "id": response_id,
+        "object": "response",
+        "created_at": created,
+        "status": "completed",
+        "model": model,
+        "output": [],
+    }
+    yield _response_sse_event(
+        "response.created",
+        {"type": "response.created", "response": {**final_response, "status": "in_progress"}},
+    )
+
+    buffer = ""
+    async for chunk in chunks:
+        buffer += chunk.decode("utf-8", "replace")
+        while "\n\n" in buffer:
+            event, buffer = buffer.split("\n\n", 1)
+            payload = _anthropic_event_payload(event)
+            if not payload:
+                continue
+            event_type = str(payload.get("type") or "")
+            if event_type == "content_block_delta":
+                delta = payload.get("delta")
+                if not isinstance(delta, dict) or not isinstance(delta.get("text"), str) or not delta["text"]:
+                    continue
+                if not text_started:
+                    text_started = True
+                    yield _response_sse_event(
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {"id": item_id, "type": "message", "role": "assistant", "status": "in_progress", "content": []},
+                        },
+                    )
+                    yield _response_sse_event(
+                        "response.content_part.added",
+                        {
+                            "type": "response.content_part.added",
+                            "item_id": item_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": {"type": "output_text", "text": "", "annotations": []},
+                        },
+                    )
+                yield _response_sse_event(
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": item_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": delta["text"],
+                    },
+                )
+            elif event_type == "message_stop":
+                yield _response_sse_event("response.completed", {"type": "response.completed", "response": final_response})
+                yield b"data: [DONE]\n\n"
+                return
+
+    yield _response_sse_event("response.completed", {"type": "response.completed", "response": final_response})
+    yield b"data: [DONE]\n\n"
+
+
+def _response_sse_event(event: str, payload: dict[str, Any]) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+async def _chat_sse_from_anthropic_event(event: str, chunk_id: str, created: int, model: str):
+    payload = _anthropic_event_payload(event)
+    if not payload:
+        return
+    event_type = str(payload.get("type") or "")
+    if event_type == "content_block_start":
+        block = payload.get("content_block")
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            index = int(payload.get("index") or 0)
+            delta = {
+                "tool_calls": [
+                    {
+                        "index": index,
+                        "id": str(block.get("id") or f"tool_{index}"),
+                        "type": "function",
+                        "function": {"name": str(block.get("name") or ""), "arguments": ""},
+                    }
+                ]
+            }
+            yield None, _chat_sse_chunk(chunk_id, created, model, delta, None)
+        return
+    if event_type == "content_block_delta":
+        delta = payload.get("delta")
+        if not isinstance(delta, dict):
+            return
+        if isinstance(delta.get("text"), str) and delta["text"]:
+            yield None, _chat_sse_chunk(chunk_id, created, model, {"content": delta["text"]}, None)
+            return
+        if isinstance(delta.get("partial_json"), str):
+            index = int(payload.get("index") or 0)
+            yield None, _chat_sse_chunk(
+                chunk_id,
+                created,
+                model,
+                {"tool_calls": [{"index": index, "function": {"arguments": delta["partial_json"]}}]},
+                None,
+            )
+        return
+    if event_type == "message_delta":
+        delta = payload.get("delta")
+        if isinstance(delta, dict):
+            reason = str(delta.get("stop_reason") or "")
+            if reason == "tool_use":
+                yield "tool_calls", b""
+            elif reason == "max_tokens":
+                yield "length", b""
+            elif reason:
+                yield "stop", b""
+
+
+def _anthropic_event_type(event: str) -> str:
+    payload = _anthropic_event_payload(event)
+    return str(payload.get("type") or "") if payload else ""
+
+
+def _anthropic_event_payload(event: str) -> dict[str, Any] | None:
+    data_lines = [
+        line.removeprefix("data:").strip()
+        for line in str(event or "").splitlines()
+        if line.startswith("data:")
+    ]
+    if not data_lines:
+        return None
+    raw = "\n".join(data_lines)
+    if not raw or raw == "[DONE]":
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _chat_sse_chunk(
+    chunk_id: str,
+    created: int,
+    model: str,
+    delta: dict[str, Any],
+    finish_reason: str | None,
+) -> bytes:
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+    return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+async def _latency_traced_stream(chunks: Any, trace: dict[str, Any], start: float):
+    first_chunk_logged = False
+    try:
+        async for chunk in chunks:
+            if not first_chunk_logged:
+                trace["first_chunk_ms"] = _elapsed_ms(start)
+                first_chunk_logged = True
+            yield chunk
+    finally:
+        trace["total_ms"] = _elapsed_ms(start)
+        _log_latency_trace(trace)
+
+
+def _log_latency_trace(trace: dict[str, Any]) -> None:
+    if not LATENCY_LOGGER.isEnabledFor(logging.INFO):
+        return
+    safe_trace = {
+        key: trace.get(key)
+        for key in ("path", "stream", "context_trimmed", "prepare_ms", "policy_ms", "first_chunk_ms", "total_ms")
+        if key in trace
+    }
+    LATENCY_LOGGER.info("gateway_latency %s", json.dumps(safe_trace, sort_keys=True))
 
 
 def _prepare_payload(
@@ -1946,39 +2276,55 @@ def _prepare_payload(
 
 
 def _limit_payload_context(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
-    limit = settings.max_request_input_chars
-    if limit <= 0 or len(extract_prompt_text(payload)) <= limit:
+    hard_limit = settings.max_request_input_chars
+    if hard_limit <= 0:
         return payload
-
+    context_limit = min(hard_limit, FAST_CONTEXT_MAX_CHARS)
+    max_messages = TOOL_CONTEXT_MAX_MESSAGES if payload_has_tool_contract(payload) else FAST_CONTEXT_MAX_MESSAGES
     messages = payload.get("messages")
     if not isinstance(messages, list) or not messages:
+        return payload
+    if len(messages) <= max_messages and len(extract_prompt_text(payload)) <= context_limit:
         return payload
 
     limited = dict(payload)
     kept: list[Any] = []
-    for message in reversed(messages):
+    for message in reversed(messages[-max_messages:]):
         if not isinstance(message, dict):
             continue
         candidate = [message, *kept]
         candidate_payload = {**limited, "messages": candidate}
-        if len(extract_prompt_text(candidate_payload)) <= limit:
+        if len(extract_prompt_text(candidate_payload)) <= context_limit:
             kept = candidate
             continue
         if not kept:
-            truncated = _truncate_message_to_context(message, limit)
+            truncated = _truncate_message_to_context(message, context_limit)
             if truncated is not None:
                 kept = [truncated]
         break
 
     if kept:
-        while kept and (
-            not isinstance(kept[0], dict)
-            or str(kept[0].get("role") or "").lower() != "user"
-        ):
+        while kept and _message_cannot_start_context(kept[0]):
             kept.pop(0)
-        limited["messages"] = kept
-        limited["__gateway_context_trimmed"] = True
+        if kept:
+            limited["messages"] = kept
+            limited["__gateway_context_trimmed"] = True
     return limited
+
+
+def _message_cannot_start_context(message: Any) -> bool:
+    if not isinstance(message, dict):
+        return True
+    if str(message.get("role") or "").lower() != "user":
+        return True
+    return _message_has_tool_result(message)
+
+
+def _message_has_tool_result(message: dict[str, Any]) -> bool:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and block.get("type") == "tool_result" for block in content)
 
 
 def _truncate_message_to_context(message: dict[str, Any], limit: int) -> dict[str, Any] | None:
@@ -2218,7 +2564,7 @@ def _command_model(value: str, settings: Settings) -> str:
     return ""
 
 
-def _with_customer_power_tier(
+async def _with_customer_power_tier(
     payload: dict[str, Any],
     app: FastAPI,
     auth: AuthContext,
@@ -2245,7 +2591,7 @@ def _with_customer_power_tier(
     if _is_explicit_low_power_model(requested_lower, settings):
         return payload
 
-    snapshot = _customer_usage_snapshot(app, auth)
+    snapshot = await _customer_usage_snapshot(app, auth)
     remaining = snapshot["today"].get("remaining_tokens")
     limit = auth.customer.daily_token_limit
     ratio = 1.0
@@ -2272,7 +2618,7 @@ def _with_customer_power_tier(
     return outgoing
 
 
-def _with_customer_latency_policy(
+async def _with_customer_latency_policy(
     payload: dict[str, Any],
     app: FastAPI,
     auth: AuthContext,
@@ -2280,7 +2626,7 @@ def _with_customer_latency_policy(
     if not auth.customer:
         return payload
 
-    snapshot = _customer_usage_snapshot(app, auth)
+    snapshot = await _customer_usage_snapshot(app, auth)
     today = snapshot.get("today") if isinstance(snapshot, dict) else {}
     try:
         requests_today = int(today.get("requests") or 0) if isinstance(today, dict) else 0
@@ -3136,10 +3482,10 @@ async def _public_model_stream_with_budget_settlement(
         async for chunk in _public_model_stream(chunks, public_model, on_usage=remember):
             yield chunk
     except Exception:
-        _rollback_customer_budget(app, reservation)
+        await _rollback_customer_budget(app, reservation)
         raise
     if usage:
-        _settle_customer_budget(app, reservation, payload, decision, {"usage": usage})
+        await _settle_customer_budget(app, reservation, payload, decision, {"usage": usage})
 
 
 def _stream_event_usage(event: str) -> dict[str, int] | None:
@@ -3354,7 +3700,7 @@ def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:
     return max(1, min(requested, settings.max_request_output_tokens))
 
 
-def _reserve_customer_budget(
+async def _reserve_customer_budget(
     app: FastAPI,
     auth: AuthContext,
     payload: dict[str, Any],
@@ -3362,23 +3708,28 @@ def _reserve_customer_budget(
 ) -> CustomerReservation | AccountUsageReservation | None:
     if not auth.customer:
         return None
-    account_reservation = app.state.account_store.reserve_usage_for_token(auth.token, payload, decision)
+    account_reservation = await asyncio.to_thread(
+        app.state.account_store.reserve_usage_for_token,
+        auth.token,
+        payload,
+        decision,
+    )
     if account_reservation:
         return account_reservation
-    return app.state.customer_usage.reserve(auth.customer, payload, decision)
+    return await asyncio.to_thread(app.state.customer_usage.reserve, auth.customer, payload, decision)
 
 
-def _rollback_customer_budget(
+async def _rollback_customer_budget(
     app: FastAPI,
     reservation: CustomerReservation | AccountUsageReservation | None,
 ) -> None:
     if isinstance(reservation, AccountUsageReservation):
-        app.state.account_store.rollback_usage(reservation)
+        await asyncio.to_thread(app.state.account_store.rollback_usage, reservation)
         return
-    app.state.customer_usage.rollback(reservation)
+    await asyncio.to_thread(app.state.customer_usage.rollback, reservation)
 
 
-def _settle_customer_budget(
+async def _settle_customer_budget(
     app: FastAPI,
     reservation: CustomerReservation | AccountUsageReservation | None,
     payload: dict[str, Any],
@@ -3391,7 +3742,7 @@ def _settle_customer_budget(
     if actual_tokens is None:
         return
     if isinstance(reservation, AccountUsageReservation):
-        app.state.account_store.settle_usage(reservation, actual_tokens=actual_tokens)
+        await asyncio.to_thread(app.state.account_store.settle_usage, reservation, actual_tokens=actual_tokens)
         return
     actual_cost = estimate_request_cost_usd(
         payload,
@@ -3399,18 +3750,19 @@ def _settle_customer_budget(
         app.state.settings,
         estimated_tokens=actual_tokens,
     )
-    app.state.customer_usage.settle(
+    await asyncio.to_thread(
+        app.state.customer_usage.settle,
         reservation,
         actual_tokens=actual_tokens,
         actual_cost_usd=actual_cost,
     )
 
 
-def _customer_usage_snapshot(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
-    account_snapshot = app.state.account_store.usage_snapshot_for_token(auth.token)
+async def _customer_usage_snapshot(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
+    account_snapshot = await asyncio.to_thread(app.state.account_store.usage_snapshot_for_token, auth.token)
     if account_snapshot:
         return account_snapshot
-    return app.state.customer_usage.snapshot_for(auth.customer)
+    return await asyncio.to_thread(app.state.customer_usage.snapshot_for, auth.customer)
 
 
 def _public_usage_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:

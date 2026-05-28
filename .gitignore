@@ -1,4 +1,5 @@
 .env
+.env copy
 .venv/
 .pytest_cache/
 .ruff_cache/

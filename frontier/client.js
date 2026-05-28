@@ -716,7 +716,7 @@ GATEWAY_KEYS = {{
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
     "CLAUDE_CODE_SUBAGENT_MODEL": SELECTED_MODEL,
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
 }}
 
 def wants_gateway():
@@ -800,7 +800,7 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
         "CLAUDE_CODE_SUBAGENT_MODEL": selected_model,
         "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
     })
     settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
     print(f"Extensao configurada em {settings_path}")
@@ -827,7 +827,7 @@ function terminalCommand(config) {
       ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-pro",
       CLAUDE_CODE_SUBAGENT_MODEL: config.model,
       CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
-      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "16000",
+      CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096",
     },
   };
   return `claude --settings ${shellQuote(JSON.stringify(settings))} --setting-sources local`;
@@ -856,7 +856,7 @@ env.update({
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
     "CLAUDE_CODE_SUBAGENT_MODEL": ${JSON.stringify(config.model)},
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
-    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "16000",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
 })
 
 settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
@@ -2203,6 +2203,31 @@ function optimisticActiveConversation() {
   };
 }
 
+function gatewayContextMessages() {
+  const maxMessages = 16;
+  const maxChars = 32000;
+  const messages = activeConversation
+    .filter((item) => item.role === "user" || item.role === "assistant")
+    .slice(-maxMessages)
+    .map((item) => ({ role: item.role, content: repairDuplicatedText(item.content || "") }));
+
+  let total = messages.reduce((sum, item) => sum + String(item.content || "").length, 0);
+  for (let index = 0; index < messages.length && total > maxChars; index += 1) {
+    const content = String(messages[index].content || "");
+    const overflow = total - maxChars;
+    const keep = Math.max(400, content.length - overflow);
+    if (content.length > keep) {
+      messages[index].content = content.slice(-keep);
+      total -= content.length - keep;
+    }
+  }
+  while (messages.length > 1 && total > maxChars) {
+    const removed = messages.shift();
+    total -= String(removed?.content || "").length;
+  }
+  return messages;
+}
+
 async function saveConversationSnapshot(
   snapshot = activeConversation,
   conversationId = activeConversationId,
@@ -2541,9 +2566,7 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
 
   const visiblePrompt = attachments.length ? `${prompt}\n\nAnexos: ${attachmentLabel(attachments)}` : prompt;
   addMessage("user", visiblePrompt);
-  const outgoingMessages = activeConversation
-    .filter((item) => item.role === "user" || item.role === "assistant")
-    .map((item) => ({ role: item.role, content: item.content }));
+  const outgoingMessages = gatewayContextMessages();
   outgoingMessages[outgoingMessages.length - 1].content = buildMessageContent(
     promptWithActiveProjectContext(prompt),
     attachments,
