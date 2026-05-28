@@ -474,6 +474,51 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(edit_request["tool_choice"], "required")
         self.assertIn("Execute the user's project request now", edit_request["messages"][-1]["content"])
 
+        unaccented_create_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "faca um site em uma nova pasta"}],
+                "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertEqual(unaccented_create_request["tool_choice"], "required")
+        self.assertIn("do not answer with instructions", unaccented_create_request["messages"][-1]["content"])
+
+        terminal_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "execute isso no terminal"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertEqual(terminal_request["tool_choice"], "required")
+
+        implicit_command_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "deixa esse projeto funcionando"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertEqual(implicit_command_request["tool_choice"], "required")
+
+        question_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "qual seu nome?"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertNotIn("tool_choice", question_request)
+
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -489,7 +534,7 @@ class GatewayTestCase(unittest.TestCase):
                         "role": "user",
                         "content": (
                             "<system-reminder>arquivo projeto read test</system-reminder>\n\n"
-                            "responda apenas ok\n"
+                            "qual seu nome?\n"
                             "from __future__ import annotations\n"
                             "print('historico com projeto e arquivos')"
                         ),
@@ -565,7 +610,7 @@ class GatewayTestCase(unittest.TestCase):
 
         estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
         self.assertLess(outgoing["max_tokens"], 16000)
-        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 32768 - 512)
         self.assertEqual(outgoing["tool_choice"], "auto")
 
     def test_vps_openai_chat_trims_large_history_to_fit_input_budget(self) -> None:
@@ -592,7 +637,7 @@ class GatewayTestCase(unittest.TestCase):
         joined = "\n".join(message["content"] for message in outgoing["messages"])
         estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
         self.assertLessEqual(estimated_input, 18000)
-        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 32768 - 512)
         self.assertIn("como vc ta", joined)
         self.assertNotIn("historico antigo historico antigo", joined)
         self.assertIn("previous content omitted", joined)
@@ -3385,6 +3430,35 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
+        self.assertEqual(payload["max_tokens"], 16000)
+
+    def test_claude_code_tool_payload_is_detected_without_beta_header(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 256,
+                "tools": [
+                    {
+                        "name": "Write",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["file_path", "content"],
+                        },
+                    }
+                ],
+                "messages": [{"role": "user", "content": "Crie uma nova pasta e faca um site"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertEqual(payload["__gateway_client"], "claude-code")
         self.assertEqual(payload["max_tokens"], 16000)
 
     def test_public_identity_prompt_includes_current_date_context(self) -> None:

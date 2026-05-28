@@ -6,6 +6,7 @@ import io
 import base64
 import json
 import os
+import re
 import statistics
 import time
 from datetime import datetime
@@ -366,7 +367,7 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
-        if _is_claude_code_request(request):
+        if _is_claude_code_request(request, payload):
             payload = {**payload, "__gateway_client": "claude-code"}
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
@@ -1705,6 +1706,8 @@ async def _complete_gateway_message(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
     auth = require_gateway_auth(request, app.state.settings)
+    if _is_claude_code_request(request, payload):
+        payload = {**payload, "__gateway_client": "claude-code"}
     payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
     payload = _with_customer_power_tier(payload, app, auth)
     decision = app.state.planner.plan(payload)
@@ -2761,9 +2764,45 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
     return outgoing
 
 
-def _is_claude_code_request(request: Request) -> bool:
+CLAUDE_CODE_TOOL_NAMES = {
+    "bash",
+    "edit",
+    "exitplanmode",
+    "glob",
+    "grep",
+    "ls",
+    "multiedit",
+    "notebookedit",
+    "read",
+    "task",
+    "todowrite",
+    "webfetch",
+    "write",
+}
+
+
+def _is_claude_code_request(request: Request, payload: dict[str, Any] | None = None) -> bool:
     beta_header = request.headers.get("anthropic-beta", "")
-    return "claude-code" in beta_header.lower()
+    user_agent = request.headers.get("user-agent", "")
+    if "claude-code" in beta_header.lower() or "claude-code" in user_agent.lower():
+        return True
+    return _looks_like_claude_code_tool_payload(payload)
+
+
+def _looks_like_claude_code_tool_payload(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for tool in payload.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        name = _normalize_tool_name(str(tool.get("name") or ""))
+        if name in CLAUDE_CODE_TOOL_NAMES:
+            return True
+    return False
+
+
+def _normalize_tool_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 def _selected_model_identity_answer(

@@ -16,7 +16,7 @@ from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
 
-OPENAI_CHAT_CONTEXT_TOKENS = 24_576
+OPENAI_CHAT_CONTEXT_TOKENS = 32_768
 OPENAI_CHAT_CONTEXT_MARGIN_TOKENS = 512
 OPENAI_CHAT_INPUT_BUDGET_TOKENS = 18_000
 OPENAI_CHAT_MIN_TRIMMED_CHARS = 1_200
@@ -30,7 +30,9 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "the user specifically asks about them, then read likely manifest or entry files before answering. Never "
     "end with permission questions like 'posso comecar?' or 'deseja que eu leia?'. If a tool fails or the "
     "workspace is incomplete, explain what you can infer and what failed, without asking for permission to "
-    "continue. Use enough tokens to finish the requested task."
+    "continue. For code creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide "
+    "file contents in the chat as a substitute for editing files. Tool-call JSON must be complete and include "
+    "all required fields such as file_path and content. Use enough tokens to finish the requested task."
 )
 CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
 CLAUDE_CODE_SESSION_RE = re.compile(r"(?is)<session>.*?</session>")
@@ -255,6 +257,8 @@ class VPSAnthropicClient:
             return False
         if self._payload_has_tool_result(payload):
             return False
+        if not payload.get("tools"):
+            return False
         text = self._current_user_request_text(payload).lower()
         if not text:
             return False
@@ -272,36 +276,83 @@ class VPSAnthropicClient:
             "aplicar patch",
             "build",
             "commit",
+            "comando",
             "corrija",
             "corrigir",
+            "create",
             "crie",
+            "criar",
             "debug",
             "edite",
             "editar",
+            "execute",
+            "executar",
             "file",
             "files",
             "fix",
+            "faca",
             "implemente",
             "implement",
             "listar",
             "list",
             "ler",
             "leia",
+            "make",
+            "mexa",
+            "mexer",
             "modifique",
             "read",
             "rode",
             "rodar",
+            "salve",
+            "save",
             "test",
             "teste",
             "tests",
+            "terminal",
             "verificar",
+            "write",
             "inspect",
             "começar",
             "comecar",
             "fassa",
             "faça",
         )
-        return any(term in text for term in action_terms)
+        if any(term in text for term in action_terms):
+            return True
+        return not self._looks_like_question(text)
+
+    def _looks_like_question(self, text: str) -> bool:
+        compact = " ".join(str(text or "").strip().lower().split())
+        if not compact:
+            return False
+        if "?" in compact:
+            return True
+        question_prefixes = (
+            "como ",
+            "how ",
+            "o que ",
+            "what ",
+            "onde ",
+            "where ",
+            "por que ",
+            "porque ",
+            "why ",
+            "qual ",
+            "quais ",
+            "which ",
+            "quem ",
+            "who ",
+            "quando ",
+            "when ",
+            "quanto ",
+            "quantos ",
+            "quantas ",
+            "can you explain ",
+            "voce pode explicar ",
+            "você pode explicar ",
+        )
+        return compact.startswith(question_prefixes)
 
     def _payload_has_tool_result(self, payload: dict[str, Any]) -> bool:
         for message in payload.get("messages") or []:
@@ -396,7 +447,9 @@ class VPSAnthropicClient:
             "answering. Never ask permission to begin or continue; never end with 'Deseja que eu continue?', "
             "'posso comecar?', or similar. Ignore .venv, .git, node_modules, __pycache__, and site-packages "
             "unless explicitly requested. For project analysis, inspect root files and likely manifests/source "
-            "files, then give the answer.</system-reminder>"
+            "files, then give the answer. If the user asks to create, edit, modify, run, or test anything, "
+            "call the appropriate tool such as Bash, Write, Edit, or MultiEdit; do not answer with instructions "
+            "for the user to do it manually.</system-reminder>"
         )
         for message in reversed(copied):
             if message.get("role") == "user":
