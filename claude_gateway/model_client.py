@@ -39,7 +39,7 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "not specified, choose a simple sensible filename in the current workspace and call Write. For code "
     "creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide file contents in the "
     "chat as a substitute for editing files. Tool-call JSON must be complete and include all required fields "
-    "such as file_path and content. Never write literal text like 'Tool use: {...}' in the chat; emit a real "
+    "such as file_path and content. Never write a plain-text tool call in the chat; emit a real "
     "tool call through the tool API. Use enough tokens to finish the requested task."
 )
 LOCAL_TOOL_AGENT_PROMPT = (
@@ -49,7 +49,7 @@ LOCAL_TOOL_AGENT_PROMPT = (
     "exact path is unclear. Use read_file/list_files/apply_patch/write_file/run_tests when those are the tools "
     "available. If the user asks to create a new file and no filename is given, choose a simple filename and "
     "call write_file. Answer in the user's language; if the user writes Portuguese, use Brazilian Portuguese. "
-    "Do not repeat the user's request as internal questions. Never write literal text like 'Tool use: {...}' "
+    "Do not repeat the user's request as internal questions. Never write a plain-text tool call "
     "in the chat; emit a real tool call through the tool API. Do not answer with only a summary when an edit "
     "was requested."
 )
@@ -518,15 +518,93 @@ class VPSAnthropicClient:
         for message in payload.get("messages") or []:
             if not isinstance(message, dict):
                 continue
-            role = str(message.get("role") or "user")
-            if role not in {"user", "assistant", "system"}:
-                role = "user"
-            messages.append({"role": role, "content": self._content_to_text(message.get("content"))})
+            messages.extend(self._message_to_openai_chat_messages(message))
 
         if self._is_claude_code_action_request(payload) or self._is_tool_action_request(payload, aggressive=False):
-            messages = self._messages_with_claude_code_agent_nudge(messages)
+            if self._payload_has_tool_result(payload):
+                messages = self._messages_with_post_tool_nudge(messages)
+            else:
+                messages = self._messages_with_claude_code_agent_nudge(messages)
 
         return messages or [{"role": "user", "content": ""}]
+
+    def _message_to_openai_chat_messages(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+        role = str(message.get("role") or "user")
+        if role not in {"user", "assistant", "system", "tool"}:
+            role = "user"
+
+        if role == "tool":
+            return [
+                {
+                    "role": "tool",
+                    "tool_call_id": str(message.get("tool_call_id") or ""),
+                    "content": self._content_to_text(message.get("content")),
+                }
+            ]
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            return [{"role": role, "content": self._content_to_text(content)}]
+
+        if role == "assistant":
+            text_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            for index, block in enumerate(content):
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get("type") or "")
+                if block_type == "tool_use":
+                    name = str(block.get("name") or "")
+                    tool_calls.append(
+                        {
+                            "id": str(block.get("id") or f"toolu_{index}"),
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(
+                                    _normalize_claude_code_tool_input(
+                                        name,
+                                        block.get("input") if isinstance(block.get("input"), dict) else {},
+                                    )
+                                ),
+                            },
+                        }
+                    )
+                else:
+                    text = self._content_to_text(block)
+                    if text:
+                        text_parts.append(text)
+            outgoing: dict[str, Any] = {
+                "role": "assistant",
+                "content": "\n".join(text_parts) if text_parts else None,
+            }
+            if tool_calls:
+                outgoing["tool_calls"] = tool_calls
+            return [outgoing]
+
+        messages: list[dict[str, Any]] = []
+        text_parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_result":
+                if text_parts:
+                    messages.append({"role": role, "content": "\n".join(text_parts)})
+                    text_parts = []
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(block.get("tool_use_id") or block.get("id") or ""),
+                        "content": self._content_to_text(block.get("content")),
+                    }
+                )
+            else:
+                text = self._content_to_text(block)
+                if text:
+                    text_parts.append(text)
+        if text_parts:
+            messages.append({"role": role, "content": "\n".join(text_parts)})
+        return messages
 
     def _messages_with_claude_code_agent_nudge(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         copied = deepcopy(messages)
@@ -543,7 +621,7 @@ class VPSAnthropicClient:
             "found and no exact path was provided, list or search the workspace instead of asking for the path. "
             "If the user asks for a new .txt/.html/.js/.py without a filename, choose a simple filename and "
             "write it. If a Read call failed because line_offset, line_count, offset, or limit was rejected, "
-            "retry Read immediately with only the file path argument. Never print literal 'Tool use: {...}' "
+            "retry Read immediately with only the file path argument. Never print a plain-text tool call "
             "text; make an actual tool call.</system-reminder>"
         )
         for message in reversed(copied):
@@ -551,6 +629,18 @@ class VPSAnthropicClient:
                 content = str(message.get("content") or "")
                 message["content"] = f"{content}\n\n{reminder}" if content else reminder
                 return copied
+        copied.append({"role": "user", "content": reminder})
+        return copied
+
+    def _messages_with_post_tool_nudge(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        copied = deepcopy(messages)
+        reminder = (
+            "<system-reminder>Use the latest tool result exactly once. If it already contains enough "
+            "information to answer or finish the edit, give the final answer now in the user's language. "
+            "Only call another tool when a concrete missing file, command, or edit is required. Do not repeat "
+            "the same tool call, do not print a plain-text tool call, and do not ask permission to "
+            "continue.</system-reminder>"
+        )
         copied.append({"role": "user", "content": reminder})
         return copied
 
@@ -573,7 +663,7 @@ class VPSAnthropicClient:
                 parts.append(f"Tool result: {self._content_to_text(block.get('content'))}")
             elif block_type == "tool_use":
                 parts.append(
-                    "Tool use: "
+                    "Previous tool call: "
                     + json.dumps(
                         {"name": block.get("name"), "input": block.get("input")},
                         ensure_ascii=True,

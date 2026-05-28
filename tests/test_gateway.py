@@ -623,7 +623,9 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
         self.assertNotIn("tool_choice", after_tool)
-        self.assertIn("retry Read immediately", after_tool["messages"][-1]["content"])
+        self.assertEqual(after_tool["messages"][-2], {"role": "tool", "tool_call_id": "toolu_1", "content": "README.md"})
+        self.assertIn("Use the latest tool result exactly once", after_tool["messages"][-1]["content"])
+        self.assertIn("Do not repeat the same tool call", after_tool["messages"][-1]["content"])
 
         edit_request = client._openai_chat_payload(
             {
@@ -1020,6 +1022,68 @@ class GatewayTestCase(unittest.TestCase):
                     "input": {"file_path": "docs/visual-direction.md"},
                 }
             ],
+        )
+
+    def test_vps_openai_chat_preserves_tool_history_as_native_openai_messages(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {"role": "user", "content": "Leia o README."},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_read",
+                                "name": "Read",
+                                "input": {"file_path": "README.md"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_read",
+                                "content": "# Projeto\n\nConteudo.",
+                            }
+                        ],
+                    },
+                ],
+                "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+
+        serialized = json.dumps(outgoing["messages"])
+        self.assertNotIn("Tool use:", serialized)
+        self.assertIn(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "toolu_read",
+                        "type": "function",
+                        "function": {
+                            "name": "Read",
+                            "arguments": '{"file_path": "README.md"}',
+                        },
+                    }
+                ],
+            },
+            outgoing["messages"],
+        )
+        self.assertIn(
+            {"role": "tool", "tool_call_id": "toolu_read", "content": "# Projeto\n\nConteudo."},
+            outgoing["messages"],
         )
 
     def test_vps_openai_chat_normalizes_claude_code_tool_aliases(self) -> None:
