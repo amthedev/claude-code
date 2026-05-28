@@ -1426,14 +1426,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(app.state.model_client.fallback_uses, 1)
         self.assertEqual(len(app.state.model_client.fallback.calls), 1)
 
-    def test_models_requires_auth(self) -> None:
+    def test_models_allows_public_discovery_without_generation_auth(self) -> None:
         response = self.client.get("/v1/models")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["object"], "list")
+
+        invalid_response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        self.assertEqual(invalid_response.status_code, 200)
 
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
         self.assertEqual(model_ids, {"claude-code-pro"})
+        self.assertEqual({model["object"] for model in response.json()["data"]}, {"model"})
+        self.assertNotIn("cost_target", response.json()["data"][0])
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
         self.assertIn("default-src 'self'", response.headers["content-security-policy"])
         self.assertNotIn("localhost", response.headers["content-security-policy"])
@@ -2575,7 +2584,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/models",
             headers={"X-Forwarded-For": "177.200.246.8"},
         )
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
 
     def test_auto_defaults_frontend_to_fast_route(self) -> None:
         response = self.client.post(

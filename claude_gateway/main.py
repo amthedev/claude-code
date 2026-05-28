@@ -280,28 +280,26 @@ def create_app(
 
     @app.get("/v1/models")
     async def list_models(request: Request) -> dict[str, Any]:
-        auth = require_gateway_auth(request, app.state.settings)
-        cost_policy = CostPolicy(
-            max_ratio_vs_claude=app.state.settings.max_cost_ratio_vs_claude,
-        )
+        auth: AuthContext | None = None
+        try:
+            auth = require_gateway_auth(request, app.state.settings)
+        except HTTPException as exc:
+            if exc.status_code not in {401, 403}:
+                raise
+
         profiles = model_profiles(app.state.settings)
-        if auth.customer and auth.customer.allowed_model != "*":
+        if auth and auth.customer and auth.customer.allowed_model != "*":
             filtered = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
             profiles = filtered or profiles
         return {
+            "object": "list",
             "data": [
                 {
                     "id": profile.id,
+                    "object": "model",
                     "type": "model",
                     "display_name": profile.display_name,
                     "description": profile.description,
-                    "cost_target": cost_policy.estimate(
-                        app.state.planner._openrouter_model_for_mode(
-                            profile.mode,
-                            "simple_code",
-                            "medium",
-                        )
-                    ).to_dict(),
                 }
                 for profile in profiles
             ]
