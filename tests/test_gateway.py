@@ -777,6 +777,49 @@ class GatewayTestCase(unittest.TestCase):
             anthropic = client._anthropic_from_openai_chat(response)
             client._ensure_required_tool_call(payload, anthropic)
 
+    def test_vps_openai_chat_normalizes_claude_code_tool_aliases(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_test",
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {
+                                    "id": "call_write",
+                                    "function": {
+                                        "name": "Write",
+                                        "arguments": json.dumps(
+                                            {"path": "site-neymar/index.html", "content": "<html></html>"}
+                                        ),
+                                    },
+                                },
+                                {
+                                    "id": "call_bash",
+                                    "function": {
+                                        "name": "Bash",
+                                        "arguments": json.dumps({"cmd": "mkdir -p site-neymar"}),
+                                    },
+                                },
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            response["content"][0]["input"],
+            {"file_path": "site-neymar/index.html", "content": "<html></html>"},
+        )
+        self.assertEqual(response["content"][1]["input"], {"command": "mkdir -p site-neymar"})
+
     def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen-14b"
@@ -850,9 +893,35 @@ class GatewayTestCase(unittest.TestCase):
         body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
 
         self.assertIn(b'"content_block": {"type": "tool_use", "id": "call_abc", "name": "read_file", "input": {}}', body)
-        self.assertIn(b'"delta": {"type": "input_json_delta", "partial_json": "{\\\\\\"path\\\\\\":"}', body)
-        self.assertIn(b'"delta": {"type": "input_json_delta", "partial_json": "\\\\\\"README.md\\\\\\"}"}', body)
+        self.assertIn(b'"delta": {"type": "input_json_delta", "partial_json": "{\\"path\\": \\"README.md\\"}"}', body)
         self.assertIn(b'"stop_reason": "tool_use"', body)
+
+    def test_vps_openai_chat_stream_normalizes_claude_code_tool_aliases(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_write",'
+                b'"type":"function","function":{"name":"Write","arguments":"{\\\\\\"path\\\\\\":"}}]}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+                b'"function":{"arguments":"\\\\\\"site-neymar/index.html\\\\\\",\\\\\\"content\\\\\\":\\\\\\"<html></html>\\\\\\"}"}}]},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
+
+        self.assertIn(b'"content_block": {"type": "tool_use", "id": "call_write", "name": "Write", "input": {}}', body)
+        self.assertIn(
+            b'"partial_json": "{\\"content\\": \\"<html></html>\\", \\"file_path\\": \\"site-neymar/index.html\\"}"',
+            body,
+        )
+        self.assertNotIn(b'\\"path\\"', body)
 
     def test_vps_openai_chat_stream_does_not_emit_tool_use_without_tool_block(self) -> None:
         settings = make_settings()

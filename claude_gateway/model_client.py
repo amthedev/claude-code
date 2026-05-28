@@ -732,7 +732,10 @@ class VPSAnthropicClient:
                         "type": "tool_use",
                         "id": str(tool_call.get("id") or ""),
                         "name": str(function.get("name") or ""),
-                        "input": self._json_object(function.get("arguments")),
+                        "input": _normalize_claude_code_tool_input(
+                            str(function.get("name") or ""),
+                            self._json_object(function.get("arguments")),
+                        ),
                     }
                 )
         if not content:
@@ -754,15 +757,7 @@ class VPSAnthropicClient:
         }
 
     def _json_object(self, value: Any) -> dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, str) and value.strip():
-            try:
-                parsed = json.loads(value)
-            except json.JSONDecodeError:
-                return {}
-            return parsed if isinstance(parsed, dict) else {}
-        return {}
+        return _json_object_from_string(value)
 
     async def _stream_openai_chat(self, payload: dict[str, Any], model: str) -> AsyncIterator[bytes]:
         target = self._target_for_model(model)
@@ -1089,28 +1084,29 @@ class _OpenAIToolCallStreamState:
                 call["started"] = True
                 self.started_order.append(index)
 
-            if call["started"]:
-                arguments = str(call["arguments"])
-                emitted = int(call["emitted_arguments"])
-                if len(arguments) > emitted:
-                    delta = arguments[emitted:]
-                    events.append(
-                        _anthropic_sse(
-                            "content_block_delta",
-                            {
-                                "type": "content_block_delta",
-                                "index": self._block_index(index),
-                                "delta": {"type": "input_json_delta", "partial_json": delta},
-                            },
-                        )
-                    )
-                    call["emitted_arguments"] = len(arguments)
-
         return events
 
     def finish(self) -> list[bytes]:
         events: list[bytes] = []
         for index in self.started_order:
+            call = self.calls.get(index) or {}
+            normalized_arguments = _normalize_claude_code_tool_input(
+                str(call.get("name") or ""),
+                _json_object_from_string(call.get("arguments")),
+            )
+            events.append(
+                _anthropic_sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": self._block_index(index),
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(normalized_arguments),
+                        },
+                    },
+                )
+            )
             events.append(
                 _anthropic_sse(
                     "content_block_stop",
@@ -1143,6 +1139,54 @@ def _response_has_tool_use(response: dict[str, Any]) -> bool:
         isinstance(block, dict) and block.get("type") == "tool_use"
         for block in content
     )
+
+
+def _json_object_from_string(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    candidates = [value]
+    if '\\"' in value:
+        candidates.append(value.replace('\\"', '"'))
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _normalize_claude_code_tool_input(tool_name: str, value: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(value) if isinstance(value, dict) else {}
+    name = tool_name.strip().lower()
+
+    if name in {"read", "write", "edit", "multiedit"}:
+        if "file_path" not in normalized and "path" in normalized:
+            normalized["file_path"] = normalized["path"]
+        normalized.pop("path", None)
+
+    if name == "notebookedit":
+        if "notebook_path" not in normalized:
+            if "path" in normalized:
+                normalized["notebook_path"] = normalized["path"]
+            elif "file_path" in normalized:
+                normalized["notebook_path"] = normalized["file_path"]
+        normalized.pop("path", None)
+        normalized.pop("file_path", None)
+
+    if name == "bash":
+        if "command" not in normalized:
+            if "cmd" in normalized:
+                normalized["command"] = normalized["cmd"]
+            elif "script" in normalized:
+                normalized["command"] = normalized["script"]
+        normalized.pop("cmd", None)
+        normalized.pop("script", None)
+
+    return normalized
 
 
 def _anthropic_sse(event: str, payload: dict[str, Any]) -> bytes:
