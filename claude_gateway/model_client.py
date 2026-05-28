@@ -29,8 +29,10 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "ignore dependency/cache folders such as .venv, .git, node_modules, __pycache__, and site-packages unless "
     "the user specifically asks about them, then read likely manifest or entry files before answering. Never "
     "end with permission questions like 'posso comecar?' or 'deseja que eu leia?'. If a tool fails or the "
-    "workspace is incomplete, explain what you can infer and what failed, without asking for permission to "
-    "continue. For code creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide "
+    "workspace is incomplete, fix the tool arguments and retry when a reasonable retry exists, then explain "
+    "what you can infer and what failed without asking for permission to continue. If Read fails because "
+    "line_offset, line_count, offset, or limit is unsupported, immediately call Read again with only the "
+    "required file path argument. For code creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide "
     "file contents in the chat as a substitute for editing files. Tool-call JSON must be complete and include "
     "all required fields such as file_path and content. Use enough tokens to finish the requested task."
 )
@@ -235,7 +237,7 @@ class VPSAnthropicClient:
             outgoing["chat_template_kwargs"] = {"enable_thinking": False}
         if tools:
             outgoing["tools"] = tools
-            if self._is_claude_code_action_request(payload):
+            if self._should_force_claude_code_tool_choice(payload):
                 outgoing["tool_choice"] = "required"
             elif payload.get("tool_choice"):
                 outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
@@ -260,10 +262,10 @@ class VPSAnthropicClient:
     def _is_claude_code_action_request(self, payload: dict[str, Any]) -> bool:
         if not self._is_claude_code_client(payload):
             return False
-        if self._payload_has_tool_result(payload):
-            return False
         if not payload.get("tools"):
             return False
+        if self._payload_has_tool_result(payload):
+            return True
         text = self._current_user_request_text(payload).lower()
         if not text:
             return False
@@ -343,6 +345,9 @@ class VPSAnthropicClient:
         if self._looks_like_smalltalk(text):
             return False
         return True
+
+    def _should_force_claude_code_tool_choice(self, payload: dict[str, Any]) -> bool:
+        return self._is_claude_code_action_request(payload) and not self._payload_has_tool_result(payload)
 
     def _looks_like_question(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split())
@@ -499,7 +504,8 @@ class VPSAnthropicClient:
             "unless explicitly requested. For project analysis, inspect root files and likely manifests/source "
             "files, then give the answer. If the user asks to create, edit, modify, run, or test anything, "
             "call the appropriate tool such as Bash, Write, Edit, or MultiEdit; do not answer with instructions "
-            "for the user to do it manually.</system-reminder>"
+            "for the user to do it manually. If a Read call failed because line_offset, line_count, offset, "
+            "or limit was rejected, retry Read immediately with only the file path argument.</system-reminder>"
         )
         for message in reversed(copied):
             if message.get("role") == "user":
@@ -743,7 +749,7 @@ class VPSAnthropicClient:
         return response_payload
 
     def _ensure_required_tool_call(self, payload: dict[str, Any], response: dict[str, Any]) -> None:
-        if self._is_claude_code_action_request(payload) and not _response_has_tool_use(response):
+        if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
             raise OpenRouterError(
                 "VPS model ignored required Claude Code tool call.",
                 status_code=502,
@@ -832,7 +838,7 @@ class VPSAnthropicClient:
                     async for chunk in self._openai_sse_to_anthropic(
                         response.aiter_bytes(),
                         model=model,
-                        require_tool_call=self._is_claude_code_action_request(payload),
+                        require_tool_call=self._should_force_claude_code_tool_choice(payload),
                     ):
                         yield chunk
         except OpenRouterError:

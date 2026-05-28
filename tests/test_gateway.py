@@ -597,8 +597,10 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("immediately use the available tools", outgoing["messages"][0]["content"])
         self.assertIn("ignore dependency/cache folders", outgoing["messages"][0]["content"])
         self.assertIn("Never end with permission questions", outgoing["messages"][0]["content"])
+        self.assertIn("immediately call Read again", outgoing["messages"][0]["content"])
         self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
         self.assertIn("Never ask permission to begin or continue", outgoing["messages"][-1]["content"])
+        self.assertIn("retry Read immediately", outgoing["messages"][-1]["content"])
         self.assertEqual(outgoing["tool_choice"], "required")
         self.assertNotIn("stop", outgoing)
 
@@ -618,6 +620,7 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
         self.assertNotIn("tool_choice", after_tool)
+        self.assertIn("retry Read immediately", after_tool["messages"][-1]["content"])
 
         edit_request = client._openai_chat_payload(
             {
@@ -2588,7 +2591,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
+        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertNotIn("Internal Gemini coding guidance", str(self.app.state.openrouter.calls[-1][1]))
 

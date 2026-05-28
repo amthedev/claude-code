@@ -267,6 +267,7 @@ class RoutePlanner:
         task_text = extract_prompt_text(payload)
         task_type = self._task_type(task_text)
         complexity = self._complexity(task_text)
+        has_tool_contract = payload_has_tool_contract(payload)
 
         mode = self._mode_for_requested_model(requested_model, task_type, complexity)
         if requested_auto and reasoning_mode in {"auto", "normal"}:
@@ -277,6 +278,8 @@ class RoutePlanner:
             mode = "pro"
         elif requested_auto and reasoning_mode == "xstrong":
             mode = "ultra"
+        if has_tool_contract and reasoning_mode == "fast":
+            mode = "pro"
         public_model = self._public_model_for_mode(mode)
         selected_model = self._openrouter_model_for_mode(mode, task_type, complexity)
         external_model_requested = "/" in requested_model and requested_model not in self._public_ids()
@@ -294,7 +297,6 @@ class RoutePlanner:
             f"{mode}-pipeline",
             self._pipeline_models(mode, agents, selected_model),
         )
-        has_tool_contract = payload_has_tool_contract(payload)
         is_streaming = bool(payload.get("stream"))
         customer_power_tier = bool(payload.get("__gateway_customer_power_tier"))
         deep_request = self._needs_deep_reasoning(task_type, complexity)
