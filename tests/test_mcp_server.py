@@ -104,6 +104,8 @@ class McpServerHelpersTestCase(unittest.TestCase):
         )
 
         self.assertIn("debugging partner", prompt)
+        self.assertIn("fast mode", prompt)
+        self.assertIn("do not use hidden thinking", prompt)
         self.assertIn("Frontend lives in frontier/client.js.", prompt)
         self.assertIn("Fix the billing button.", prompt)
 

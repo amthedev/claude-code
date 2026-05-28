@@ -265,10 +265,14 @@ async def ask_gateway(
     prompt: str,
     model: str = "claude-code-pro",
     max_tokens: int = 1200,
+    reasoning_mode: str = "fast",
+    timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     body = {
         "model": model,
         "max_tokens": max(1, min(max_tokens, 4096)),
+        "gateway_reasoning_mode": reasoning_mode,
+        "thinking": {"type": "disabled"},
         "messages": [{"role": "user", "content": prompt}],
     }
     headers = {
@@ -280,7 +284,7 @@ async def ask_gateway(
             f"{gateway_base_url()}/v1/messages",
             headers=headers,
             json=body,
-            timeout=httpx.Timeout(connect=10.0, read=55.0, write=20.0, pool=10.0),
+            timeout=httpx.Timeout(connect=10.0, read=timeout_seconds, write=20.0, pool=10.0),
         )
     except httpx.TimeoutException as exc:
         return {
@@ -319,6 +323,7 @@ def build_cowork_prompt(
     context = project_context.strip()
     parts = [
         f"Act as a {mode_label} inside a coworking session.",
+        "Use fast mode: do not use hidden thinking, long internal analysis, or repeated self-check loops.",
         "Use practical engineering judgment, be concise, and give concrete next steps.",
         "When code changes are needed, mention exact files and patches conceptually.",
     ]
@@ -333,12 +338,14 @@ async def cowork_gateway(
     project_context: str = "",
     mode: str = "pair_programming",
     model: str = "claude-code-pro",
-    max_tokens: int = 1600,
+    max_tokens: int = 900,
 ) -> dict[str, Any]:
     return await ask_gateway(
         prompt=build_cowork_prompt(task=task, project_context=project_context, mode=mode),
         model=model,
-        max_tokens=max_tokens,
+        max_tokens=min(max_tokens, 900),
+        reasoning_mode="fast",
+        timeout_seconds=25.0,
     )
 
 
@@ -451,7 +458,7 @@ def build_mcp_server() -> Any:
         project_context: str = "",
         mode: str = "pair_programming",
         model: str = "claude-code-pro",
-        max_tokens: int = 1600,
+        max_tokens: int = 900,
     ) -> dict[str, Any]:
         """Run a coworking-style coding session through this project's API."""
         return await cowork_gateway(

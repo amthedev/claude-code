@@ -55,6 +55,7 @@ class OpenRouterClient:
         else:
             outgoing["reasoning"] = {"effort": "none", "exclude": True}
         outgoing["include_reasoning"] = False
+        outgoing.pop("thinking", None)
         return outgoing
 
     def _strip_reasoning_from_response(self, response: dict[str, Any]) -> dict[str, Any]:

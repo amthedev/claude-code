@@ -473,6 +473,7 @@ class GatewayTestCase(unittest.TestCase):
                 "__gateway_route_decision": object(),
                 "reasoning": {"effort": "high"},
                 "include_reasoning": True,
+                "thinking": {"type": "enabled", "budget_tokens": 4096},
                 "messages": [{"role": "user", "content": "Explique uma função simples"}],
             },
             "deepseek/deepseek-v4-pro",
@@ -483,6 +484,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertNotIn("__gateway_route_decision", outgoing)
         self.assertNotIn("reasoning", outgoing)
         self.assertNotIn("include_reasoning", outgoing)
+        self.assertNotIn("thinking", outgoing)
         self.assertNotIn("Authorization", client._headers())
 
         settings.vps_model_api_key = "vps-secret"
@@ -536,6 +538,24 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
         self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_vps_openai_chat_adds_no_think_for_fast_non_qwen_without_extra_body(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "generic-coder"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_reasoning": "none",
+                "messages": [{"role": "user", "content": "Responda rapido."}],
+            },
+            stream=False,
+            model=settings.fast_agent,
+        )
+
+        self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
+        self.assertNotIn("chat_template_kwargs", outgoing)
 
     def test_vps_openai_chat_adds_no_think_for_qwen3_tool_requests(self) -> None:
         settings = make_settings()
@@ -914,7 +934,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(client.chat_completions_url, "https://runpod.example/v1/chat/completions")
         self.assertEqual(outgoing["model"], "qwen-14b")
         self.assertEqual(outgoing["messages"][0], {"role": "system", "content": "Seja direto."})
-        self.assertEqual(outgoing["messages"][1], {"role": "user", "content": "Oi"})
+        self.assertEqual(outgoing["messages"][1], {"role": "user", "content": "/no_think\n\nOi"})
         self.assertEqual(outgoing["tools"][0]["function"]["name"], "read_file")
         self.assertEqual(outgoing["tool_choice"], "auto")
         self.assertNotIn("__gateway_reasoning", outgoing)
@@ -4397,13 +4417,14 @@ class GatewayTestCase(unittest.TestCase):
         client = OpenRouterClient(make_settings())
 
         payload = client._payload_for_model(
-            {"messages": [], "__gateway_reasoning": "low"},
+            {"messages": [], "__gateway_reasoning": "low", "thinking": {"type": "enabled"}},
             "qwen/qwen3-coder-flash",
         )
 
         self.assertEqual(payload["reasoning"], {"effort": "low", "exclude": True})
         self.assertFalse(payload["include_reasoning"])
         self.assertNotIn("__gateway_reasoning", payload)
+        self.assertNotIn("thinking", payload)
 
     def test_openrouter_strips_reasoning_blocks_from_non_streaming_response(self) -> None:
         client = OpenRouterClient(make_settings())

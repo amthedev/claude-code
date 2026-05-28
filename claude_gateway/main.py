@@ -3306,6 +3306,7 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
     outgoing["__gateway_reasoning"] = "none"
     outgoing.pop("reasoning", None)
     outgoing.pop("include_reasoning", None)
+    outgoing.pop("thinking", None)
     return outgoing
 
 

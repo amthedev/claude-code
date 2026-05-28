@@ -162,6 +162,7 @@ class VPSAnthropicClient:
         outgoing["model"] = target.model_id
         outgoing.pop("include_reasoning", None)
         outgoing.pop("reasoning", None)
+        outgoing.pop("thinking", None)
         return outgoing
 
     async def complete_messages(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
@@ -236,8 +237,8 @@ class VPSAnthropicClient:
     ) -> dict[str, Any]:
         target = self._target_for_model(model)
         messages = self._messages_to_openai(payload)
-        disable_qwen_thinking = self._should_disable_qwen_thinking(payload, target)
-        if disable_qwen_thinking:
+        disable_hidden_thinking = self._should_disable_hidden_thinking(payload)
+        if disable_hidden_thinking:
             messages = self._messages_with_no_think(messages)
         tools = self._tools_to_openai(payload.get("tools"))
         tools = self._compact_tools_for_openai_chat_context(messages, tools)
@@ -256,7 +257,7 @@ class VPSAnthropicClient:
         for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "stop"):
             if key in payload:
                 outgoing[key] = payload[key]
-        if disable_qwen_thinking:
+        if disable_hidden_thinking and self._supports_chat_template_thinking_toggle(target):
             outgoing["chat_template_kwargs"] = {"enable_thinking": False}
         if tools:
             outgoing["tools"] = tools
@@ -266,18 +267,19 @@ class VPSAnthropicClient:
                 outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
         return outgoing
 
-    def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
+    def _should_disable_hidden_thinking(self, payload: dict[str, Any]) -> bool:
         if not self.settings.vps_disable_qwen_thinking:
-            return False
-        model_id = target.model_id.lower()
-        if "qwen3" not in model_id and "qwen/qwen3" not in model_id:
             return False
         if str(payload.get("__gateway_reasoning") or "").strip().lower() == "none":
             return True
         if self._is_claude_code_client(payload):
             return True
-        # Claude Code/tool-heavy requests can otherwise stream only hidden thinking blocks.
+        # Tool-heavy/cowork requests can otherwise stream only hidden thinking blocks.
         return bool(payload.get("tools") or payload.get("tool_choice"))
+
+    def _supports_chat_template_thinking_toggle(self, target: VPSTarget) -> bool:
+        model_id = target.model_id.lower()
+        return "qwen3" in model_id or "qwen/qwen3" in model_id
 
     def _is_claude_code_client(self, payload: dict[str, Any]) -> bool:
         return str(payload.get("__gateway_client") or "").strip().lower() == "claude-code"
