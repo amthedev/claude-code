@@ -1528,6 +1528,10 @@ def _response_has_tool_use(response: dict[str, Any]) -> bool:
 
 def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
+    bare_call = _bare_json_tool_call_from_text(text)
+    if bare_call:
+        return [bare_call]
+
     lowered = str(text or "").lower()
     search_from = 0
     while True:
@@ -1549,6 +1553,21 @@ def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
             calls.append(call)
         search_from = object_end + 1
     return calls
+
+
+def _bare_json_tool_call_from_text(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("```"):
+        raw = re.sub(r"(?is)^```(?:json)?\s*", "", raw).strip()
+        raw = re.sub(r"(?is)\s*```$", "", raw).strip()
+    if not raw.startswith("{"):
+        return None
+    object_end = _balanced_json_object_end(raw, 0)
+    if object_end < 0 or raw[object_end + 1 :].strip():
+        return None
+    return _tool_call_from_textual_payload(_json_object_from_string(raw), 0)
 
 
 def _balanced_json_object_end(text: str, start: int) -> int:

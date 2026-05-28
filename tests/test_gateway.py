@@ -1152,6 +1152,37 @@ class GatewayTestCase(unittest.TestCase):
             ],
         )
 
+        raw_json_response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_raw_json_tool",
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "name": "Write",
+                                    "arguments": {
+                                        "file_path": "/Users/allanmatheus/Documents/claudecode/teste.txt",
+                                        "content": "oi",
+                                    },
+                                }
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(raw_json_response["stop_reason"], "tool_use")
+        self.assertEqual(raw_json_response["content"][0]["name"], "Write")
+        self.assertEqual(
+            raw_json_response["content"][0]["input"],
+            {
+                "file_path": "/Users/allanmatheus/Documents/claudecode/teste.txt",
+                "content": "oi",
+            },
+        )
+
     def test_vps_openai_chat_preserves_tool_history_as_native_openai_messages(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -1357,6 +1388,39 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"partial_json": "{\\"file_path\\": \\"docs/design-system.md\\"}"', body)
         self.assertNotIn(b"Tool use:", body)
         self.assertIn(b'"stop_reason": "tool_use"', body)
+
+        async def raw_json_chunks():
+            yield (
+                "data: "
+                + json.dumps({"choices": [{"delta": {"content": '{\n  "name": "Write",'}}]})
+                + "\n\n"
+            ).encode()
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": '\n  "arguments": {\n    "file_path": "teste.txt",\n    "content": "oi"\n  }\n}'
+                                }
+                            }
+                        ]
+                    }
+                )
+                + "\n\n"
+            ).encode()
+            yield b"data: [DONE]\n\n"
+
+        raw_body = b"".join(
+            asyncio.run(
+                _collect_async_bytes(client._openai_sse_to_anthropic(raw_json_chunks(), require_tool_call=True))
+            )
+        )
+        self.assertIn(b'"name": "Write"', raw_body)
+        self.assertIn(b'\\"file_path\\": \\"teste.txt\\"', raw_body)
+        self.assertNotIn(b'"type": "text_delta"', raw_body)
+        self.assertIn(b'"stop_reason": "tool_use"', raw_body)
 
     def test_vps_openai_chat_stream_falls_back_to_tool_when_required_tool_is_ignored(self) -> None:
         settings = make_settings()
