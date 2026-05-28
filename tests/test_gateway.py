@@ -523,7 +523,7 @@ class GatewayTestCase(unittest.TestCase):
             {
                 "__gateway_client": "claude-code",
                 "__gateway_reasoning": "high",
-                "messages": [{"role": "user", "content": "oi"}],
+                "messages": [{"role": "user", "content": "eae"}],
                 "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
             },
             stream=True,
@@ -829,6 +829,26 @@ class GatewayTestCase(unittest.TestCase):
                                         "arguments": json.dumps({"cmd": "mkdir -p site-neymar"}),
                                     },
                                 },
+                                {
+                                    "id": "call_grep",
+                                    "function": {
+                                        "name": "Grep",
+                                        "arguments": json.dumps(
+                                            {
+                                                "query": "Neymar",
+                                                "files": ["index.html", "styles.css"],
+                                                "file_pattern": "*.html",
+                                            }
+                                        ),
+                                    },
+                                },
+                                {
+                                    "id": "call_glob",
+                                    "function": {
+                                        "name": "Glob",
+                                        "arguments": json.dumps({"glob": "**/*.py", "dir": "claude_gateway"}),
+                                    },
+                                },
                             ]
                         },
                         "finish_reason": "tool_calls",
@@ -842,6 +862,8 @@ class GatewayTestCase(unittest.TestCase):
             {"file_path": "site-neymar/index.html", "content": "<html></html>"},
         )
         self.assertEqual(response["content"][1]["input"], {"command": "mkdir -p site-neymar"})
+        self.assertEqual(response["content"][2]["input"], {"glob": "*.html", "pattern": "Neymar"})
+        self.assertEqual(response["content"][3]["input"], {"path": "claude_gateway", "pattern": "**/*.py"})
 
     def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
         settings = make_settings()

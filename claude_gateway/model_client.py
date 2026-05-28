@@ -377,6 +377,9 @@ class VPSAnthropicClient:
         if not compact:
             return False
         exact = {
+            "eae",
+            "iae",
+            "iai",
             "oi",
             "ola",
             "olá",
@@ -1227,6 +1230,62 @@ def _normalize_claude_code_tool_input(tool_name: str, value: dict[str, Any]) -> 
                 normalized["command"] = normalized["script"]
         normalized.pop("cmd", None)
         normalized.pop("script", None)
+
+    if name == "grep":
+        if "glob" not in normalized:
+            for alias in ("file_pattern", "filePattern", "include"):
+                if alias in normalized:
+                    normalized["glob"] = normalized[alias]
+                    break
+        if "path" not in normalized:
+            for alias in ("dir", "directory", "root"):
+                if alias in normalized:
+                    normalized["path"] = normalized[alias]
+                    break
+        if "pattern" not in normalized:
+            for alias in ("query", "search", "searchTerm", "regex"):
+                if alias in normalized:
+                    normalized["pattern"] = normalized[alias]
+                    break
+        for invalid in (
+            "files",
+            "file",
+            "paths",
+            "file_pattern",
+            "filePattern",
+            "include",
+            "dir",
+            "directory",
+            "root",
+            "query",
+            "search",
+            "searchTerm",
+            "regex",
+        ):
+            normalized.pop(invalid, None)
+
+    if name == "glob":
+        if "pattern" not in normalized:
+            for alias in ("glob", "file_pattern", "filePattern", "include"):
+                if alias in normalized:
+                    normalized["pattern"] = normalized[alias]
+                    break
+        if "path" not in normalized:
+            for alias in ("dir", "directory", "root"):
+                if alias in normalized:
+                    normalized["path"] = normalized[alias]
+                    break
+        for invalid in ("files", "paths", "glob", "file_pattern", "filePattern", "include", "dir", "directory", "root"):
+            normalized.pop(invalid, None)
+
+    if name == "ls":
+        if "path" not in normalized:
+            for alias in ("dir", "directory", "root"):
+                if alias in normalized:
+                    normalized["path"] = normalized[alias]
+                    break
+        for invalid in ("files", "paths", "dir", "directory", "root"):
+            normalized.pop(invalid, None)
 
     return normalized
 
