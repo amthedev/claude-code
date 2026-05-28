@@ -1089,6 +1089,7 @@ def _mount_frontend(app: FastAPI) -> None:
         return FileResponse(FRONTEND_DIR / "app.html")
 
     @app.get("/admin", include_in_schema=False)
+    @app.get("/admin/", include_in_schema=False)
     async def admin_page() -> FileResponse:
         return FileResponse(FRONTEND_DIR / "admin.html")
 
