@@ -699,6 +699,58 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Use the latest tool result exactly once", after_tool["messages"][-1]["content"])
         self.assertIn("Do not repeat the same tool call", after_tool["messages"][-1]["content"])
 
+        after_only_inspection_for_edit = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {"role": "user", "content": "quero que vc fassa o site do neymar"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_ls", "name": "LS", "input": {"path": "."}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_ls", "content": "README.md"}],
+                    },
+                ],
+                "tools": [
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Write", "input_schema": {"type": "object"}},
+                ],
+            },
+            stream=True,
+        )
+        self.assertEqual(after_only_inspection_for_edit["tool_choice"], "required")
+
+        after_write_for_edit = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {"role": "user", "content": "quero que vc fassa o site do neymar"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_write",
+                                "name": "Write",
+                                "input": {"file_path": "index.html", "content": "<!doctype html>"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_write", "content": "ok"}],
+                    },
+                ],
+                "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertNotIn("tool_choice", after_write_for_edit)
+
         edit_request = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",
@@ -1042,7 +1094,7 @@ class GatewayTestCase(unittest.TestCase):
             ],
         )
 
-    def test_vps_openai_chat_rejects_text_when_tool_call_is_required(self) -> None:
+    def test_vps_openai_chat_falls_back_to_tool_when_required_tool_is_ignored(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
         settings.vps_model_api_format = "openai-chat"
@@ -1059,9 +1111,13 @@ class GatewayTestCase(unittest.TestCase):
             "usage": {"prompt_tokens": 7, "completion_tokens": 3},
         }
 
-        with self.assertRaises(OpenRouterError):
-            anthropic = client._anthropic_from_openai_chat(response)
-            client._ensure_required_tool_call(payload, anthropic)
+        anthropic = client._anthropic_from_openai_chat(response)
+        client._ensure_required_tool_call(payload, anthropic)
+
+        self.assertEqual(anthropic["stop_reason"], "tool_use")
+        self.assertEqual(anthropic["content"][0]["type"], "tool_use")
+        self.assertEqual(anthropic["content"][0]["name"], "Bash")
+        self.assertIn("find .", anthropic["content"][0]["input"]["command"])
 
     def test_vps_openai_chat_converts_textual_tool_use_to_real_tool_call(self) -> None:
         settings = make_settings()
@@ -1300,6 +1356,44 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"content_block": {"type": "tool_use", "id": "call_text_0", "name": "Read", "input": {}}', body)
         self.assertIn(b'"partial_json": "{\\"file_path\\": \\"docs/design-system.md\\"}"', body)
         self.assertNotIn(b"Tool use:", body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
+
+    def test_vps_openai_chat_stream_falls_back_to_tool_when_required_tool_is_ignored(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [{"role": "user", "content": "quero que vc fassa o site do neymar"}],
+            "tools": [
+                {"name": "Bash", "input_schema": {"type": "object"}},
+                {"name": "Write", "input_schema": {"type": "object"}},
+            ],
+        }
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"Vamos criar index.html e style.css."}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(
+            asyncio.run(
+                _collect_async_bytes(
+                    client._openai_sse_to_anthropic(
+                        chunks(),
+                        require_tool_call=True,
+                        payload=payload,
+                    )
+                )
+            )
+        )
+
+        self.assertIn(b'"content_block": {"type": "tool_use"', body)
+        self.assertIn(b'"name": "Bash"', body)
+        self.assertIn(b"find .", body)
+        self.assertNotIn(b"Vamos criar index.html", body)
         self.assertIn(b'"stop_reason": "tool_use"', body)
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:

@@ -375,10 +375,15 @@ class VPSAnthropicClient:
         return aggressive
 
     def _should_force_tool_choice(self, payload: dict[str, Any]) -> bool:
-        return (
-            self._is_claude_code_action_request(payload)
-            or self._is_tool_action_request(payload, aggressive=False)
-        ) and not self._payload_has_tool_result(payload)
+        is_action_request = self._is_claude_code_action_request(payload) or self._is_tool_action_request(
+            payload,
+            aggressive=False,
+        )
+        if not is_action_request:
+            return False
+        if not self._payload_has_tool_result(payload):
+            return True
+        return self._is_file_change_request(payload) and not self._payload_has_mutating_tool_use(payload)
 
     def _should_force_claude_code_tool_choice(self, payload: dict[str, Any]) -> bool:
         return self._should_force_tool_choice(payload)
@@ -454,6 +459,127 @@ class VPSAnthropicClient:
             ):
                 return True
         return False
+
+    def _payload_has_mutating_tool_use(self, payload: dict[str, Any]) -> bool:
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, dict):
+                content = [content]
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                tool_name = str(block.get("name") or "").strip().lower()
+                tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+                if tool_name in {
+                    "write",
+                    "edit",
+                    "multiedit",
+                    "notebookedit",
+                    "apply_patch",
+                    "write_file",
+                    "delete_file",
+                    "replace_file",
+                    "create_file",
+                }:
+                    return True
+                if tool_name == "bash" and self._bash_command_can_mutate(str(tool_input.get("command") or "")):
+                    return True
+        return False
+
+    def _bash_command_can_mutate(self, command: str) -> bool:
+        compact = " ".join(str(command or "").lower().split())
+        if not compact:
+            return False
+        readonly_prefixes = (
+            "pwd",
+            "ls",
+            "find",
+            "rg",
+            "grep",
+            "cat",
+            "sed -n",
+            "git status",
+            "git diff",
+            "git log",
+            "git show",
+            "npm test",
+            "pytest",
+            "python -m pytest",
+            "python3 -m pytest",
+        )
+        if compact.startswith(readonly_prefixes) and not re.search(r"\b(>|tee|touch|mkdir|mv|cp|rm|git add|git commit|git push)\b", compact):
+            return False
+        mutating_terms = (
+            ">",
+            "tee ",
+            "touch ",
+            "mkdir ",
+            "mv ",
+            "cp ",
+            "rm ",
+            "apply_patch",
+            "npm install",
+            "npm run build",
+            "git add",
+            "git commit",
+            "git push",
+        )
+        return any(term in compact for term in mutating_terms)
+
+    def _is_file_change_request(self, payload: dict[str, Any]) -> bool:
+        text = self._task_request_text(payload).lower()
+        if not text or self._looks_like_question(text):
+            return False
+        change_terms = (
+            "alter",
+            "aplicar patch",
+            "build",
+            "conserte",
+            "corrija",
+            "corrigir",
+            "create",
+            "cria",
+            "crie",
+            "criar",
+            "edite",
+            "editar",
+            "faca",
+            "fassa",
+            "faça",
+            "faz",
+            "fazer",
+            "fix",
+            "implemente",
+            "implement",
+            "modifique",
+            "monte",
+            "patch",
+            "salve",
+            "site",
+            "write",
+        )
+        return any(term in text for term in change_terms)
+
+    def _task_request_text(self, payload: dict[str, Any]) -> str:
+        for message in reversed(payload.get("messages") or []):
+            if not isinstance(message, dict) or str(message.get("role") or "").lower() != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and all(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in content
+            ):
+                continue
+            text = self._content_to_text(content)
+            if not text:
+                continue
+            synthetic = {"messages": [{"role": "user", "content": text}]}
+            return self._current_user_request_text(synthetic)
+        return self._current_user_request_text(payload)
 
     def _last_user_text(self, payload: dict[str, Any]) -> str:
         for message in reversed(payload.get("messages") or []):
@@ -881,10 +1007,68 @@ class VPSAnthropicClient:
 
     def _ensure_required_tool_call(self, payload: dict[str, Any], response: dict[str, Any]) -> None:
         if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
+            fallback_tool = self._fallback_tool_use_for_required_action(payload)
+            if fallback_tool:
+                response["content"] = [fallback_tool]
+                response["stop_reason"] = "tool_use"
+                return
             raise OpenRouterError(
                 "VPS model ignored required Claude Code tool call.",
                 status_code=502,
             )
+
+    def _fallback_tool_use_for_required_action(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        tool_names = self._available_tool_names(payload)
+        if not tool_names:
+            return None
+
+        def first_available(*names: str) -> str | None:
+            wanted = {name.lower() for name in names}
+            for tool_name in tool_names:
+                if tool_name.lower() in wanted:
+                    return tool_name
+            return None
+
+        if tool_name := first_available("LS", "list_files"):
+            return {
+                "type": "tool_use",
+                "id": "call_gateway_inspect_0",
+                "name": tool_name,
+                "input": {"path": "."},
+            }
+        if tool_name := first_available("Glob"):
+            return {
+                "type": "tool_use",
+                "id": "call_gateway_inspect_0",
+                "name": tool_name,
+                "input": {"pattern": "**/*"},
+            }
+        if tool_name := first_available("Bash", "run_command"):
+            command_key = "command" if tool_name.lower() == "bash" else "cmd"
+            return {
+                "type": "tool_use",
+                "id": "call_gateway_inspect_0",
+                "name": tool_name,
+                "input": {
+                    command_key: "pwd && find . -maxdepth 2 -type f | head -80",
+                    "description": "Inspect workspace files before editing",
+                },
+            }
+        if tool_name := first_available("read_file", "Read"):
+            return {
+                "type": "tool_use",
+                "id": "call_gateway_inspect_0",
+                "name": tool_name,
+                "input": {"file_path": "README.md"},
+            }
+        return None
+
+    def _available_tool_names(self, payload: dict[str, Any]) -> list[str]:
+        names: list[str] = []
+        for tool in payload.get("tools") or []:
+            if isinstance(tool, dict) and tool.get("name"):
+                names.append(str(tool["name"]))
+        return names
 
     def _anthropic_from_openai_chat(
         self,
@@ -985,6 +1169,7 @@ class VPSAnthropicClient:
                     response.aiter_bytes(),
                     model=model,
                     require_tool_call=self._should_force_tool_choice(payload),
+                    payload=payload,
                 ):
                     yield chunk
         except OpenRouterError:
@@ -997,6 +1182,7 @@ class VPSAnthropicClient:
         chunks: AsyncIterator[bytes],
         model: str | None = None,
         require_tool_call: bool = False,
+        payload: dict[str, Any] | None = None,
     ) -> AsyncIterator[bytes]:
         target = self._target_for_model(model)
         yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"'
@@ -1048,6 +1234,11 @@ class VPSAnthropicClient:
             if textual_tool_calls:
                 for outgoing in tool_state.feed(textual_tool_calls):
                     yield outgoing
+            elif require_tool_call and payload:
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool:
+                    for outgoing in tool_state.feed([_openai_tool_call_from_anthropic_tool_use(fallback_tool, 0)]):
+                        yield outgoing
             else:
                 for outgoing in state.feed(textual_tool_buffer):
                     yield outgoing
@@ -1401,6 +1592,18 @@ def _tool_call_from_textual_payload(payload: dict[str, Any], index: int) -> dict
         "function": {
             "name": name,
             "arguments": json.dumps(arguments),
+        },
+    }
+
+
+def _openai_tool_call_from_anthropic_tool_use(block: dict[str, Any], index: int) -> dict[str, Any]:
+    return {
+        "index": index,
+        "id": str(block.get("id") or f"call_gateway_{index}"),
+        "type": "function",
+        "function": {
+            "name": str(block.get("name") or ""),
+            "arguments": json.dumps(block.get("input") if isinstance(block.get("input"), dict) else {}),
         },
     }
 
