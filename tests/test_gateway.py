@@ -1492,6 +1492,36 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(text, "Resposta final.")
 
+    def test_public_stream_drops_thinking_blocks_and_remaps_visible_indices(self) -> None:
+        async def chunks():
+            yield (
+                b'event: message_start\n'
+                b'data: {"type":"message_start","message":{"model":"qwen3","content":[]}}\n\n'
+                b'event: content_block_start\n'
+                b'data: {"type":"content_block_start","index":0,'
+                b'"content_block":{"type":"thinking","thinking":""}}\n\n'
+            )
+            yield (
+                b'event: content_block_delta\n'
+                b'data: {"type":"content_block_delta","index":0,'
+                b'"delta":{"type":"thinking_delta","thinking":"analisando"}}\n\n'
+                b'event: content_block_stop\n'
+                b'data: {"type":"content_block_stop","index":0}\n\n'
+                b'event: content_block_start\n'
+                b'data: {"type":"content_block_start","index":1,'
+                b'"content_block":{"type":"text","text":""}}\n\n'
+                b'event: content_block_delta\n'
+                b'data: {"type":"content_block_delta","index":1,'
+                b'"delta":{"type":"text_delta","text":"Resposta final."}}\n\n'
+            )
+
+        body = b"".join(asyncio.run(_collect_async_bytes(_public_model_stream(chunks(), "claude-code-pro"))))
+
+        self.assertNotIn(b"thinking", body)
+        self.assertIn(b'"model": "claude-code-pro"', body)
+        self.assertIn(b'"index": 0', body)
+        self.assertIn(b"Resposta final.", body)
+
     def test_public_stream_preserves_spaces_when_words_share_one_letter(self) -> None:
         payloads = [
             {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Deixe"}},

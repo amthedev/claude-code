@@ -3470,6 +3470,7 @@ def _sse_response(chunks: Any) -> StreamingResponse:
 async def _public_model_stream(chunks: Any, public_model: str, on_usage: Callable[[dict[str, int]], None] | None = None):
     buffer = ""
     text_normalizer = _StreamTextNormalizer()
+    visibility_filter = _StreamVisibilityFilter()
     async for chunk in chunks:
         buffer += chunk.decode("utf-8", "replace")
         while "\n\n" in buffer:
@@ -3477,13 +3478,17 @@ async def _public_model_stream(chunks: Any, public_model: str, on_usage: Callabl
             usage = _stream_event_usage(event)
             if usage and on_usage:
                 on_usage(usage)
-            yield (_rewrite_stream_event_model(event, public_model, text_normalizer) + "\n\n").encode("utf-8")
+            rewritten = _rewrite_stream_event_model(event, public_model, text_normalizer, visibility_filter)
+            if rewritten is not None:
+                yield (rewritten + "\n\n").encode("utf-8")
 
     if buffer:
         usage = _stream_event_usage(buffer)
         if usage and on_usage:
             on_usage(usage)
-        yield _rewrite_stream_event_model(buffer, public_model, text_normalizer).encode("utf-8")
+        rewritten = _rewrite_stream_event_model(buffer, public_model, text_normalizer, visibility_filter)
+        if rewritten is not None:
+            yield rewritten.encode("utf-8")
 
 
 async def _public_model_stream_with_budget_settlement(
@@ -3559,6 +3564,51 @@ class _StreamTextNormalizer:
         return delta
 
 
+class _StreamVisibilityFilter:
+    def __init__(self) -> None:
+        self.suppressed_indices: set[int] = set()
+        self.index_map: dict[int, int] = {}
+        self.next_index = 0
+
+    def rewrite_payload(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        event_type = str(payload.get("type") or "")
+        index = payload.get("index")
+        content_block = payload.get("content_block")
+
+        if (
+            event_type == "content_block_start"
+            and isinstance(index, int)
+            and isinstance(content_block, dict)
+            and content_block.get("type") in {"thinking", "redacted_thinking"}
+        ):
+            self.suppressed_indices.add(index)
+            return None
+
+        if isinstance(index, int) and index in self.suppressed_indices:
+            if event_type == "content_block_stop":
+                self.suppressed_indices.discard(index)
+            return None
+
+        delta = payload.get("delta")
+        if isinstance(delta, dict) and delta.get("type") in {
+            "thinking_delta",
+            "signature_delta",
+            "reasoning_delta",
+        }:
+            return None
+
+        if isinstance(index, int):
+            payload = dict(payload)
+            payload["index"] = self._visible_index(index)
+        return payload
+
+    def _visible_index(self, original: int) -> int:
+        if original not in self.index_map:
+            self.index_map[original] = self.next_index
+            self.next_index += 1
+        return self.index_map[original]
+
+
 def _merge_stream_text(current: str, incoming: str) -> str:
     if not current:
         return incoming
@@ -3632,7 +3682,8 @@ def _rewrite_stream_event_model(
     event: str,
     public_model: str,
     text_normalizer: _StreamTextNormalizer | None = None,
-) -> str:
+    visibility_filter: _StreamVisibilityFilter | None = None,
+) -> str | None:
     lines = event.splitlines()
     rewritten: list[str] = []
     for line in lines:
@@ -3653,6 +3704,10 @@ def _rewrite_stream_event_model(
             continue
 
         if isinstance(payload, dict):
+            if visibility_filter:
+                payload = visibility_filter.rewrite_payload(payload)
+                if payload is None:
+                    return None
             if isinstance(payload.get("message"), dict):
                 payload["message"]["model"] = public_model
                 payload["message"].pop("provider", None)
