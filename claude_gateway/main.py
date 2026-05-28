@@ -372,6 +372,8 @@ def create_app(
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
 
+        if _is_claude_code_request(request):
+            payload = {**payload, "__gateway_client": "claude-code"}
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
@@ -2731,6 +2733,11 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
     else:
         outgoing["__gateway_reasoning"] = "none"
     return outgoing
+
+
+def _is_claude_code_request(request: Request) -> bool:
+    beta_header = request.headers.get("anthropic-beta", "")
+    return "claude-code" in beta_header.lower()
 
 
 def _selected_model_identity_answer(

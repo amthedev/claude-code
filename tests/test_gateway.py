@@ -271,6 +271,17 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(settings.deep_reasoning_agent, "deepseek/deepseek-v4-pro")
         self.assertEqual(settings.api_rate_limit, 600)
 
+    def test_x_api_key_takes_priority_over_stale_authorization_header(self) -> None:
+        response = self.client.get(
+            "/v1/models",
+            headers={
+                "Authorization": "Bearer stale-claude-ai-token",
+                "X-API-Key": "test-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_large_old_context_is_trimmed_instead_of_rejected(self) -> None:
         settings = make_settings()
         settings.max_request_input_chars = 1000
@@ -370,6 +381,86 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
+
+    def test_vps_openai_chat_adds_no_think_for_qwen3_tool_requests(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "Use a ferramenta e responda."}],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+
+        self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nUse a ferramenta e responda.")
+        self.assertEqual(outgoing["tool_choice"], "auto")
+
+    def test_vps_openai_chat_adds_no_think_for_claude_code_qwen3_requests(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "Responda no terminal."}],
+                "tools": [],
+            },
+            stream=True,
+        )
+
+        self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda no terminal.")
+
+    def test_vps_openai_chat_compacts_large_tool_schemas_to_leave_output_room(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        tools = [
+            {
+                "name": f"tool_{index}",
+                "description": "descricao longa " * 600,
+                "input_schema": {
+                    "type": "object",
+                    "description": "schema longo " * 200,
+                    "properties": {
+                        "path": {"type": "string", "description": "caminho " * 80},
+                        "options": {
+                            "type": "object",
+                            "properties": {
+                                "mode": {"type": "string", "description": "modo " * 80},
+                            },
+                        },
+                    },
+                    "required": ["path"],
+                },
+            }
+            for index in range(28)
+        ]
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "max_tokens": 64000,
+                "system": "instrucoes do agente " * 900,
+                "messages": [{"role": "user", "content": "Responda no terminal."}],
+                "tools": tools,
+            },
+            stream=True,
+        )
+
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        self.assertLessEqual(estimated_input, 18000)
+        self.assertGreater(outgoing["max_tokens"], 1000)
 
     def test_vps_openai_chat_caps_output_to_fit_context_window(self) -> None:
         settings = make_settings()

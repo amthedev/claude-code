@@ -197,6 +197,7 @@ class VPSAnthropicClient:
         if self._should_disable_qwen_thinking(payload, target):
             messages = self._messages_with_no_think(messages)
         tools = self._tools_to_openai(payload.get("tools"))
+        tools = self._compact_tools_for_openai_chat_context(messages, tools)
         messages = self._trim_messages_for_openai_chat_context(messages, tools)
         requested_max_tokens = int(payload.get("max_tokens") or 4096)
         outgoing: dict[str, Any] = {
@@ -219,10 +220,15 @@ class VPSAnthropicClient:
         return outgoing
 
     def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
-        if str(payload.get("__gateway_reasoning") or "").strip().lower() != "none":
-            return False
         model_id = target.model_id.lower()
-        return "qwen3" in model_id or "qwen/qwen3" in model_id
+        if "qwen3" not in model_id and "qwen/qwen3" not in model_id:
+            return False
+        if str(payload.get("__gateway_reasoning") or "").strip().lower() == "none":
+            return True
+        if str(payload.get("__gateway_client") or "").strip().lower() == "claude-code":
+            return True
+        # Claude Code/tool-heavy requests can otherwise stream only hidden thinking blocks.
+        return bool(payload.get("tools") or payload.get("tool_choice"))
 
     def _messages_with_no_think(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         copied = deepcopy(messages)
@@ -301,6 +307,76 @@ class VPSAnthropicClient:
             )
         return converted
 
+    def _compact_tools_for_openai_chat_context(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not tools:
+            return tools
+        if self._estimate_openai_chat_input_tokens(messages, tools) <= OPENAI_CHAT_INPUT_BUDGET_TOKENS:
+            return tools
+
+        compacted = deepcopy(tools)
+        for tool in compacted:
+            function = tool.get("function")
+            if not isinstance(function, dict):
+                continue
+            function["description"] = self._truncate_text_end(str(function.get("description") or ""), 600)
+            function["parameters"] = self._compact_json_schema(function.get("parameters"))
+
+        if self._estimate_openai_chat_input_tokens(messages, compacted) <= OPENAI_CHAT_INPUT_BUDGET_TOKENS:
+            return compacted
+
+        for tool in compacted:
+            function = tool.get("function")
+            if not isinstance(function, dict):
+                continue
+            function["description"] = self._truncate_text_end(str(function.get("description") or ""), 180)
+            function["parameters"] = {"type": "object", "additionalProperties": True}
+        return compacted
+
+    def _compact_json_schema(self, schema: Any, *, depth: int = 0) -> dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {"type": "object", "additionalProperties": True}
+
+        compacted: dict[str, Any] = {}
+        schema_type = schema.get("type")
+        if isinstance(schema_type, str):
+            compacted["type"] = schema_type
+        elif isinstance(schema_type, list):
+            compacted["type"] = schema_type[:3]
+        else:
+            compacted["type"] = "object"
+
+        description = schema.get("description")
+        if isinstance(description, str) and description:
+            compacted["description"] = self._truncate_text_end(description, 180 if depth else 300)
+
+        enum = schema.get("enum")
+        if isinstance(enum, list) and len(enum) <= 20:
+            compacted["enum"] = enum
+
+        required = schema.get("required")
+        if isinstance(required, list):
+            compacted["required"] = required[:30]
+
+        properties = schema.get("properties")
+        if isinstance(properties, dict) and depth < 2:
+            compacted["properties"] = {
+                str(name): self._compact_json_schema(value, depth=depth + 1)
+                for name, value in properties.items()
+                if isinstance(value, dict)
+            }
+        elif compacted.get("type") == "object":
+            compacted["additionalProperties"] = True
+
+        items = schema.get("items")
+        if isinstance(items, dict) and depth < 2:
+            compacted["items"] = self._compact_json_schema(items, depth=depth + 1)
+
+        return compacted
+
     def _fit_max_tokens_for_openai_chat(
         self,
         messages: list[dict[str, Any]],
@@ -353,6 +429,12 @@ class VPSAnthropicClient:
         head = available // 2
         tail = available - head
         return f"{text[:head]}{marker}{text[-tail:]}"
+
+    def _truncate_text_end(self, text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        marker = " [... omitted]"
+        return text[: max(0, max_chars - len(marker))].rstrip() + marker
 
     def _tool_choice_to_openai(self, tool_choice: Any) -> Any:
         if isinstance(tool_choice, str):

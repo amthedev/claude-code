@@ -24,11 +24,19 @@ class AuthContext:
 
 
 def extract_bearer_token(request: Request) -> str | None:
+    explicit_api_key = request.headers.get("x-api-key")
+    if explicit_api_key:
+        return explicit_api_key.strip()
+
+    auth_token = request.headers.get("anthropic-auth-token")
+    if auth_token:
+        return auth_token.strip()
+
     authorization = request.headers.get("authorization", "")
     scheme, _, value = authorization.partition(" ")
     if scheme.lower() == "bearer" and value:
         return value.strip()
-    return request.headers.get("x-api-key") or request.headers.get("anthropic-auth-token")
+    return None
 
 
 def authenticate_request(request: Request, settings: Settings) -> AuthContext:
