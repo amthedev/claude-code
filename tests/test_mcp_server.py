@@ -58,6 +58,7 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertEqual(config["env"]["MCP_TRANSPORT"], "stdio")
         self.assertEqual(config["env"]["MCP_GATEWAY_BASE_URL"], "https://example.test")
         self.assertEqual(config["env"]["MCP_GATEWAY_TOKEN"], "sk-test")
+        self.assertEqual(config["env"]["ANTHROPIC_AUTH_TOKEN"], "")
 
     def test_claude_desktop_server_config_omits_local_dev_token_for_hosted_gateway(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -69,6 +70,32 @@ class McpServerHelpersTestCase(unittest.TestCase):
             )
 
         self.assertNotIn("MCP_GATEWAY_TOKEN", config["env"])
+
+    def test_gateway_token_prefers_customer_api_key_and_ignores_auth_token(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_GATEWAY_TOKEN": "",
+                "GATEWAY_API_KEY": "",
+                "GATEWAY_API_KEYS": "admin-token",
+                "ANTHROPIC_AUTH_TOKEN": "oauth-token",
+                "ANTHROPIC_API_KEY": "customer-token",
+            },
+            clear=False,
+        ):
+            self.assertEqual(mcp_server.gateway_token(), "customer-token")
+
+    def test_gateway_token_uses_explicit_mcp_token_first(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_GATEWAY_TOKEN": "customer-token",
+                "GATEWAY_API_KEY": "other-token",
+                "ANTHROPIC_API_KEY": "anthropic-token",
+            },
+            clear=False,
+        ):
+            self.assertEqual(mcp_server.gateway_token(), "customer-token")
 
     def test_claude_desktop_server_config_does_not_use_admin_gateway_api_keys(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -109,6 +136,7 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertIn("do not use hidden thinking", prompt)
         self.assertIn("180 palavras", prompt)
         self.assertIn("sem saudacao generica", prompt)
+        self.assertIn("Se houver Project context", prompt)
         self.assertIn("Se nenhum conteudo da conversa foi enviado", prompt)
         self.assertIn("Frontend lives in frontier/client.js.", prompt)
         self.assertIn("Fix the billing button.", prompt)
@@ -151,6 +179,26 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertEqual(captured["max_tokens"], mcp_server.COWORK_MAX_OUTPUT_TOKENS)
         self.assertEqual(captured["timeout_seconds"], mcp_server.COWORK_TIMEOUT_SECONDS)
         self.assertEqual(captured["temperature"], 0.2)
+
+    def test_cowork_gateway_replaces_portuguese_generic_help_prompt(self) -> None:
+        async def fake_ask_gateway(**_kwargs):
+            return {
+                "status_code": 200,
+                "response": {
+                    "content": [{"type": "text", "text": "Claro, como posso ajudar voce hoje?"}],
+                },
+            }
+
+        with patch.object(mcp_server, "ask_gateway", fake_ask_gateway):
+            result = asyncio.run(
+                mcp_server.cowork_gateway(
+                    task="Leia o conteudo da conversa e resuma.",
+                    project_context="",
+                )
+            )
+
+        text = result["response"]["content"][0]["text"]
+        self.assertIn("Nao recebi o conteudo da conversa", text)
 
     def test_cowork_gateway_rejects_empty_task_and_context(self) -> None:
         result = asyncio.run(mcp_server.cowork_gateway(task="", project_context=""))

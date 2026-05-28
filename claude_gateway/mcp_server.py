@@ -59,8 +59,7 @@ def gateway_token() -> str:
     return (
         os.getenv("MCP_GATEWAY_TOKEN")
         or os.getenv("GATEWAY_API_KEY")
-        or _first_csv_value(os.getenv("GATEWAY_API_KEYS", ""))
-        or os.getenv("ANTHROPIC_AUTH_TOKEN")
+        or os.getenv("ANTHROPIC_API_KEY")
         or "local-dev-token"
     )
 
@@ -106,6 +105,7 @@ def claude_desktop_server_config(
         "MCP_TRANSPORT": "stdio",
         "MCP_WORKSPACE_ROOT": str(root),
         "MCP_GATEWAY_BASE_URL": resolved_url,
+        "ANTHROPIC_AUTH_TOKEN": "",
         "MCP_ENABLE_WRITE_TOOLS": "true" if enable_write_tools else "false",
         "MCP_ENABLE_COMMANDS": "true" if enable_commands else "false",
     }
@@ -306,12 +306,13 @@ async def ask_gateway(
         data: Any = response.json()
     except json.JSONDecodeError:
         data = {"text": response.text}
-    if response.status_code == 403:
+    if response.status_code in {401, 403}:
         data = {
             **(data if isinstance(data, dict) else {"response": data}),
             "hint": (
                 "Use a customer/API token generated in the Admin screen. "
-                "Admin tokens from GATEWAY_API_KEYS cannot call model endpoints."
+                "Admin tokens from GATEWAY_API_KEYS and Claude Desktop auth tokens "
+                "cannot call model endpoints."
             ),
         }
     return {"status_code": response.status_code, "response": data}
@@ -335,10 +336,13 @@ def build_cowork_prompt(
         "Responda em pt-BR, direto ao ponto, sem saudacao generica.",
         "Entregue a primeira resposta util em no maximo 6 bullets ou 180 palavras.",
         "Use fast mode: do not use hidden thinking, long internal analysis, or repeated self-check loops.",
-        "Se pedirem para ler/analisar conversa, use apenas o texto enviado abaixo.",
-        "Se nenhum conteudo da conversa foi enviado em Task ou Project context, diga isso claramente.",
+        "Nao responda 'como posso ajudar', 'what can I help with', ou variacoes.",
+        "Se houver Project context abaixo, trate esse texto como a conversa/conteudo principal e responda usando ele.",
+        "Se pedirem para ler/analisar conversa, use o texto em Project context e tambem qualquer conversa colada em Task.",
+        "Se nenhum conteudo da conversa foi enviado em Task ou Project context, diga isso claramente em uma frase.",
         "Use practical engineering judgment, be concise, and give concrete next steps.",
         "When code changes are needed, mention exact files and patches conceptually.",
+        "Comece pela resposta solicitada; nao pergunte permissao para comecar.",
     ]
     if context:
         parts.append(f"Project context / conteudo recebido:\n{context}")
@@ -356,6 +360,7 @@ def build_cowork_system_prompt(mode: str = "pair_programming") -> str:
     return (
         f"Voce e um {mode_label} dentro de uma sessao cowork do Claude Desktop. "
         "Nunca responda com saudacao generica como 'Hello! How can I assist you today?'. "
+        "Nunca responda com 'como posso ajudar?', 'o que voce precisa?', ou equivalente se ja houver task/contexto. "
         "Nao finja ter lido a conversa se o conteudo nao foi enviado. "
         "Quando o usuario pedir para ler, resumir ou analisar a conversa, analise somente o texto recebido "
         "na mensagem do usuario. Se esse texto nao estiver presente, responda em pt-BR que o conteudo da "
@@ -428,12 +433,22 @@ def _is_generic_cowork_greeting(result: dict[str, Any]) -> bool:
     elif isinstance(response, str):
         text = response
     normalized = " ".join(text.strip().lower().split())
-    return normalized in {
+    if normalized in {
         "hello! how can i assist you today?",
         "hello, how can i assist you today?",
         "hello! how can i help you today?",
         "hi! how can i assist you today?",
-    }
+    }:
+        return True
+    generic_markers = (
+        "how can i assist you",
+        "how can i help you",
+        "como posso ajudar",
+        "em que posso ajudar",
+        "o que posso fazer",
+        "no que posso ajudar",
+    )
+    return len(normalized) <= 180 and any(marker in normalized for marker in generic_markers)
 
 
 async def gateway_models() -> dict[str, Any]:
