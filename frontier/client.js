@@ -710,7 +710,6 @@ SELECTED_MODEL = {selected_model!r}
 GATEWAY_KEYS = {{
     "ANTHROPIC_BASE_URL": BASE_URL,
     "ANTHROPIC_AUTH_TOKEN": API_TOKEN,
-    "ANTHROPIC_API_KEY": API_TOKEN,
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": SELECTED_MODEL,
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
@@ -794,7 +793,6 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
     env.update({
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_AUTH_TOKEN": api_token,
-        "ANTHROPIC_API_KEY": api_token,
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
         "ANTHROPIC_DEFAULT_SONNET_MODEL": selected_model,
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
@@ -821,7 +819,6 @@ function terminalCommand(config) {
     env: {
       ANTHROPIC_BASE_URL: config.baseUrl,
       ANTHROPIC_AUTH_TOKEN: config.token,
-      ANTHROPIC_API_KEY: config.token,
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-code-pro",
       ANTHROPIC_DEFAULT_SONNET_MODEL: config.model,
       ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-code-pro",
@@ -850,7 +847,6 @@ env = settings.setdefault("env", {})
 env.update({
     "ANTHROPIC_BASE_URL": ${JSON.stringify(config.baseUrl)},
     "ANTHROPIC_AUTH_TOKEN": ${JSON.stringify(config.token)},
-    "ANTHROPIC_API_KEY": ${JSON.stringify(config.token)},
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(config.model)},
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
