@@ -628,6 +628,46 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"content_block": {"type": "text", "text": ""}', body)
         self.assertIn(b'"delta": {"type": "text_delta", "text": "Resposta"', body)
 
+    def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc",'
+                b'"type":"function","function":{"name":"read_file","arguments":"{\\\\\\"path\\\\\\":"}}]}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+                b'"function":{"arguments":"\\\\\\"README.md\\\\\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
+
+        self.assertIn(b'"content_block": {"type": "tool_use", "id": "call_abc", "name": "read_file", "input": {}}', body)
+        self.assertIn(b'"delta": {"type": "input_json_delta", "partial_json": "{\\\\\\"path\\\\\\":"}', body)
+        self.assertIn(b'"delta": {"type": "input_json_delta", "partial_json": "\\\\\\"README.md\\\\\\"}"}', body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
+
+    def test_vps_openai_chat_stream_does_not_emit_tool_use_without_tool_block(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks()))))
+
+        self.assertIn(b"chamada de ferramenta valida", body)
+        self.assertIn(b'"stop_reason": "end_turn"', body)
+        self.assertNotIn(b'"stop_reason": "tool_use"', body)
+
     def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
         settings = make_settings()
         app = create_app(
@@ -884,6 +924,16 @@ class GatewayTestCase(unittest.TestCase):
             text,
             "Deixe esfriar antes de servir com toque extra ou confeiteiro ou calda. Faça uma massa simples.",
         )
+
+    def test_public_stream_does_not_overlap_short_word_boundaries(self) -> None:
+        payloads = [
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Nao foi possivel encontrar"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "arquivos na pasta."}},
+        ]
+
+        text = asyncio.run(collect_stream_text(stream_events(payloads)))
+
+        self.assertEqual(text, "Nao foi possivel encontrar arquivos na pasta.")
 
     def test_clean_model_text_repairs_fragmented_duplicate_words(self) -> None:
         broken = (

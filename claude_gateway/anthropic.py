@@ -38,6 +38,7 @@ _GLUED_REPAIRS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bpensem\s+frases\b", re.IGNORECASE), "pense em frases"),
     (re.compile(r"\bmedo\s+derrar\b", re.IGNORECASE), "medo de errar"),
     (re.compile(r"\bPoso\b", re.IGNORECASE), "Posso"),
+    (re.compile(r"\bencontrar?arquivos\b", re.IGNORECASE), "encontrar arquivos"),
     (re.compile(r"\bcomanteiga\b", re.IGNORECASE), "com manteiga"),
     (re.compile(r"\bo\s+leite\s+o\s+óleo\b", re.IGNORECASE), "o leite e o óleo"),
     (re.compile(r"\bantes\s+desenformar\b", re.IGNORECASE), "antes de desenformar"),

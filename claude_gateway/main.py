@@ -2933,7 +2933,7 @@ def _merge_stream_text(current: str, incoming: str) -> str:
         return incoming
 
     overlap = _stream_overlap_length(current, incoming)
-    if overlap:
+    if overlap >= 3 or (overlap > 0 and len(incoming) > overlap and incoming[overlap].isspace()):
         return current + incoming[overlap:]
 
     stripped = incoming.lstrip()

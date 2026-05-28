@@ -590,51 +590,100 @@ class VPSAnthropicClient:
         yield target.model_id.encode("utf-8")
         yield b'","role":"assistant","content":[]}}\n\n'
         state = _QwenThinkingStreamState()
+        tool_state = _OpenAIToolCallStreamState(state)
+        stop_reason = "end_turn"
 
         buffer = ""
         async for chunk in chunks:
             buffer += chunk.decode("utf-8", "replace")
             while "\n\n" in buffer:
                 event, buffer = buffer.split("\n\n", 1)
-                text_delta = self._openai_text_delta(event)
+                text_delta, tool_calls, finish_reason = self._openai_stream_delta(event)
+                if finish_reason == "tool_calls":
+                    stop_reason = "tool_use"
+                elif finish_reason in {"stop", "length", "content_filter"} and stop_reason != "tool_use":
+                    stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
                 if text_delta:
                     for outgoing in state.feed(text_delta):
                         yield outgoing
+                if tool_calls:
+                    for outgoing in tool_state.feed(tool_calls):
+                        yield outgoing
 
         if buffer:
-            text_delta = self._openai_text_delta(buffer)
+            text_delta, tool_calls, finish_reason = self._openai_stream_delta(buffer)
+            if finish_reason == "tool_calls":
+                stop_reason = "tool_use"
+            elif finish_reason in {"stop", "length", "content_filter"} and stop_reason != "tool_use":
+                stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
             if text_delta:
                 for outgoing in state.feed(text_delta):
+                    yield outgoing
+            if tool_calls:
+                for outgoing in tool_state.feed(tool_calls):
                     yield outgoing
 
         for outgoing in state.finish():
             yield outgoing
-        yield b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":0}}\n\n'
+        for outgoing in tool_state.finish():
+            yield outgoing
+        if tool_state.has_tool:
+            stop_reason = "tool_use"
+        elif state.is_empty:
+            stop_reason = "end_turn"
+            fallback_text = "Nao consegui gerar uma chamada de ferramenta valida. Tente pedir novamente de forma mais direta."
+            yield _anthropic_sse(
+                "content_block_start",
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            )
+            yield _anthropic_sse(
+                "content_block_delta",
+                {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": fallback_text}},
+            )
+            yield _anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+        elif stop_reason == "tool_use":
+            stop_reason = "end_turn"
+        yield (
+            "event: message_delta\n"
+            "data: "
+            f"{json.dumps({'type': 'message_delta', 'delta': {'stop_reason': stop_reason, 'stop_sequence': None}, 'usage': {'output_tokens': 0}})}"
+            "\n\n"
+        ).encode("utf-8")
         yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
     def _openai_text_delta(self, event: str) -> str:
+        text_delta, _, _ = self._openai_stream_delta(event)
+        return text_delta
+
+    def _openai_stream_delta(self, event: str) -> tuple[str, list[dict[str, Any]], str | None]:
         data_lines = [
             line.removeprefix("data:").strip()
             for line in event.splitlines()
             if line.startswith("data:")
         ]
         if not data_lines:
-            return ""
+            return "", [], None
         raw = "\n".join(data_lines)
         if raw == "[DONE]":
-            return ""
+            return "", [], None
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return ""
+            return "", [], None
         choices = data.get("choices")
         if not isinstance(choices, list) or not choices:
-            return ""
-        delta = choices[0].get("delta") if isinstance(choices[0], dict) else {}
+            return "", [], None
+        choice = choices[0] if isinstance(choices[0], dict) else {}
+        delta = choice.get("delta") if isinstance(choice, dict) else {}
         if not isinstance(delta, dict):
-            return ""
+            return "", [], None
         content = delta.get("content")
-        return content if isinstance(content, str) else ""
+        tool_calls = delta.get("tool_calls")
+        return (
+            content if isinstance(content, str) else "",
+            tool_calls if isinstance(tool_calls, list) else [],
+            str(choice.get("finish_reason")) if choice.get("finish_reason") else None,
+        )
 
 
 class _QwenThinkingStreamState:
@@ -645,6 +694,11 @@ class _QwenThinkingStreamState:
         self.thinking_started = False
         self.thinking_stopped = False
         self.text_started = False
+        self.text_stopped = False
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.thinking_started and not self.text_started
 
     def feed(self, delta: str) -> list[bytes]:
         self.raw_text += str(delta or "")
@@ -717,10 +771,122 @@ class _QwenThinkingStreamState:
         if self.thinking_started and not self.thinking_stopped:
             events.append(_anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": 0}))
             self.thinking_stopped = True
-        if self.text_started:
+        if self.text_started and not self.text_stopped:
             text_index = 1 if self.thinking_started else 0
             events.append(_anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": text_index}))
+            self.text_stopped = True
         return events
+
+    def close_before_tool(self) -> list[bytes]:
+        return self.finish()
+
+    def next_block_index(self) -> int:
+        index = 0
+        if self.thinking_started:
+            index += 1
+        if self.text_started:
+            index += 1
+        return index
+
+
+class _OpenAIToolCallStreamState:
+    def __init__(self, text_state: _QwenThinkingStreamState) -> None:
+        self.text_state = text_state
+        self.base_index: int | None = None
+        self.calls: dict[int, dict[str, Any]] = {}
+        self.started_order: list[int] = []
+
+    @property
+    def has_tool(self) -> bool:
+        return any(bool(call.get("started")) for call in self.calls.values())
+
+    def feed(self, tool_calls: list[dict[str, Any]]) -> list[bytes]:
+        events: list[bytes] = []
+        if tool_calls and self.base_index is None:
+            events.extend(self.text_state.close_before_tool())
+            self.base_index = self.text_state.next_block_index()
+
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            index = self._tool_index(tool_call)
+            call = self.calls.setdefault(
+                index,
+                {
+                    "id": str(tool_call.get("id") or f"call_{index}"),
+                    "name": "",
+                    "arguments": "",
+                    "emitted_arguments": 0,
+                    "started": False,
+                },
+            )
+            if tool_call.get("id"):
+                call["id"] = str(tool_call["id"])
+
+            function = tool_call.get("function")
+            if isinstance(function, dict):
+                if function.get("name"):
+                    call["name"] = str(function["name"])
+                if isinstance(function.get("arguments"), str):
+                    call["arguments"] += function["arguments"]
+
+            if not call["started"] and call["name"]:
+                events.append(
+                    _anthropic_sse(
+                        "content_block_start",
+                        {
+                            "type": "content_block_start",
+                            "index": self._block_index(index),
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": call["id"],
+                                "name": call["name"],
+                                "input": {},
+                            },
+                        },
+                    )
+                )
+                call["started"] = True
+                self.started_order.append(index)
+
+            if call["started"]:
+                arguments = str(call["arguments"])
+                emitted = int(call["emitted_arguments"])
+                if len(arguments) > emitted:
+                    delta = arguments[emitted:]
+                    events.append(
+                        _anthropic_sse(
+                            "content_block_delta",
+                            {
+                                "type": "content_block_delta",
+                                "index": self._block_index(index),
+                                "delta": {"type": "input_json_delta", "partial_json": delta},
+                            },
+                        )
+                    )
+                    call["emitted_arguments"] = len(arguments)
+
+        return events
+
+    def finish(self) -> list[bytes]:
+        events: list[bytes] = []
+        for index in self.started_order:
+            events.append(
+                _anthropic_sse(
+                    "content_block_stop",
+                    {"type": "content_block_stop", "index": self._block_index(index)},
+                )
+            )
+        return events
+
+    def _tool_index(self, tool_call: dict[str, Any]) -> int:
+        try:
+            return int(tool_call.get("index") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _block_index(self, tool_index: int) -> int:
+        return int(self.base_index or 0) + tool_index
 
 
 def _next_delta(previous: str, current: str) -> str:
