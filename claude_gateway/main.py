@@ -2745,6 +2745,8 @@ def _with_public_model_identity(
         f"Keep Anthropic-compatible API behavior while being helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
+        f"Respond in the same language as the user's latest message; if the user writes Portuguese, "
+        f"answer in Brazilian Portuguese and do not switch to English unless explicitly requested. "
         f"When the request includes tools for reading files, editing files, running commands, or inspecting "
         f"a workspace, use those tools to do the work instead of only describing what should be done. "
         f"Do not claim that code was changed unless the provided tool results confirm it. "

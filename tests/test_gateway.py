@@ -598,9 +598,12 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("ignore dependency/cache folders", outgoing["messages"][0]["content"])
         self.assertIn("Never end with permission questions", outgoing["messages"][0]["content"])
         self.assertIn("immediately call Read again", outgoing["messages"][0]["content"])
+        self.assertIn("Answer in the user's language", outgoing["messages"][0]["content"])
+        self.assertIn("call LS/Glob/Grep to discover files", outgoing["messages"][0]["content"])
         self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
         self.assertIn("Never ask permission to begin or continue", outgoing["messages"][-1]["content"])
         self.assertIn("retry Read immediately", outgoing["messages"][-1]["content"])
+        self.assertIn("Reply in the same language as the user", outgoing["messages"][-1]["content"])
         self.assertEqual(outgoing["tool_choice"], "required")
         self.assertNotIn("stop", outgoing)
 
@@ -736,6 +739,8 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(outgoing["tool_choice"], "required")
         self.assertIn("Local workspace tool behavior override", outgoing["messages"][0]["content"])
         self.assertIn("read_file/list_files/apply_patch/write_file/run_tests", outgoing["messages"][0]["content"])
+        self.assertIn("use Brazilian Portuguese", outgoing["messages"][0]["content"])
+        self.assertIn("choose a simple filename", outgoing["messages"][0]["content"])
         self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
 
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
@@ -4053,6 +4058,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertTrue(payload["stream"])
         self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
+        self.assertIn("Respond in the same language as the user's latest message", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
         self.assertIn("Automatic senior skill routing is active", payload["system"])
 

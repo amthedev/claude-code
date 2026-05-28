@@ -28,20 +28,28 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "tool action, then summarize what you found. For project analysis, inspect the repository root first, "
     "ignore dependency/cache folders such as .venv, .git, node_modules, __pycache__, and site-packages unless "
     "the user specifically asks about them, then read likely manifest or entry files before answering. Never "
-    "end with permission questions like 'posso comecar?' or 'deseja que eu leia?'. If a tool fails or the "
-    "workspace is incomplete, fix the tool arguments and retry when a reasonable retry exists, then explain "
-    "what you can infer and what failed without asking for permission to continue. If Read fails because "
-    "line_offset, line_count, offset, or limit is unsupported, immediately call Read again with only the "
-    "required file path argument. For code creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide "
-    "file contents in the chat as a substitute for editing files. Tool-call JSON must be complete and include "
-    "all required fields such as file_path and content. Use enough tokens to finish the requested task."
+    "end with permission questions like 'posso comecar?' or 'deseja que eu leia?'. Answer in the user's "
+    "language; if the user writes Portuguese, use Brazilian Portuguese. Do not repeat or rephrase the user's "
+    "request back to yourself. If a tool fails or the workspace is incomplete, fix the tool arguments and "
+    "retry when a reasonable retry exists, then explain what you can infer and what failed without asking "
+    "for permission to continue. If Read fails because line_offset, line_count, offset, or limit is "
+    "unsupported, immediately call Read again with only the required file path argument. If a file path is "
+    "not found and the user did not give an exact path, call LS/Glob/Grep to discover files instead of asking "
+    "for the path. If the user asks to create a new file such as .txt, .html, .js, or .py and the filename is "
+    "not specified, choose a simple sensible filename in the current workspace and call Write. For code "
+    "creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide file contents in the "
+    "chat as a substitute for editing files. Tool-call JSON must be complete and include all required fields "
+    "such as file_path and content. Use enough tokens to finish the requested task."
 )
 LOCAL_TOOL_AGENT_PROMPT = (
     "Local workspace tool behavior override: the user expects you to use the available file/workspace tools. "
     "When the user asks to read, find, edit, create, patch, run tests, or change files, call the matching tool "
     "first instead of summarizing or saying you cannot find files. Start by listing or reading files when the "
     "exact path is unclear. Use read_file/list_files/apply_patch/write_file/run_tests when those are the tools "
-    "available. Do not answer with only a summary when an edit was requested."
+    "available. If the user asks to create a new file and no filename is given, choose a simple filename and "
+    "call write_file. Answer in the user's language; if the user writes Portuguese, use Brazilian Portuguese. "
+    "Do not repeat the user's request as internal questions. Do not answer with only a summary when an edit "
+    "was requested."
 )
 CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
 CLAUDE_CODE_SESSION_RE = re.compile(r"(?is)<session>.*?</session>")
@@ -523,12 +531,17 @@ class VPSAnthropicClient:
         reminder = (
             "<system-reminder>Execute the user's project request now. If tools are available, use them before "
             "answering. Never ask permission to begin or continue; never end with 'Deseja que eu continue?', "
-            "'posso comecar?', or similar. Ignore .venv, .git, node_modules, __pycache__, and site-packages "
+            "'posso comecar?', or similar. Reply in the same language as the user, using Brazilian Portuguese "
+            "for Portuguese requests. Do not ask yourself repeated questions in the response. Ignore .venv, "
+            ".git, node_modules, __pycache__, and site-packages "
             "unless explicitly requested. For project analysis, inspect root files and likely manifests/source "
             "files, then give the answer. If the user asks to create, edit, modify, run, or test anything, "
             "call the appropriate tool such as Bash, Write, Edit, MultiEdit, read_file, write_file, apply_patch, "
-            "or run_tests; do not answer with instructions for the user to do it manually. If a Read call failed because line_offset, line_count, offset, "
-            "or limit was rejected, retry Read immediately with only the file path argument.</system-reminder>"
+            "or run_tests; do not answer with instructions for the user to do it manually. If a file is not "
+            "found and no exact path was provided, list or search the workspace instead of asking for the path. "
+            "If the user asks for a new .txt/.html/.js/.py without a filename, choose a simple filename and "
+            "write it. If a Read call failed because line_offset, line_count, offset, or limit was rejected, "
+            "retry Read immediately with only the file path argument.</system-reminder>"
         )
         for message in reversed(copied):
             if message.get("role") == "user":
