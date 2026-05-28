@@ -26,6 +26,10 @@ DEFAULT_ALLOWED_COMMANDS = (
 )
 HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-subdomain.squareweb.app")
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
+COWORK_CONTEXT_MAX_CHARS = 12_000
+COWORK_TASK_MAX_CHARS = 4_000
+COWORK_MAX_OUTPUT_TOKENS = 420
+COWORK_TIMEOUT_SECONDS = 15.0
 _GATEWAY_HTTP_CLIENT: httpx.AsyncClient | None = None
 
 
@@ -268,6 +272,7 @@ async def ask_gateway(
     reasoning_mode: str = "fast",
     timeout_seconds: float = 30.0,
     system: str = "",
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     body = {
         "model": model,
@@ -278,6 +283,8 @@ async def ask_gateway(
     }
     if system.strip():
         body["system"] = system.strip()
+    if temperature is not None:
+        body["temperature"] = max(0.0, min(1.0, float(temperature)))
     headers = {
         "Authorization": f"Bearer {gateway_token()}",
         "Content-Type": "application/json",
@@ -323,10 +330,12 @@ def build_cowork_prompt(
         "debug": "debugging partner",
         "plan": "technical planning partner",
     }.get(mode, "pair-programming partner")
-    context = project_context.strip()
+    context = _compact_cowork_text(project_context, COWORK_CONTEXT_MAX_CHARS).strip()
+    compact_task = _compact_cowork_text(task, COWORK_TASK_MAX_CHARS).strip()
     parts = [
         f"Modo cowork: {mode_label}.",
         "Responda em pt-BR, direto ao ponto, sem saudacao generica.",
+        "Entregue a primeira resposta util em no maximo 6 bullets ou 180 palavras.",
         "Use fast mode: do not use hidden thinking, long internal analysis, or repeated self-check loops.",
         "Se pedirem para ler/analisar conversa, use apenas o texto enviado abaixo.",
         "Se nenhum conteudo da conversa foi enviado em Task ou Project context, diga isso claramente.",
@@ -335,8 +344,19 @@ def build_cowork_prompt(
     ]
     if context:
         parts.append(f"Project context / conteudo recebido:\n{context}")
-    parts.append(f"Task / pedido do usuario:\n{task.strip()}")
+    parts.append(f"Task / pedido do usuario:\n{compact_task}")
     return "\n\n".join(parts)
+
+
+def _compact_cowork_text(value: str, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    marker = "\n\n[... trecho central omitido para responder mais rapido ...]\n\n"
+    available = max(0, max_chars - len(marker))
+    head = max(0, available // 3)
+    tail = max(0, available - head)
+    return f"{text[:head]}{marker}{text[-tail:]}"
 
 
 def build_cowork_system_prompt(mode: str = "pair_programming") -> str:
@@ -353,7 +373,8 @@ def build_cowork_system_prompt(mode: str = "pair_programming") -> str:
         "Quando o usuario pedir para ler, resumir ou analisar a conversa, analise somente o texto recebido "
         "na mensagem do usuario. Se esse texto nao estiver presente, responda em pt-BR que o conteudo da "
         "conversa nao chegou ao cowork e peca para colar/exportar o trecho. "
-        "Se houver conteudo, entregue a analise diretamente em pt-BR."
+        "Se houver conteudo, entregue a analise diretamente em pt-BR. "
+        "Priorize velocidade: resposta curta, sem preambulo, sem repetir o pedido e sem explorar alternativas longas."
     )
 
 
@@ -362,7 +383,7 @@ async def cowork_gateway(
     project_context: str = "",
     mode: str = "pair_programming",
     model: str = "claude-code-pro",
-    max_tokens: int = 900,
+    max_tokens: int = COWORK_MAX_OUTPUT_TOKENS,
 ) -> dict[str, Any]:
     if not task.strip() and not project_context.strip():
         return {
@@ -377,10 +398,11 @@ async def cowork_gateway(
     result = await ask_gateway(
         prompt=build_cowork_prompt(task=task, project_context=project_context, mode=mode),
         model=model,
-        max_tokens=min(max_tokens, 900),
+        max_tokens=min(max_tokens, COWORK_MAX_OUTPUT_TOKENS),
         reasoning_mode="fast",
-        timeout_seconds=25.0,
+        timeout_seconds=COWORK_TIMEOUT_SECONDS,
         system=build_cowork_system_prompt(mode),
+        temperature=0.2,
     )
     if _is_generic_cowork_greeting(result):
         result["response"] = {
@@ -536,7 +558,7 @@ def build_mcp_server() -> Any:
         project_context: str = "",
         mode: str = "pair_programming",
         model: str = "claude-code-pro",
-        max_tokens: int = 900,
+        max_tokens: int = COWORK_MAX_OUTPUT_TOKENS,
     ) -> dict[str, Any]:
         """Run a coworking-style coding session through this project's API."""
         return await cowork_gateway(

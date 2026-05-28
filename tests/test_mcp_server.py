@@ -107,13 +107,28 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertIn("debugging partner", prompt)
         self.assertIn("fast mode", prompt)
         self.assertIn("do not use hidden thinking", prompt)
+        self.assertIn("180 palavras", prompt)
         self.assertIn("sem saudacao generica", prompt)
         self.assertIn("Se nenhum conteudo da conversa foi enviado", prompt)
         self.assertIn("Frontend lives in frontier/client.js.", prompt)
         self.assertIn("Fix the billing button.", prompt)
 
+    def test_build_cowork_prompt_compacts_large_conversation_context(self) -> None:
+        prompt = mcp_server.build_cowork_prompt(
+            task="Analise a conversa.",
+            project_context="inicio " + ("x" * 20_000) + " fim",
+        )
+
+        self.assertLess(len(prompt), 13_000)
+        self.assertIn("inicio", prompt)
+        self.assertIn("fim", prompt)
+        self.assertIn("trecho central omitido", prompt)
+
     def test_cowork_gateway_replaces_generic_greeting_with_clear_conversation_message(self) -> None:
+        captured = {}
+
         async def fake_ask_gateway(**_kwargs):
+            captured.update(_kwargs)
             return {
                 "status_code": 200,
                 "response": {
@@ -131,6 +146,9 @@ class McpServerHelpersTestCase(unittest.TestCase):
 
         text = result["response"]["content"][0]["text"]
         self.assertIn("Nao recebi o conteudo da conversa", text)
+        self.assertEqual(captured["max_tokens"], mcp_server.COWORK_MAX_OUTPUT_TOKENS)
+        self.assertEqual(captured["timeout_seconds"], mcp_server.COWORK_TIMEOUT_SECONDS)
+        self.assertEqual(captured["temperature"], 0.2)
 
     def test_cowork_gateway_rejects_empty_task_and_context(self) -> None:
         result = asyncio.run(mcp_server.cowork_gateway(task="", project_context=""))
