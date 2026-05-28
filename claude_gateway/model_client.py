@@ -262,6 +262,8 @@ class VPSAnthropicClient:
         text = self._current_user_request_text(payload).lower()
         if not text:
             return False
+        if self._looks_like_question(text):
+            return False
         action_terms = (
             "analis",
             "analise",
@@ -280,17 +282,22 @@ class VPSAnthropicClient:
             "corrija",
             "corrigir",
             "create",
+            "cria",
             "crie",
             "criar",
             "debug",
             "edite",
             "editar",
+            "envie",
+            "enviar",
             "execute",
             "executar",
             "file",
             "files",
             "fix",
             "faca",
+            "faz",
+            "fazer",
             "implemente",
             "implement",
             "listar",
@@ -298,14 +305,18 @@ class VPSAnthropicClient:
             "ler",
             "leia",
             "make",
+            "mande",
             "mexa",
             "mexer",
             "modifique",
+            "monte",
             "read",
             "rode",
             "rodar",
             "salve",
             "save",
+            "site",
+            "suba",
             "test",
             "teste",
             "tests",
@@ -317,10 +328,16 @@ class VPSAnthropicClient:
             "comecar",
             "fassa",
             "faça",
+            "github",
+            "preciso",
+            "push",
+            "quero",
         )
         if any(term in text for term in action_terms):
             return True
-        return not self._looks_like_question(text)
+        if self._looks_like_smalltalk(text):
+            return False
+        return True
 
     def _looks_like_question(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split())
@@ -353,6 +370,31 @@ class VPSAnthropicClient:
             "você pode explicar ",
         )
         return compact.startswith(question_prefixes)
+
+    def _looks_like_smalltalk(self, text: str) -> bool:
+        compact = " ".join(str(text or "").strip().lower().split())
+        compact = compact.strip(" .,!;:")
+        if not compact:
+            return False
+        exact = {
+            "oi",
+            "ola",
+            "olá",
+            "e ai",
+            "e aí",
+            "bom dia",
+            "boa tarde",
+            "boa noite",
+            "beleza",
+            "valeu",
+            "obrigado",
+            "obrigada",
+        }
+        if compact in exact:
+            return True
+        words = compact.split()
+        greeting_prefixes = ("oi ", "ola ", "olá ", "bom dia ", "boa tarde ", "boa noite ")
+        return len(words) <= 4 and compact.startswith(greeting_prefixes)
 
     def _payload_has_tool_result(self, payload: dict[str, Any]) -> bool:
         for message in payload.get("messages") or []:

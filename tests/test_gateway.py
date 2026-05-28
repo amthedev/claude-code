@@ -519,6 +519,17 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertNotIn("tool_choice", question_request)
 
+        greeting_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "oi"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertNotIn("tool_choice", greeting_request)
+
         auto_tool_choice_request = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",
@@ -530,6 +541,18 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
         self.assertEqual(auto_tool_choice_request["tool_choice"], "required")
+
+        site_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "quero que vc fassa o site do neymar"}],
+                "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+        self.assertEqual(site_request["tool_choice"], "required")
 
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
