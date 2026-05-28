@@ -25,14 +25,14 @@ def _load_dotenv_token(path: Path) -> str:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
-        if key.strip() not in {"MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY", "GATEWAY_API_KEYS"}:
+        if key.strip() not in {"MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY"}:
             continue
         values[key.strip()] = value.strip().strip('"').strip("'").split(",", 1)[0].strip()
-    for key in ("MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY", "GATEWAY_API_KEYS"):
+    for key in ("MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY"):
         value = values.get(key, "")
         if value not in LOCAL_DEV_TOKENS:
             return value
-    return values.get("MCP_GATEWAY_TOKEN") or values.get("GATEWAY_API_KEY") or values.get("GATEWAY_API_KEYS") or ""
+    return values.get("MCP_GATEWAY_TOKEN") or values.get("GATEWAY_API_KEY") or ""
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -73,7 +73,8 @@ def main() -> None:
     if not token and not args.allow_missing_token:
         raise SystemExit(
             "Missing gateway token. Pass --gateway-token, set MCP_GATEWAY_TOKEN, "
-            "or run with --allow-missing-token and edit Claude Desktop config later."
+            "or run with --allow-missing-token and edit Claude Desktop config later. "
+            "Use a customer/API token from the Admin screen, not GATEWAY_API_KEYS."
         )
 
     server_config = claude_desktop_server_config(

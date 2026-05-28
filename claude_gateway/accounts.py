@@ -399,6 +399,23 @@ class AccountStore:
             db.commit()
         return _public_account(account)
 
+    def bulk_add_daily_tokens(self, amount: int) -> dict[str, int | str]:
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Token amount must be greater than zero.")
+        with self._lock, self._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+            db.execute(
+                """
+                UPDATE accounts
+                   SET daily_limit = daily_limit + ?,
+                       computed_daily_tokens = computed_daily_tokens + ?,
+                       manual_limit = daily_limit + ?
+                """,
+                (amount, amount, amount),
+            )
+            db.commit()
+        return {"status": "updated", "accounts": int(count), "addedTokens": int(amount)}
+
     def create_purchase(self, token: str, values: dict[str, Any]) -> dict[str, Any]:
         plan_id = str(values.get("planId") or values.get("plan_id") or "").strip().lower()
         plan = _plan_by_id(plan_id)

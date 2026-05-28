@@ -3359,6 +3359,42 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(brl_account["price"], 100)
             self.assertEqual(brl_account["manualLimit"], brl_account["dailyLimit"])
 
+    def test_admin_can_bulk_add_50m_daily_tokens_to_all_accounts(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            first = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 50, "durationHours": 24, "model": "opus"},
+            ).json()["account"]
+            second = client.post(
+                "/v1/auth/signup",
+                json={
+                    "name": "Cliente App",
+                    "login": "bulk@example.com",
+                    "password": "secret-bulk",
+                },
+            ).json()["account"]
+
+            response = client.post(
+                "/v1/admin/accounts/bulk-recharge",
+                headers=self.headers,
+                json={"addTokens": 50_000_000},
+            )
+            accounts = client.get("/v1/admin/accounts", headers=self.headers).json()["data"]
+            by_id = {account["id"]: account for account in accounts}
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["accounts"], 2)
+            self.assertEqual(by_id[first["id"]]["dailyLimit"], first["dailyLimit"] + 50_000_000)
+            self.assertEqual(by_id[second["id"]]["dailyLimit"], second["dailyLimit"] + 50_000_000)
+            self.assertEqual(by_id[first["id"]]["manualLimit"], by_id[first["id"]]["dailyLimit"])
+            self.assertEqual(by_id[second["id"]]["manualLimit"], by_id[second["id"]]["dailyLimit"])
+
     def test_api_only_token_defaults_to_28_hours_and_reports_pacing_fields(self) -> None:
         with TemporaryDirectory() as tmpdir:
             settings = make_settings()

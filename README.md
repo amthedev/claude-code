@@ -198,7 +198,7 @@ For Claude Desktop on this machine, install the local stdio MCP bridge:
 ```bash
 python3 scripts/install_claude_desktop_mcp.py \
   --gateway-url "https://your-subdomain.squareweb.app" \
-  --gateway-token "replace-with-a-real-gateway-or-account-token"
+  --gateway-token "replace-with-a-customer-or-api-token"
 ```
 
 Restart Claude Desktop after installing. The installer merges a `claude-code-api`
@@ -210,6 +210,9 @@ tools that call this project's API, especially `ask_claude_api`,
 `think_with_gateway`, `coworking`, `list_gateway_models`, and `gateway_status`.
 The `coworking` MCP tool provides a coworking-style coding session through your
 own hosted API, without depending on Claude Desktop's native paid Cowork feature.
+Use a customer/API token generated in the Admin screen. `GATEWAY_API_KEYS` is an
+admin-only emergency token and cannot call model endpoints when
+`ALLOW_ADMIN_MODEL_ACCESS=false`.
 
 For Claude Code or another HTTP MCP host, you can run the same server as a local
 Streamable HTTP endpoint:
@@ -217,7 +220,7 @@ Streamable HTTP endpoint:
 ```bash
 export MCP_WORKSPACE_ROOT="$PWD"
 export MCP_GATEWAY_BASE_URL="https://your-subdomain.squareweb.app"
-export MCP_GATEWAY_TOKEN="replace-with-a-real-gateway-or-account-token"
+export MCP_GATEWAY_TOKEN="replace-with-a-customer-or-api-token"
 export MCP_TRANSPORT="streamable-http"
 export MCP_HOST="127.0.0.1"
 export MCP_PORT="8000"

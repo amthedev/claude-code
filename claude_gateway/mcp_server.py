@@ -85,7 +85,6 @@ def claude_desktop_server_config(
         resolved_token = (
             os.getenv("MCP_GATEWAY_TOKEN")
             or os.getenv("GATEWAY_API_KEY")
-            or _first_csv_value(os.getenv("GATEWAY_API_KEYS", ""))
         )
     resolved_url = (gateway_url or HOSTED_GATEWAY_BASE_URL).rstrip("/")
     if resolved_url == HOSTED_GATEWAY_BASE_URL and (resolved_token or "") in LOCAL_DEV_TOKENS:
@@ -272,6 +271,14 @@ async def ask_gateway(
         data: Any = response.json()
     except json.JSONDecodeError:
         data = {"text": response.text}
+    if response.status_code == 403:
+        data = {
+            **(data if isinstance(data, dict) else {"response": data}),
+            "hint": (
+                "Use a customer/API token generated in the Admin screen. "
+                "Admin tokens from GATEWAY_API_KEYS cannot call model endpoints."
+            ),
+        }
     return {"status_code": response.status_code, "response": data}
 
 

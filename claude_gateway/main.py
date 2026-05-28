@@ -697,6 +697,18 @@ def create_app(
         include_gift_cards = bool((payload or {}).get("includeGiftCards"))
         return JSONResponse(app.state.account_store.purge_accounts(include_gift_cards=include_gift_cards))
 
+    @app.post("/v1/admin/accounts/bulk-recharge")
+    async def bulk_recharge_accounts(
+        request: Request,
+        payload: dict[str, Any] | None = Body(default=None),
+    ) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_admin(request, app.state.settings)
+        if payload is not None and not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        amount = int(float((payload or {}).get("addTokens") or 50_000_000))
+        return JSONResponse(app.state.account_store.bulk_add_daily_tokens(amount))
+
     @app.get("/v1/admin/vps/schedules")
     async def list_vps_schedules(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)

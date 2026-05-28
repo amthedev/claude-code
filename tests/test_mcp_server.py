@@ -69,6 +69,22 @@ class McpServerHelpersTestCase(unittest.TestCase):
 
         self.assertNotIn("MCP_GATEWAY_TOKEN", config["env"])
 
+    def test_claude_desktop_server_config_does_not_use_admin_gateway_api_keys(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {"GATEWAY_API_KEYS": "admin-token", "MCP_GATEWAY_TOKEN": "", "GATEWAY_API_KEY": ""},
+                clear=False,
+            ):
+                config = mcp_server.claude_desktop_server_config(
+                    repo_root=tmpdir,
+                    gateway_url="https://example.test",
+                    token=None,
+                    python_executable="/bin/python3",
+                )
+
+        self.assertNotIn("MCP_GATEWAY_TOKEN", config["env"])
+
     def test_merge_claude_desktop_config_preserves_existing_preferences(self) -> None:
         merged = mcp_server.merge_claude_desktop_config(
             {"preferences": {"theme": "dark"}, "mcpServers": {"old": {"command": "old"}}},

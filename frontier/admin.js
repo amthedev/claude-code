@@ -1149,6 +1149,23 @@ document.querySelector("#purgeAccounts").addEventListener("click", async () => {
   }
 });
 
+document.querySelector("#boostAccounts").addEventListener("click", async () => {
+  const amount = 50000000;
+  if (!confirm(`Adicionar ${ClaudeApp.integer.format(amount)} tokens/dia para todas as contas e APIs cadastradas?`)) {
+    return;
+  }
+  try {
+    await adminRequest("/v1/admin/accounts/bulk-recharge", {
+      method: "POST",
+      body: JSON.stringify({ addTokens: amount }),
+    });
+    await refreshFromServer();
+    renderAll();
+  } catch (error) {
+    alert(error.fallback ? "API admin indisponível." : error.message);
+  }
+});
+
 document.querySelector("#purchasesTable").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-purchase-action]");
   if (!button) return;
