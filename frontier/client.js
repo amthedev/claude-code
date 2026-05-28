@@ -717,6 +717,7 @@ GATEWAY_KEYS = {{
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
 }}
+CONFLICT_KEYS = ("ANTHROPIC_API_KEY",)
 
 def wants_gateway():
     try:
@@ -741,6 +742,8 @@ def main():
 
     env = os.environ.copy()
     if wants_gateway():
+        for key in CONFLICT_KEYS:
+            env.pop(key, None)
         env.update(GATEWAY_KEYS)
         settings_arg = json.dumps({{"env": GATEWAY_KEYS}})
         print("OK, usando a API configurada.")
@@ -790,6 +793,7 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
     except Exception:
         settings = {}
     env = settings.setdefault("env", {})
+    env.pop("ANTHROPIC_API_KEY", None)
     env.update({
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_AUTH_TOKEN": api_token,
@@ -844,6 +848,7 @@ except Exception:
     settings = {}
 
 env = settings.setdefault("env", {})
+env.pop("ANTHROPIC_API_KEY", None)
 env.update({
     "ANTHROPIC_BASE_URL": ${JSON.stringify(config.baseUrl)},
     "ANTHROPIC_AUTH_TOKEN": ${JSON.stringify(config.token)},
