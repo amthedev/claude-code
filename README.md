@@ -82,31 +82,30 @@ Gateway configuration:
 
 ```env
 VPS_MODEL_BASE_URL=https://SEU-POD-8000.proxy.runpod.net/v1
-VPS_MODEL_ID=qwen-14b
+VPS_MODEL_ID=qwen25-coder-14b
 VPS_MODEL_API_FORMAT=openai-chat
 VPS_MODEL_API_KEY=sk-SEU-POD
 
 VPS_FAST_MODEL_BASE_URL=https://SEU-POD-8000.proxy.runpod.net/v1
-VPS_FAST_MODEL_ID=qwen-14b
+VPS_FAST_MODEL_ID=qwen25-coder-14b
 VPS_FAST_MODEL_API_FORMAT=openai-chat
 VPS_FAST_MODEL_API_KEY=sk-SEU-POD
 
-VPS_STRONG_MODEL_BASE_URL=https://SEU-POD-8001.proxy.runpod.net/v1
-VPS_STRONG_MODEL_ID=qwen3-32b
-VPS_STRONG_MODEL_API_FORMAT=openai-chat
-VPS_STRONG_MODEL_API_KEY=sk-SEU-POD
+VPS_STRONG_MODEL_BASE_URL=
+VPS_STRONG_MODEL_ID=
+VPS_STRONG_MODEL_API_FORMAT=
+VPS_STRONG_MODEL_API_KEY=
 ```
 
 Suggested pod command for an L40S:
 
 ```bash
-bash -lc 'python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000 --model Qwen/Qwen2.5-14B-Instruct-AWQ --served-model-name qwen-14b --api-key "$VLLM_API_KEY" --max-model-len 8192 --gpu-memory-utilization 0.32 --trust-remote-code & python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8001 --model Qwen/Qwen3-32B-AWQ --served-model-name qwen3-32b --api-key "$VLLM_API_KEY" --max-model-len 32768 --gpu-memory-utilization 0.62 --trust-remote-code; wait'
+bash -lc 'python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8001 --model Qwen/Qwen2.5-Coder-14B-Instruct-AWQ --served-model-name qwen25-coder-14b --api-key "$VLLM_API_KEY" --max-model-len 16384 --gpu-memory-utilization 0.62 --trust-remote-code --enable-auto-tool-choice --tool-call-parser hermes'
 ```
 
-If the strong model runs out of memory, lower `--max-model-len` before adding
-more GPU. For code-specific quality, a 4-bit/FP8 quantization of
-`Qwen/Qwen3-Coder-30B-A3B-Instruct` can replace `Qwen/Qwen3-32B-AWQ` after a
-smoke test on the same L40S.
+Use one fast code model by default under user load. If you later add a strong
+model, keep it on a separate port and only enable `VPS_STRONG_MODEL_*` after a
+smoke test on the same GPU.
 
 ## Coding Combo
 
