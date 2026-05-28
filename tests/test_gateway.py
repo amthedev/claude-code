@@ -519,6 +519,18 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertNotIn("tool_choice", question_request)
 
+        auto_tool_choice_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "mande meu projeto pro github"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+        self.assertEqual(auto_tool_choice_request["tool_choice"], "required")
+
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -744,6 +756,27 @@ class GatewayTestCase(unittest.TestCase):
             ],
         )
 
+    def test_vps_openai_chat_rejects_text_when_tool_call_is_required(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [{"role": "user", "content": "mande meu projeto pro github"}],
+            "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+        }
+        response = {
+            "id": "chatcmpl_test",
+            "choices": [{"message": {"content": "Voce precisa executar git push."}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+        }
+
+        with self.assertRaises(OpenRouterError):
+            anthropic = client._anthropic_from_openai_chat(response)
+            client._ensure_required_tool_call(payload, anthropic)
+
     def test_vps_openai_chat_stream_is_converted_to_anthropic_sse(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen-14b"
@@ -779,6 +812,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"delta": {"type": "thinking_delta", "thinking": "cunho"', body)
         self.assertIn(b'"content_block": {"type": "text", "text": ""}', body)
         self.assertIn(b'"delta": {"type": "text_delta", "text": "Resposta"', body)
+
+    def test_vps_openai_chat_stream_rejects_text_when_tool_call_is_required(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"Use git push."}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        with self.assertRaises(OpenRouterError):
+            asyncio.run(
+                _collect_async_bytes(
+                    client._openai_sse_to_anthropic(chunks(), require_tool_call=True)
+                )
+            )
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
         settings = make_settings()

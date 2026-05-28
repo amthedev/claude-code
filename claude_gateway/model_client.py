@@ -232,10 +232,10 @@ class VPSAnthropicClient:
                 outgoing[key] = payload[key]
         if tools:
             outgoing["tools"] = tools
-            if payload.get("tool_choice"):
-                outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
-            elif self._is_claude_code_action_request(payload):
+            if self._is_claude_code_action_request(payload):
                 outgoing["tool_choice"] = "required"
+            elif payload.get("tool_choice"):
+                outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
         return outgoing
 
     def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
@@ -688,7 +688,16 @@ class VPSAnthropicClient:
             raise OpenRouterError("VPS model returned invalid JSON.", status_code=502) from exc
         if not isinstance(data, dict):
             raise OpenRouterError("VPS model returned an invalid response object.", status_code=502)
-        return self._anthropic_from_openai_chat(data, model=model)
+        response_payload = self._anthropic_from_openai_chat(data, model=model)
+        self._ensure_required_tool_call(payload, response_payload)
+        return response_payload
+
+    def _ensure_required_tool_call(self, payload: dict[str, Any], response: dict[str, Any]) -> None:
+        if self._is_claude_code_action_request(payload) and not _response_has_tool_use(response):
+            raise OpenRouterError(
+                "VPS model ignored required Claude Code tool call.",
+                status_code=502,
+            )
 
     def _anthropic_from_openai_chat(
         self,
@@ -778,6 +787,7 @@ class VPSAnthropicClient:
                     async for chunk in self._openai_sse_to_anthropic(
                         response.aiter_bytes(),
                         model=model,
+                        require_tool_call=self._is_claude_code_action_request(payload),
                     ):
                         yield chunk
         except OpenRouterError:
@@ -789,7 +799,13 @@ class VPSAnthropicClient:
         self,
         chunks: AsyncIterator[bytes],
         model: str | None = None,
+        require_tool_call: bool = False,
     ) -> AsyncIterator[bytes]:
+        if require_tool_call:
+            async for chunk in self._openai_sse_to_anthropic_required_tool(chunks, model=model):
+                yield chunk
+            return
+
         target = self._target_for_model(model)
         yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"'
         yield target.model_id.encode("utf-8")
@@ -855,6 +871,25 @@ class VPSAnthropicClient:
             "\n\n"
         ).encode("utf-8")
         yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    async def _openai_sse_to_anthropic_required_tool(
+        self,
+        chunks: AsyncIterator[bytes],
+        model: str | None = None,
+    ) -> AsyncIterator[bytes]:
+        buffered: list[bytes] = []
+        saw_tool = False
+        async for chunk in self._openai_sse_to_anthropic(chunks, model=model, require_tool_call=False):
+            buffered.append(chunk)
+            if b'"type": "tool_use"' in chunk or b'"type":"tool_use"' in chunk:
+                saw_tool = True
+        if not saw_tool:
+            raise OpenRouterError(
+                "VPS model ignored required Claude Code tool call.",
+                status_code=502,
+            )
+        for chunk in buffered:
+            yield chunk
 
     def _openai_text_delta(self, event: str) -> str:
         text_delta, _, _ = self._openai_stream_delta(event)
@@ -1100,6 +1135,14 @@ def _next_delta(previous: str, current: str) -> str:
     if current.startswith(previous):
         return current[len(previous) :]
     return current
+
+
+def _response_has_tool_use(response: dict[str, Any]) -> bool:
+    content = response.get("content")
+    return isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") == "tool_use"
+        for block in content
+    )
 
 
 def _anthropic_sse(event: str, payload: dict[str, Any]) -> bytes:
