@@ -278,8 +278,6 @@ class RoutePlanner:
             mode = "pro"
         elif requested_auto and reasoning_mode == "xstrong":
             mode = "ultra"
-        if has_tool_contract and reasoning_mode == "fast":
-            mode = "pro"
         public_model = self._public_model_for_mode(mode)
         selected_model = self._openrouter_model_for_mode(mode, task_type, complexity)
         external_model_requested = "/" in requested_model and requested_model not in self._public_ids()

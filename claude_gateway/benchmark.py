@@ -55,7 +55,7 @@ BENCHMARK_CASES: tuple[BenchmarkCase, ...] = (
         prompt="Leia um arquivo local e diga o proximo passo.",
         tools=({"name": "read_file", "input_schema": {"type": "object"}},),
         live_default=True,
-        expect_mode="pro",
+        expect_mode="economy",
         expect_orchestration=False,
         expect_web_search=False,
     ),

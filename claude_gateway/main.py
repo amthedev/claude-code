@@ -2282,11 +2282,6 @@ def _prepare_payload(
         search_policy = "off"
     limited["__gateway_web_search_policy"] = search_policy
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
-    if payload_has_tool_contract(limited):
-        limited["max_tokens"] = max(
-            limited["max_tokens"],
-            min(settings.tool_request_output_tokens, settings.max_request_output_tokens),
-        )
     if auth.customer:
         limited = clamp_customer_payload(limited, settings, auth.customer)
     return limited

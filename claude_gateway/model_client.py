@@ -118,9 +118,6 @@ class VPSAnthropicClient:
         )
 
     def _target_for_model(self, model: str | None) -> VPSTarget:
-        if not self.settings.vps_strong_model_id:
-            return self._default_target()
-
         requested = str(model or "").strip().lower()
         fast_names = {
             self.settings.cheap_code_agent.lower(),
@@ -128,8 +125,11 @@ class VPSAnthropicClient:
             self.settings.vps_fast_model_id.lower(),
             self.settings.vps_model_id.lower(),
         }
-        if requested in fast_names or "flash" in requested or "economy" in requested:
+        has_fast_target = bool(self.settings.vps_fast_model_base_url or self.settings.vps_fast_model_id)
+        if has_fast_target and (requested in fast_names or "flash" in requested or "economy" in requested):
             return self._fast_target()
+        if not self.settings.vps_strong_model_id:
+            return self._default_target()
         return self._strong_target()
 
     def _api_format(self, target: VPSTarget | None = None) -> str:

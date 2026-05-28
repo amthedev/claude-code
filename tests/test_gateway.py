@@ -520,6 +520,30 @@ class GatewayTestCase(unittest.TestCase):
             "https://runpod-strong.example/v1/chat/completions",
         )
 
+    def test_vps_routes_fast_model_when_only_fast_target_is_configured(self) -> None:
+        settings = make_settings()
+        settings.vps_model_base_url = "https://runpod-default.example/v1"
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        settings.vps_fast_model_base_url = "https://runpod-fast.example/v1"
+        settings.vps_fast_model_id = "qwen3-14b"
+        settings.vps_strong_model_base_url = ""
+        settings.vps_strong_model_id = ""
+        client = VPSAnthropicClient(settings)
+
+        fast = client._openai_chat_payload(
+            {"messages": [{"role": "user", "content": "Oi"}]},
+            stream=False,
+            model=settings.fast_agent,
+        )
+        fast_target = client._target_for_model(settings.fast_agent)
+
+        self.assertEqual(fast["model"], "qwen3-14b")
+        self.assertEqual(
+            client._url("/v1/chat/completions", fast_target),
+            "https://runpod-fast.example/v1/chat/completions",
+        )
+
     def test_vps_openai_chat_adds_no_think_for_fast_qwen3_requests(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -2838,7 +2862,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
+        self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertNotIn("Internal Gemini coding guidance", str(self.app.state.openrouter.calls[-1][1]))
 
@@ -3779,6 +3803,34 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(unlocked.status_code, 200)
             self.assertEqual(unlocked.json()["mode"], "ultra")
 
+    def test_customer_fast_tool_requests_stay_on_fast_route(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 500, "durationHours": 28, "model": "opus"},
+            ).json()["account"]
+            response = client.post(
+                "/v1/router/debug",
+                headers={"Authorization": f"Bearer {account['apiToken']}"},
+                json={
+                    "model": "claude-code-pro",
+                    "gateway_reasoning_mode": "fast",
+                    "max_tokens": 256,
+                    "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+                    "messages": [{"role": "user", "content": "Crie um arquivo txt simples"}],
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["mode"], "economy")
+            self.assertFalse(response.json()["use_orchestration"])
+
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
             "/v1/responses",
@@ -4331,7 +4383,7 @@ class GatewayTestCase(unittest.TestCase):
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
-        self.assertEqual(payload["max_tokens"], 16000)
+        self.assertEqual(payload["max_tokens"], 256)
 
     def test_claude_code_tool_payload_is_detected_without_beta_header(self) -> None:
         response = self.client.post(
@@ -4360,7 +4412,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertEqual(payload["__gateway_client"], "claude-code")
-        self.assertEqual(payload["max_tokens"], 16000)
+        self.assertEqual(payload["max_tokens"], 256)
 
     def test_public_identity_prompt_includes_current_date_context(self) -> None:
         response = self.client.post(
