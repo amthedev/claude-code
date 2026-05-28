@@ -859,7 +859,8 @@ def create_app(
     async def current_support_ticket(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_customer(request, app.state.settings)
-        return {"ticket": app.state.support_store.current_for_customer(auth.token)}
+        ticket = await asyncio.to_thread(app.state.support_store.current_for_customer, auth.token)
+        return {"ticket": ticket}
 
     @app.post("/v1/support/tickets")
     async def open_support_ticket(
@@ -870,7 +871,7 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        ticket = app.state.support_store.open_ticket(auth.token, payload)
+        ticket = await asyncio.to_thread(app.state.support_store.open_ticket, auth.token, payload)
         ticket = await _auto_support_reply(app, ticket, str(payload.get("message") or ""))
         return JSONResponse({"ticket": ticket})
 
@@ -884,7 +885,7 @@ def create_app(
         auth = _require_customer(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        ticket = app.state.support_store.customer_message(auth.token, ticket_id, payload)
+        ticket = await asyncio.to_thread(app.state.support_store.customer_message, auth.token, ticket_id, payload)
         if ticket.get("status") == "ai":
             ticket = await _auto_support_reply(app, ticket, str(payload.get("message") or ""))
         return JSONResponse({"ticket": ticket})
@@ -893,13 +894,14 @@ def create_app(
     async def list_support_tickets(request: Request) -> dict[str, Any]:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
-        return app.state.support_store.list_admin_tickets()
+        return await asyncio.to_thread(app.state.support_store.list_admin_tickets)
 
     @app.post("/v1/admin/support/tickets/{ticket_id}/claim")
     async def claim_support_ticket(ticket_id: str, request: Request) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
-        return JSONResponse({"ticket": app.state.support_store.claim_ticket(ticket_id)})
+        ticket = await asyncio.to_thread(app.state.support_store.claim_ticket, ticket_id)
+        return JSONResponse({"ticket": ticket})
 
     @app.post("/v1/admin/support/tickets/{ticket_id}/messages")
     async def admin_support_message(
@@ -911,13 +913,15 @@ def create_app(
         _require_admin(request, app.state.settings)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-        return JSONResponse({"ticket": app.state.support_store.admin_message(ticket_id, payload)})
+        ticket = await asyncio.to_thread(app.state.support_store.admin_message, ticket_id, payload)
+        return JSONResponse({"ticket": ticket})
 
     @app.post("/v1/admin/support/tickets/{ticket_id}/close")
     async def close_support_ticket(ticket_id: str, request: Request) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_admin(request, app.state.settings)
-        return JSONResponse({"ticket": app.state.support_store.close_ticket(ticket_id)})
+        ticket = await asyncio.to_thread(app.state.support_store.close_ticket, ticket_id)
+        return JSONResponse({"ticket": ticket})
 
     @app.get("/v1/conversations")
     async def list_conversations(request: Request) -> dict[str, Any]:
@@ -3515,6 +3519,10 @@ class _StreamTextNormalizer:
         text = str(incoming or "")
         if not text:
             return ""
+        if _safe_incremental_stream_delta(self.cleaned_text, text):
+            self.raw_text += text
+            self.cleaned_text += text
+            return text
         self.raw_text = _merge_stream_text(self.raw_text, text)
         next_cleaned = clean_model_text(self.raw_text, strip=False)
         if _stream_text_equal(next_cleaned, self.cleaned_text) or _stream_text_endswith(self.cleaned_text, next_cleaned):
@@ -3528,6 +3536,30 @@ class _StreamTextNormalizer:
         delta = next_cleaned[overlap:] if overlap else next_cleaned
         self.cleaned_text = next_cleaned
         return delta
+
+
+def _safe_incremental_stream_delta(current: str, incoming: str) -> bool:
+    if not current:
+        return False
+    if not incoming:
+        return False
+    if "<think" in incoming.lower() or "</think" in incoming.lower():
+        return False
+    if _stream_text_startswith(incoming, current):
+        return False
+    stripped = incoming.lstrip()
+    if stripped and stripped != incoming:
+        if _stream_text_endswith(current, stripped):
+            return False
+        if _stream_overlap_length(current, stripped) >= 3:
+            return False
+    if incoming[:1].isspace() or current[-1:].isspace():
+        return True
+    if incoming[:1] in ".,;:!?)]}":
+        return True
+    if current[-1:] in "([{/\n":
+        return True
+    return False
 
 
 class _StreamVisibilityFilter:

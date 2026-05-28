@@ -4,6 +4,7 @@ let activeRecognition = null;
 let activeVoiceButton = null;
 let activeSupportTicket = null;
 let supportPollTimer = null;
+const SUPPORT_POLL_INTERVAL_MS = 7000;
 let pendingAttachments = [];
 let activeConversationId = null;
 let activeChatSessionKey = `chat_${Date.now()}`;
@@ -2451,6 +2452,51 @@ function mergeStreamText(current, incoming) {
   return current + text;
 }
 
+function createStreamUiScheduler(onText, onThinking) {
+  const scheduleFrame =
+    typeof window.requestAnimationFrame === "function"
+      ? (callback) => window.requestAnimationFrame(callback)
+      : (callback) => window.setTimeout(callback, 16);
+  const cancelFrame =
+    typeof window.cancelAnimationFrame === "function"
+      ? (handle) => window.cancelAnimationFrame(handle)
+      : (handle) => window.clearTimeout(handle);
+  let pendingText = "";
+  let pendingThinking = "";
+  let textFrame = null;
+  let thinkingFrame = null;
+
+  const flushText = () => {
+    textFrame = null;
+    onText(pendingText);
+  };
+  const flushThinking = () => {
+    thinkingFrame = null;
+    onThinking(pendingThinking);
+  };
+
+  return {
+    text(value) {
+      pendingText = value;
+      if (textFrame === null) textFrame = scheduleFrame(flushText);
+    },
+    thinking(value) {
+      pendingThinking = value;
+      if (thinkingFrame === null) thinkingFrame = scheduleFrame(flushThinking);
+    },
+    flush() {
+      if (textFrame !== null) {
+        cancelFrame(textFrame);
+        flushText();
+      }
+      if (thinkingFrame !== null) {
+        cancelFrame(thinkingFrame);
+        flushThinking();
+      }
+    },
+  };
+}
+
 function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMode) {
   const remaining = Math.max(0, Number(current?.dailyLimit || 0) - Number(current?.usedToday || 0));
   const availableRawTokens = Math.floor(remaining / reasoningTokenMultiplier(mode));
@@ -2522,6 +2568,7 @@ async function callGateway(
   let buffer = "";
   let answer = "";
   let thinking = "";
+  const streamUi = createStreamUiScheduler(onText, onThinking);
 
   while (true) {
     const { value, done } = await reader.read();
@@ -2529,12 +2576,13 @@ async function callGateway(
     buffer += decoder.decode(value, { stream: true });
     buffer = parseGatewayStreamChunk(buffer, (text) => {
       answer = mergeStreamText(answer, text);
-      onText(answer.trimStart());
+      streamUi.text(answer.trimStart());
     }, (text) => {
       thinking = mergeStreamText(thinking, text);
-      onThinking(thinking.trimStart());
+      streamUi.thinking(thinking.trimStart());
     });
   }
+  streamUi.flush();
 
   return answer.trim() || "Sem resposta.";
 }
@@ -3306,7 +3354,7 @@ async function refreshSupportTicket() {
 function startSupportPolling() {
   if (supportPollTimer || !account()?.active) return;
   refreshSupportTicket();
-  supportPollTimer = window.setInterval(refreshSupportTicket, 2200);
+  supportPollTimer = window.setInterval(refreshSupportTicket, SUPPORT_POLL_INTERVAL_MS);
 }
 
 function stopSupportPolling() {

@@ -5,6 +5,7 @@ const apiTokenForm = document.querySelector("#apiTokenForm");
 let supportState = { waiting: [], active: [], closed: [] };
 let activeSupportTicket = null;
 let supportPollTimer = null;
+const SUPPORT_POLL_INTERVAL_MS = 7000;
 let adminSetupConfigured = true;
 let purchaseState = [];
 let gatewayHealthState = null;
@@ -202,7 +203,7 @@ function startSupportPolling() {
   refreshSupportFromServer().catch(() => {});
   supportPollTimer = window.setInterval(() => {
     refreshSupportFromServer().catch(() => {});
-  }, 2200);
+  }, SUPPORT_POLL_INTERVAL_MS);
 }
 
 function stopSupportPolling() {
