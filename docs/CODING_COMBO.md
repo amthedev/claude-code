@@ -15,15 +15,14 @@ VPS_DISABLE_QWEN_THINKING=true
 SIMPLE_REQUEST_MAX_OUTPUT_TOKENS=768
 ```
 
-## OpenRouter somente emergencia
+## OpenRouter desativado
 
 ```env
-OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
-OPENROUTER_BASE_URL=https://openrouter.ai/api
 ```
 
-OpenRouter só entra se a VPS falhar, der erro HTTP, retornar resposta inválida ou demorar mais que `VPS_MODEL_SLOW_FALLBACK_SECONDS` antes da primeira resposta.
+O gateway nao usa OpenRouter em producao. Se a VPS falhar, a resposta deve falhar claramente em vez de consumir creditos OpenRouter.
 
 ## Modelos publicos
 
@@ -62,7 +61,6 @@ ENABLE_AGENT_ORCHESTRATION=true
 | Papel | Modelo | Uso |
 | --- | --- | --- |
 | VPS model | `VPS_MODEL_ID` | resposta principal para todos os modos publicos |
-| OpenRouter fallback | modelos internos seguros | emergencia quando a VPS falha ou fica lenta antes da primeira resposta |
 | OpenAI helper | `gpt-5.4-mini` | escolhe defaults, reduz perguntas desnecessárias e revisa/design director em frontend e modo forte |
 
 ## Regras do roteador
@@ -101,5 +99,5 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
 ## Fontes usadas
 
 - Configuracao da VPS: API Anthropic-compatible em `/v1/messages` ou OpenAI-compatible em `/v1/chat/completions`.
-- OpenRouter: mantido somente como fallback de emergencia quando a VPS falha ou fica lenta antes da primeira resposta.
+- OpenRouter: desativado em producao; mantenha `OPENROUTER_EMERGENCY_FALLBACK=false`.
 - Anthropic Claude Code docs: `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL` e `ANTHROPIC_BASE_URL` são os pontos corretos para mapear aliases/modelos no Claude Code.

@@ -44,7 +44,7 @@ class Settings:
     allow_unauthenticated: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api"
-    openrouter_emergency_fallback: bool = True
+    openrouter_emergency_fallback: bool = False
     vps_model_base_url: str = "http://127.0.0.1:8000"
     vps_model_id: str = "local-model"
     vps_model_api_format: str = "anthropic"
@@ -169,7 +169,7 @@ class Settings:
             allow_unauthenticated=_bool_env("ALLOW_UNAUTHENTICATED", False),
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
-            openrouter_emergency_fallback=_bool_env("OPENROUTER_EMERGENCY_FALLBACK", True),
+            openrouter_emergency_fallback=False,
             vps_model_base_url=os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000"),
             vps_model_id=vps_model_id,
             vps_model_api_format=os.getenv("VPS_MODEL_API_FORMAT", "anthropic"),

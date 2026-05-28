@@ -270,6 +270,7 @@ class GatewayTestCase(unittest.TestCase):
                 "BACKEND_PARTNER_AGENT": "moonshotai/kimi-k2.6",
                 "PROJECT_REASONING_AGENT": "qwen/qwen3-235b-a22b-thinking-2507",
                 "DEEP_REASONING_AGENT": "deepseek/deepseek-r1",
+                "OPENROUTER_EMERGENCY_FALLBACK": "true",
                 "API_RATE_LIMIT": "120",
             },
         ):
@@ -281,6 +282,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(settings.backend_partner_agent, "deepseek/deepseek-v4-pro")
         self.assertEqual(settings.project_reasoning_agent, "deepseek/deepseek-v4-pro")
         self.assertEqual(settings.deep_reasoning_agent, "deepseek/deepseek-v4-pro")
+        self.assertFalse(settings.openrouter_emergency_fallback)
         self.assertEqual(settings.api_rate_limit, 600)
 
     def test_x_api_key_takes_priority_over_stale_authorization_header(self) -> None:
@@ -1111,8 +1113,24 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"Oi! Estou aqui", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
+    def test_common_president_question_returns_local_answer_without_upstream(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "quem é o presidente do brasil"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Luiz Inácio Lula da Silva", response.json()["content"][0]["text"])
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
     def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
         settings = make_settings()
+        settings.openrouter_emergency_fallback = True
         app = create_app(
             settings=settings,
             client_factory=FakeFailingVPSClient,
@@ -1137,6 +1155,7 @@ class GatewayTestCase(unittest.TestCase):
 
     def test_slow_vps_uses_openrouter_emergency_fallback_before_first_response(self) -> None:
         settings = make_settings()
+        settings.openrouter_emergency_fallback = True
         settings.vps_model_slow_fallback_seconds = 0.01
         app = create_app(
             settings=settings,
@@ -1227,6 +1246,7 @@ class GatewayTestCase(unittest.TestCase):
 
     def test_streaming_vps_failure_before_first_chunk_uses_openrouter_fallback(self) -> None:
         settings = make_settings()
+        settings.openrouter_emergency_fallback = True
         app = create_app(
             settings=settings,
             client_factory=FakeFailingVPSClient,
@@ -1297,7 +1317,7 @@ class GatewayTestCase(unittest.TestCase):
         admin_data = admin_response.json()
         self.assertEqual(admin_data["model_provider"], "vps")
         self.assertTrue(admin_data["vps_model_configured"])
-        self.assertTrue(admin_data["openrouter_fallback_configured"])
+        self.assertFalse(admin_data["openrouter_fallback_configured"])
         self.assertIn("cost_target", admin_data)
 
     def test_admin_benchmark_reports_setup_and_route_results_without_upstream_call(self) -> None:

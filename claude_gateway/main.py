@@ -2519,10 +2519,10 @@ def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
         ),
         (
             "openrouter_fallback",
-            "OpenRouter emergencia configurado",
-            readiness["openrouter_fallback"],
+            "OpenRouter desativado",
+            not readiness["openrouter_fallback"],
             "warning",
-            "Sem OpenRouter o fallback de emergencia fica indisponivel.",
+            "OpenRouter deve permanecer desativado para evitar consumo de creditos.",
         ),
         (
             "web_search",
@@ -2725,6 +2725,9 @@ def _literal_conversation_title(text: str) -> bool:
 def _quick_local_answer(payload: dict[str, Any]) -> str | None:
     prompt = _normalize_text(_visible_last_user_message_text(payload).replace("?", "").replace("!", ""))
     if prompt in {
+        "eae",
+        "iae",
+        "iai",
         "oi",
         "ola",
         "opa",
@@ -2737,6 +2740,13 @@ def _quick_local_answer(payload: dict[str, Any]) -> str | None:
         "ola tudo bem",
     }:
         return "Oi! Estou aqui. O que vamos resolver?"
+    if prompt in {
+        "quem e o presidente do brasil",
+        "presidente do brasil",
+        "qual e o presidente do brasil",
+        "qual o presidente do brasil",
+    }:
+        return "O presidente do Brasil é Luiz Inácio Lula da Silva (Lula)."
     return None
 
 

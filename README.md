@@ -1,6 +1,6 @@
 # Claude Code Gateway
 
-FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes public model names like `claude-code-pro`, routes them to your Anthropic-compatible VPS model first, supports optional OpenAI web search, and keeps OpenRouter only as an emergency fallback.
+FastAPI gateway and web app for selling an AI assistant experience with Claude Code compatibility. It exposes public model names like `claude-code-pro`, routes them to your Anthropic-compatible VPS model first, supports optional OpenAI web search.
 
 ## Quick Start
 
@@ -21,8 +21,6 @@ VPS_MODEL_API_KEY=
 RUNPOD_API_KEY=
 RUNPOD_POD_ID=
 ```
-
-Optionally set `OPENROUTER_API_KEY` only for emergency fallback.
 
 For RunPod vLLM templates, `VPS_MODEL_API_KEY` is the vLLM serving key, often
 `sk-[pod-id]`. The admin panel's "Ligar VPS" button needs `RUNPOD_API_KEY`,
@@ -59,7 +57,6 @@ The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients p
 - Primary OpenAI-compatible/vLLM/RunPod: `POST {VPS_MODEL_BASE_URL}/chat/completions` when `VPS_MODEL_API_FORMAT=openai-chat`
 - Public model: `claude-code-pro`
 - Actual VPS model id sent upstream: `VPS_MODEL_ID`
-- Emergency fallback: OpenRouter only when the VPS errors or is too slow before the first response
 
 ```env
 VPS_MODEL_BASE_URL=https://sua-vps.example.com
@@ -70,7 +67,7 @@ VPS_MODEL_TIMEOUT_SECONDS=55
 VPS_MODEL_SLOW_FALLBACK_SECONDS=6
 VPS_DISABLE_QWEN_THINKING=true
 SIMPLE_REQUEST_MAX_OUTPUT_TOKENS=768
-OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 ```
 
@@ -116,7 +113,7 @@ smoke test on the same L40S.
 The public model combo is tuned for Claude Code terminal work, but the actual generation now uses your configured VPS model. The router still keeps public identity, token limits, tool behavior, and compatibility rules stable.
 
 - `VPS_MODEL_ID`: the single upstream model used by default.
-- OpenRouter fallback: emergency only, not the normal route.
+- OpenRouter fallback: disabled. Requests stay on the configured VPS.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
 Every request also receives a Claude public response profile while preserving Anthropic-compatible tone, tool-call behavior, and coding ergonomics for Claude Code.
@@ -140,7 +137,7 @@ export ALLOW_PREMIUM_FALLBACK=false
 export ALLOW_DIRECT_EXTERNAL_MODELS=false
 ```
 
-`claude-code-pro` is the only public model exposed to clients. OpenRouter models are not used unless the emergency fallback activates.
+`claude-code-pro` is the only public model exposed to clients. OpenRouter is disabled for production requests.
 
 ## Optional ChatGPT Helper
 
@@ -403,7 +400,7 @@ VPS_MODEL_BASE_URL=https://your-vps.example.com
 VPS_MODEL_ID=local-model
 VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
-OPENROUTER_EMERGENCY_FALLBACK=true
+OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 OPENAI_API_KEY=sk-proj-...
 GATEWAY_API_KEYS=strong-admin-token
