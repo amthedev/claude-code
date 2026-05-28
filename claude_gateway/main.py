@@ -2289,40 +2289,7 @@ def _prepare_payload(
 
 
 def _limit_payload_context(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:
-    hard_limit = settings.max_request_input_chars
-    if hard_limit <= 0:
-        return payload
-    context_limit = min(hard_limit, FAST_CONTEXT_MAX_CHARS)
-    max_messages = TOOL_CONTEXT_MAX_MESSAGES if payload_has_tool_contract(payload) else FAST_CONTEXT_MAX_MESSAGES
-    messages = payload.get("messages")
-    if not isinstance(messages, list) or not messages:
-        return payload
-    if len(messages) <= max_messages and len(extract_prompt_text(payload)) <= context_limit:
-        return payload
-
-    limited = dict(payload)
-    kept: list[Any] = []
-    for message in reversed(messages[-max_messages:]):
-        if not isinstance(message, dict):
-            continue
-        candidate = [message, *kept]
-        candidate_payload = {**limited, "messages": candidate}
-        if len(extract_prompt_text(candidate_payload)) <= context_limit:
-            kept = candidate
-            continue
-        if not kept:
-            truncated = _truncate_message_to_context(message, context_limit)
-            if truncated is not None:
-                kept = [truncated]
-        break
-
-    if kept:
-        while kept and _message_cannot_start_context(kept[0]):
-            kept.pop(0)
-        if kept:
-            limited["messages"] = kept
-            limited["__gateway_context_trimmed"] = True
-    return limited
+    return payload
 
 
 def _message_cannot_start_context(message: Any) -> bool:

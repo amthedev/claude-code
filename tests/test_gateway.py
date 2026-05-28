@@ -416,7 +416,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(blocked_other_ip.status_code, 429)
 
-    def test_large_old_context_is_trimmed_instead_of_rejected(self) -> None:
+    def test_oversized_context_is_rejected_instead_of_silently_trimmed(self) -> None:
         settings = make_settings()
         settings.max_request_input_chars = 1000
         app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
@@ -436,9 +436,8 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 200)
-        sent_payload = app.state.openrouter.calls[-1][1]
-        self.assertEqual(sent_payload["messages"], [{"role": "user", "content": "responda agora"}])
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(app.state.openrouter.calls, [])
 
     def test_quick_greeting_ignores_claude_code_system_reminders(self) -> None:
         response = self.client.post(
@@ -3850,11 +3849,11 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.head("/")
         self.assertEqual(response.status_code, 200)
 
-    def test_gateway_trims_long_chat_history_before_upstream(self) -> None:
+    def test_gateway_preserves_long_chat_history_before_upstream(self) -> None:
         messages = [
-            {"role": "user", "content": f"pergunta {index} " + ("contexto " * 600)}
+            {"role": "user", "content": f"pergunta {index} " + ("contexto " * 200)}
             if index % 2 == 0
-            else {"role": "assistant", "content": f"resposta {index} " + ("detalhe " * 600)}
+            else {"role": "assistant", "content": f"resposta {index} " + ("detalhe " * 200)}
             for index in range(30)
         ]
         messages.append({"role": "user", "content": "Explique a função final"})
@@ -3874,8 +3873,8 @@ class GatewayTestCase(unittest.TestCase):
             b"".join(response.iter_bytes())
 
         sent = self.app.state.openrouter.calls[-1][1]
-        self.assertLessEqual(len(sent["messages"]), 16)
-        self.assertTrue(sent["__gateway_context_trimmed"])
+        self.assertEqual(len(sent["messages"]), len(messages))
+        self.assertNotIn("__gateway_context_trimmed", sent)
         self.assertIn("Explique a função final", str(sent["messages"][-1]["content"]))
 
     def test_customer_conversations_are_saved_in_database(self) -> None:

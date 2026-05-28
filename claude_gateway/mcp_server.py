@@ -26,8 +26,6 @@ DEFAULT_ALLOWED_COMMANDS = (
 )
 HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-subdomain.squareweb.app")
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
-COWORK_CONTEXT_MAX_CHARS = 12_000
-COWORK_TASK_MAX_CHARS = 4_000
 COWORK_MAX_OUTPUT_TOKENS = 420
 COWORK_TIMEOUT_SECONDS = 15.0
 _GATEWAY_HTTP_CLIENT: httpx.AsyncClient | None = None
@@ -330,8 +328,8 @@ def build_cowork_prompt(
         "debug": "debugging partner",
         "plan": "technical planning partner",
     }.get(mode, "pair-programming partner")
-    context = _compact_cowork_text(project_context, COWORK_CONTEXT_MAX_CHARS).strip()
-    compact_task = _compact_cowork_text(task, COWORK_TASK_MAX_CHARS).strip()
+    context = project_context.strip()
+    task_text = task.strip()
     parts = [
         f"Modo cowork: {mode_label}.",
         "Responda em pt-BR, direto ao ponto, sem saudacao generica.",
@@ -344,19 +342,8 @@ def build_cowork_prompt(
     ]
     if context:
         parts.append(f"Project context / conteudo recebido:\n{context}")
-    parts.append(f"Task / pedido do usuario:\n{compact_task}")
+    parts.append(f"Task / pedido do usuario:\n{task_text}")
     return "\n\n".join(parts)
-
-
-def _compact_cowork_text(value: str, max_chars: int) -> str:
-    text = str(value or "").strip()
-    if len(text) <= max_chars:
-        return text
-    marker = "\n\n[... trecho central omitido para responder mais rapido ...]\n\n"
-    available = max(0, max_chars - len(marker))
-    head = max(0, available // 3)
-    tail = max(0, available - head)
-    return f"{text[:head]}{marker}{text[-tail:]}"
 
 
 def build_cowork_system_prompt(mode: str = "pair_programming") -> str:

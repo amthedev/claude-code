@@ -113,16 +113,18 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertIn("Frontend lives in frontier/client.js.", prompt)
         self.assertIn("Fix the billing button.", prompt)
 
-    def test_build_cowork_prompt_compacts_large_conversation_context(self) -> None:
+    def test_build_cowork_prompt_preserves_large_conversation_context(self) -> None:
+        large_context = "inicio " + ("x" * 20_000) + " fim"
         prompt = mcp_server.build_cowork_prompt(
             task="Analise a conversa.",
-            project_context="inicio " + ("x" * 20_000) + " fim",
+            project_context=large_context,
         )
 
-        self.assertLess(len(prompt), 13_000)
+        self.assertGreater(len(prompt), 20_000)
         self.assertIn("inicio", prompt)
         self.assertIn("fim", prompt)
-        self.assertIn("trecho central omitido", prompt)
+        self.assertIn("x" * 20_000, prompt)
+        self.assertNotIn("trecho central omitido", prompt)
 
     def test_cowork_gateway_replaces_generic_greeting_with_clear_conversation_message(self) -> None:
         captured = {}
