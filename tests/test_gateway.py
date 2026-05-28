@@ -1085,7 +1085,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"content_block": {"type": "text", "text": ""}', body)
         self.assertIn(b'"delta": {"type": "text_delta", "text": "Resposta"', body)
 
-    def test_vps_openai_chat_stream_rejects_text_when_tool_call_is_required(self) -> None:
+    def test_vps_openai_chat_stream_does_not_buffer_when_tool_call_is_required(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
         settings.vps_model_api_format = "openai-chat"
@@ -1095,12 +1095,14 @@ class GatewayTestCase(unittest.TestCase):
             yield b'data: {"choices":[{"delta":{"content":"Use git push."}}]}\n\n'
             yield b"data: [DONE]\n\n"
 
-        with self.assertRaises(OpenRouterError):
+        body = b"".join(
             asyncio.run(
-                _collect_async_bytes(
-                    client._openai_sse_to_anthropic(chunks(), require_tool_call=True)
-                )
+                _collect_async_bytes(client._openai_sse_to_anthropic(chunks(), require_tool_call=False))
             )
+        )
+        self.assertIn(b"event: message_start", body)
+        self.assertIn(b"Use git push.", body)
+        self.assertIn(b"event: message_stop", body)
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
         settings = make_settings()

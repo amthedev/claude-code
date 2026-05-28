@@ -861,7 +861,7 @@ class VPSAnthropicClient:
                 async for chunk in self._openai_sse_to_anthropic(
                     response.aiter_bytes(),
                     model=model,
-                    require_tool_call=self._should_force_claude_code_tool_choice(payload),
+                    require_tool_call=False,
                 ):
                     yield chunk
         except OpenRouterError:
@@ -875,11 +875,6 @@ class VPSAnthropicClient:
         model: str | None = None,
         require_tool_call: bool = False,
     ) -> AsyncIterator[bytes]:
-        if require_tool_call:
-            async for chunk in self._openai_sse_to_anthropic_required_tool(chunks, model=model):
-                yield chunk
-            return
-
         target = self._target_for_model(model)
         yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"'
         yield target.model_id.encode("utf-8")
@@ -945,25 +940,6 @@ class VPSAnthropicClient:
             "\n\n"
         ).encode("utf-8")
         yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
-
-    async def _openai_sse_to_anthropic_required_tool(
-        self,
-        chunks: AsyncIterator[bytes],
-        model: str | None = None,
-    ) -> AsyncIterator[bytes]:
-        buffered: list[bytes] = []
-        saw_tool = False
-        async for chunk in self._openai_sse_to_anthropic(chunks, model=model, require_tool_call=False):
-            buffered.append(chunk)
-            if b'"type": "tool_use"' in chunk or b'"type":"tool_use"' in chunk:
-                saw_tool = True
-        if not saw_tool:
-            raise OpenRouterError(
-                "VPS model ignored required Claude Code tool call.",
-                status_code=502,
-            )
-        for chunk in buffered:
-            yield chunk
 
     def _openai_text_delta(self, event: str) -> str:
         text_delta, _, _ = self._openai_stream_delta(event)
