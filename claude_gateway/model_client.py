@@ -39,7 +39,8 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "not specified, choose a simple sensible filename in the current workspace and call Write. For code "
     "creation or edits, call Write, Edit, MultiEdit, or Bash as needed; do not provide file contents in the "
     "chat as a substitute for editing files. Tool-call JSON must be complete and include all required fields "
-    "such as file_path and content. Use enough tokens to finish the requested task."
+    "such as file_path and content. Never write literal text like 'Tool use: {...}' in the chat; emit a real "
+    "tool call through the tool API. Use enough tokens to finish the requested task."
 )
 LOCAL_TOOL_AGENT_PROMPT = (
     "Local workspace tool behavior override: the user expects you to use the available file/workspace tools. "
@@ -48,7 +49,8 @@ LOCAL_TOOL_AGENT_PROMPT = (
     "exact path is unclear. Use read_file/list_files/apply_patch/write_file/run_tests when those are the tools "
     "available. If the user asks to create a new file and no filename is given, choose a simple filename and "
     "call write_file. Answer in the user's language; if the user writes Portuguese, use Brazilian Portuguese. "
-    "Do not repeat the user's request as internal questions. Do not answer with only a summary when an edit "
+    "Do not repeat the user's request as internal questions. Never write literal text like 'Tool use: {...}' "
+    "in the chat; emit a real tool call through the tool API. Do not answer with only a summary when an edit "
     "was requested."
 )
 CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
@@ -541,7 +543,8 @@ class VPSAnthropicClient:
             "found and no exact path was provided, list or search the workspace instead of asking for the path. "
             "If the user asks for a new .txt/.html/.js/.py without a filename, choose a simple filename and "
             "write it. If a Read call failed because line_offset, line_count, offset, or limit was rejected, "
-            "retry Read immediately with only the file path argument.</system-reminder>"
+            "retry Read immediately with only the file path argument. Never print literal 'Tool use: {...}' "
+            "text; make an actual tool call.</system-reminder>"
         )
         for message in reversed(copied):
             if message.get("role") == "user":
@@ -809,7 +812,22 @@ class VPSAnthropicClient:
             thinking_text, visible_text = split_thinking_text(text)
             if thinking_text:
                 content.append({"type": "thinking", "thinking": thinking_text})
-            if visible_text:
+            textual_tool_calls = _textual_tool_calls_from_text(visible_text)
+            if textual_tool_calls:
+                for tool_call in textual_tool_calls:
+                    function = tool_call["function"]
+                    content.append(
+                        {
+                            "type": "tool_use",
+                            "id": str(tool_call.get("id") or ""),
+                            "name": str(function.get("name") or ""),
+                            "input": _normalize_claude_code_tool_input(
+                                str(function.get("name") or ""),
+                                _json_object_from_string(function.get("arguments")),
+                            ),
+                        }
+                    )
+            elif visible_text:
                 content.append({"type": "text", "text": visible_text})
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
@@ -874,7 +892,7 @@ class VPSAnthropicClient:
                 async for chunk in self._openai_sse_to_anthropic(
                     response.aiter_bytes(),
                     model=model,
-                    require_tool_call=False,
+                    require_tool_call=self._should_force_tool_choice(payload),
                 ):
                     yield chunk
         except OpenRouterError:
@@ -894,6 +912,7 @@ class VPSAnthropicClient:
         yield b'","role":"assistant","content":[]}}\n\n'
         state = _QwenThinkingStreamState()
         tool_state = _OpenAIToolCallStreamState(state)
+        textual_tool_buffer = "" if require_tool_call else None
         stop_reason = "end_turn"
 
         buffer = ""
@@ -906,10 +925,13 @@ class VPSAnthropicClient:
                     stop_reason = "tool_use"
                 elif finish_reason in {"stop", "length", "content_filter"} and stop_reason != "tool_use":
                     stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
-                if text_delta:
+                if text_delta and textual_tool_buffer is not None and not tool_state.has_tool:
+                    textual_tool_buffer += text_delta
+                elif text_delta:
                     for outgoing in state.feed(text_delta):
                         yield outgoing
                 if tool_calls:
+                    textual_tool_buffer = "" if textual_tool_buffer is not None else None
                     for outgoing in tool_state.feed(tool_calls):
                         yield outgoing
 
@@ -919,11 +941,23 @@ class VPSAnthropicClient:
                 stop_reason = "tool_use"
             elif finish_reason in {"stop", "length", "content_filter"} and stop_reason != "tool_use":
                 stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
-            if text_delta:
+            if text_delta and textual_tool_buffer is not None and not tool_state.has_tool:
+                textual_tool_buffer += text_delta
+            elif text_delta:
                 for outgoing in state.feed(text_delta):
                     yield outgoing
             if tool_calls:
+                textual_tool_buffer = "" if textual_tool_buffer is not None else None
                 for outgoing in tool_state.feed(tool_calls):
+                    yield outgoing
+
+        if textual_tool_buffer and not tool_state.has_tool:
+            textual_tool_calls = _textual_tool_calls_from_text(textual_tool_buffer)
+            if textual_tool_calls:
+                for outgoing in tool_state.feed(textual_tool_calls):
+                    yield outgoing
+            else:
+                for outgoing in state.feed(textual_tool_buffer):
                     yield outgoing
 
         for outgoing in state.finish():
@@ -1207,6 +1241,76 @@ def _response_has_tool_use(response: dict[str, Any]) -> bool:
         isinstance(block, dict) and block.get("type") == "tool_use"
         for block in content
     )
+
+
+def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    lowered = str(text or "").lower()
+    search_from = 0
+    while True:
+        marker = lowered.find("tool use", search_from)
+        if marker < 0:
+            break
+        colon = lowered.find(":", marker)
+        if colon < 0:
+            break
+        object_start = text.find("{", colon)
+        if object_start < 0:
+            break
+        object_end = _balanced_json_object_end(text, object_start)
+        if object_end < 0:
+            break
+        parsed = _json_object_from_string(text[object_start : object_end + 1])
+        call = _tool_call_from_textual_payload(parsed, len(calls))
+        if call:
+            calls.append(call)
+        search_from = object_end + 1
+    return calls
+
+
+def _balanced_json_object_end(text: str, start: int) -> int:
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _tool_call_from_textual_payload(payload: dict[str, Any], index: int) -> dict[str, Any] | None:
+    name = str(payload.get("name") or payload.get("tool") or payload.get("tool_name") or "").strip()
+    if not name:
+        return None
+    arguments = payload.get("input")
+    if not isinstance(arguments, dict):
+        arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return {
+        "index": index,
+        "id": str(payload.get("id") or f"call_text_{index}"),
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(arguments),
+        },
+    }
 
 
 def _json_object_from_string(value: Any) -> dict[str, Any]:

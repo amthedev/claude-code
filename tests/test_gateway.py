@@ -989,6 +989,39 @@ class GatewayTestCase(unittest.TestCase):
             anthropic = client._anthropic_from_openai_chat(response)
             client._ensure_required_tool_call(payload, anthropic)
 
+    def test_vps_openai_chat_converts_textual_tool_use_to_real_tool_call(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_text_tool",
+                "choices": [
+                    {
+                        "message": {
+                            "content": 'Tool use: {"name":"Read","input":{"file_path":"docs/visual-direction.md"}}'
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(response["stop_reason"], "tool_use")
+        self.assertEqual(
+            response["content"],
+            [
+                {
+                    "type": "tool_use",
+                    "id": "call_text_0",
+                    "name": "Read",
+                    "input": {"file_path": "docs/visual-direction.md"},
+                }
+            ],
+        )
+
     def test_vps_openai_chat_normalizes_claude_code_tool_aliases(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -1108,6 +1141,30 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"event: message_start", body)
         self.assertIn(b"Use git push.", body)
         self.assertIn(b"event: message_stop", body)
+
+    def test_vps_openai_chat_stream_converts_textual_tool_use_to_tool_call(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"Tool use: {\\"name\\":\\"Read\\","}}]}\n\n'
+            yield (
+                b'data: {"choices":[{"delta":{"content":"\\"input\\":{\\"file_path\\":\\"docs/design-system.md\\"}}"}}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(
+            asyncio.run(
+                _collect_async_bytes(client._openai_sse_to_anthropic(chunks(), require_tool_call=True))
+            )
+        )
+
+        self.assertIn(b'"content_block": {"type": "tool_use", "id": "call_text_0", "name": "Read", "input": {}}', body)
+        self.assertIn(b'"partial_json": "{\\"file_path\\": \\"docs/design-system.md\\"}"', body)
+        self.assertNotIn(b"Tool use:", body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
         settings = make_settings()
