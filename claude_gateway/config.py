@@ -4,6 +4,11 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
+
+
+DEFAULT_RUNPOD_CODER_MODEL_ID = "qwen25-coder-14b"
+DEFAULT_RUNPOD_VLLM_PORT = "8001"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -36,6 +41,61 @@ def _load_dotenv() -> None:
         value = value.strip().strip('"').strip("'")
         if key:
             os.environ.setdefault(key, value)
+
+
+def _runpod_vllm_base_url(pod_id: str, port: str = DEFAULT_RUNPOD_VLLM_PORT) -> str:
+    return f"https://{pod_id}-{port}.proxy.runpod.net/v1"
+
+
+def _looks_like_gateway_url(value: str) -> bool:
+    host = (urlparse(value).hostname or "").lower()
+    if not host:
+        return False
+    return host.endswith(".squareweb.app") or "claude-code-api" in host
+
+
+def _model_backend_env() -> dict[str, str]:
+    runpod_pod_id = os.getenv("RUNPOD_POD_ID", "").strip()
+    runpod_port = os.getenv("RUNPOD_VLLM_PORT", DEFAULT_RUNPOD_VLLM_PORT).strip() or DEFAULT_RUNPOD_VLLM_PORT
+    base_url = os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000").strip()
+    model_id = os.getenv("VPS_MODEL_ID", "local-model").strip()
+    api_format = os.getenv("VPS_MODEL_API_FORMAT", "anthropic").strip()
+    fast_base_url = os.getenv("VPS_FAST_MODEL_BASE_URL", "").strip()
+    fast_model_id = os.getenv("VPS_FAST_MODEL_ID", "").strip()
+    fast_api_format = os.getenv("VPS_FAST_MODEL_API_FORMAT", "").strip()
+    strong_base_url = os.getenv("VPS_STRONG_MODEL_BASE_URL", "").strip()
+    strong_model_id = os.getenv("VPS_STRONG_MODEL_ID", "").strip()
+    strong_api_format = os.getenv("VPS_STRONG_MODEL_API_FORMAT", "").strip()
+
+    if runpod_pod_id and _looks_like_gateway_url(base_url):
+        base_url = _runpod_vllm_base_url(runpod_pod_id, runpod_port)
+        model_id = (
+            fast_model_id
+            if fast_model_id and not _looks_like_gateway_url(fast_base_url)
+            else DEFAULT_RUNPOD_CODER_MODEL_ID
+        )
+        api_format = "openai-chat"
+        if not fast_base_url or _looks_like_gateway_url(fast_base_url):
+            fast_base_url = base_url
+        if not fast_model_id or fast_model_id in {"local-model", "claude-code-pro"}:
+            fast_model_id = model_id
+        if not fast_api_format:
+            fast_api_format = api_format
+        strong_base_url = ""
+        strong_model_id = ""
+        strong_api_format = ""
+
+    return {
+        "vps_model_base_url": base_url,
+        "vps_model_id": model_id,
+        "vps_model_api_format": api_format,
+        "vps_fast_model_base_url": fast_base_url,
+        "vps_fast_model_id": fast_model_id,
+        "vps_fast_model_api_format": fast_api_format,
+        "vps_strong_model_base_url": strong_base_url,
+        "vps_strong_model_id": strong_model_id,
+        "vps_strong_model_api_format": strong_api_format,
+    }
 
 
 @dataclass(slots=True)
@@ -164,7 +224,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         _load_dotenv()
-        vps_model_id = os.getenv("VPS_MODEL_ID", "local-model")
+        model_backend = _model_backend_env()
+        vps_model_id = model_backend["vps_model_id"]
         public_model_id = os.getenv("PUBLIC_MODEL_ID", "claude-code-pro")
         return cls(
             gateway_api_keys=_csv_env("GATEWAY_API_KEYS", "local-dev-token"),
@@ -173,17 +234,17 @@ class Settings:
             openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
             openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api"),
             openrouter_emergency_fallback=False,
-            vps_model_base_url=os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000"),
+            vps_model_base_url=model_backend["vps_model_base_url"],
             vps_model_id=vps_model_id,
-            vps_model_api_format=os.getenv("VPS_MODEL_API_FORMAT", "anthropic"),
+            vps_model_api_format=model_backend["vps_model_api_format"],
             vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
-            vps_fast_model_base_url=os.getenv("VPS_FAST_MODEL_BASE_URL", ""),
-            vps_fast_model_id=os.getenv("VPS_FAST_MODEL_ID", ""),
-            vps_fast_model_api_format=os.getenv("VPS_FAST_MODEL_API_FORMAT", ""),
+            vps_fast_model_base_url=model_backend["vps_fast_model_base_url"],
+            vps_fast_model_id=model_backend["vps_fast_model_id"],
+            vps_fast_model_api_format=model_backend["vps_fast_model_api_format"],
             vps_fast_model_api_key=os.getenv("VPS_FAST_MODEL_API_KEY", ""),
-            vps_strong_model_base_url=os.getenv("VPS_STRONG_MODEL_BASE_URL", ""),
-            vps_strong_model_id=os.getenv("VPS_STRONG_MODEL_ID", ""),
-            vps_strong_model_api_format=os.getenv("VPS_STRONG_MODEL_API_FORMAT", ""),
+            vps_strong_model_base_url=model_backend["vps_strong_model_base_url"],
+            vps_strong_model_id=model_backend["vps_strong_model_id"],
+            vps_strong_model_api_format=model_backend["vps_strong_model_api_format"],
             vps_strong_model_api_key=os.getenv("VPS_STRONG_MODEL_API_KEY", ""),
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "55")),
             vps_model_slow_fallback_seconds=float(

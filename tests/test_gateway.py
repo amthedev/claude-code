@@ -322,6 +322,35 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(admin_response.json()["detail"], "Customer API token required.")
         self.assertEqual(customer_response.status_code, 200)
 
+    def test_settings_recover_runpod_backend_when_vps_points_to_gateway(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "GATEWAY_SKIP_DOTENV": "1",
+                "RUNPOD_POD_ID": "pod123",
+                "RUNPOD_VLLM_PORT": "8001",
+                "VPS_MODEL_BASE_URL": "https://claude-code-api.squareweb.app/",
+                "VPS_MODEL_ID": "claude-code-pro",
+                "VPS_MODEL_API_FORMAT": "openai-chat",
+                "VPS_FAST_MODEL_BASE_URL": "",
+                "VPS_FAST_MODEL_ID": "",
+                "VPS_FAST_MODEL_API_FORMAT": "",
+                "VPS_STRONG_MODEL_BASE_URL": "https://old-strong.example/v1",
+                "VPS_STRONG_MODEL_ID": "qwen3-32b",
+                "VPS_STRONG_MODEL_API_FORMAT": "openai-chat",
+            },
+            clear=False,
+        ):
+            settings = Settings.from_env()
+
+        self.assertEqual(settings.vps_model_base_url, "https://pod123-8001.proxy.runpod.net/v1")
+        self.assertEqual(settings.vps_model_id, "qwen25-coder-14b")
+        self.assertEqual(settings.vps_model_api_format, "openai-chat")
+        self.assertEqual(settings.vps_fast_model_base_url, "https://pod123-8001.proxy.runpod.net/v1")
+        self.assertEqual(settings.vps_fast_model_id, "qwen25-coder-14b")
+        self.assertEqual(settings.vps_strong_model_base_url, "")
+        self.assertEqual(settings.vps_strong_model_id, "")
+
     def test_admin_can_purge_accounts_and_old_api_tokens_stop_working(self) -> None:
         with TemporaryDirectory() as directory:
             settings = make_settings()
