@@ -1528,7 +1528,7 @@ def _response_has_tool_use(response: dict[str, Any]) -> bool:
 
 def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
-    bare_call = _bare_json_tool_call_from_text(text)
+    bare_call = _json_tool_call_from_text(text)
     if bare_call:
         return [bare_call]
 
@@ -1555,19 +1555,51 @@ def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:
     return calls
 
 
-def _bare_json_tool_call_from_text(text: str) -> dict[str, Any] | None:
+def _json_tool_call_from_text(text: str) -> dict[str, Any] | None:
     raw = str(text or "").strip()
     if not raw:
         return None
-    if raw.startswith("```"):
-        raw = re.sub(r"(?is)^```(?:json)?\s*", "", raw).strip()
-        raw = re.sub(r"(?is)\s*```$", "", raw).strip()
-    if not raw.startswith("{"):
+    candidates: list[str] = []
+    for match in reversed(list(re.finditer(r"\{", raw))):
+        object_end = _balanced_json_object_end(raw, match.start())
+        if object_end >= 0:
+            candidates.append(raw[match.start() : object_end + 1])
+    for candidate in candidates:
+        candidate = candidate.strip()
+        call = _tool_call_from_textual_payload(_json_object_from_string(candidate), 0)
+        if call:
+            return call
+    return None
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    name = str(tool_name or "").strip()
+    compact = name.lower().replace("_", "").replace("-", "")
+    aliases = {
+        "enterworktre": "EnterWorktree",
+        "enterworktree": "EnterWorktree",
+    }
+    return aliases.get(compact, name)
+
+
+def _tool_call_from_textual_payload(payload: dict[str, Any], index: int) -> dict[str, Any] | None:
+    name = _normalize_tool_name(payload.get("name") or payload.get("tool") or payload.get("tool_name") or "")
+    if not name:
         return None
-    object_end = _balanced_json_object_end(raw, 0)
-    if object_end < 0 or raw[object_end + 1 :].strip():
-        return None
-    return _tool_call_from_textual_payload(_json_object_from_string(raw), 0)
+    arguments = payload.get("input")
+    if not isinstance(arguments, dict):
+        arguments = payload.get("arguments")
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return {
+        "index": index,
+        "id": str(payload.get("id") or f"call_text_{index}"),
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(arguments),
+        },
+    }
 
 
 def _balanced_json_object_end(text: str, start: int) -> int:
@@ -1593,26 +1625,6 @@ def _balanced_json_object_end(text: str, start: int) -> int:
             if depth == 0:
                 return index
     return -1
-
-
-def _tool_call_from_textual_payload(payload: dict[str, Any], index: int) -> dict[str, Any] | None:
-    name = str(payload.get("name") or payload.get("tool") or payload.get("tool_name") or "").strip()
-    if not name:
-        return None
-    arguments = payload.get("input")
-    if not isinstance(arguments, dict):
-        arguments = payload.get("arguments")
-    if not isinstance(arguments, dict):
-        arguments = {}
-    return {
-        "index": index,
-        "id": str(payload.get("id") or f"call_text_{index}"),
-        "type": "function",
-        "function": {
-            "name": name,
-            "arguments": json.dumps(arguments),
-        },
-    }
 
 
 def _openai_tool_call_from_anthropic_tool_use(block: dict[str, Any], index: int) -> dict[str, Any]:

@@ -1183,6 +1183,28 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
 
+        fenced_json_response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_fenced_json_tool",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "Entendi. Vou usar o `EnterWorktre`.\n\n"
+                                "```json\n"
+                                '{"name":"EnterWorktre","arguments":{}}\n'
+                                "```"
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(fenced_json_response["stop_reason"], "tool_use")
+        self.assertEqual(fenced_json_response["content"][0]["name"], "EnterWorktree")
+        self.assertEqual(fenced_json_response["content"][0]["input"], {})
+
     def test_vps_openai_chat_preserves_tool_history_as_native_openai_messages(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
