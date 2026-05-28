@@ -610,8 +610,31 @@ class GatewayTestCase(unittest.TestCase):
 
         estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
         self.assertLess(outgoing["max_tokens"], 16000)
-        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 32768 - 512)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
         self.assertEqual(outgoing["tool_choice"], "auto")
+
+    def test_vps_openai_chat_respects_configured_context_window(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        settings.vps_openai_chat_context_tokens = 24_576
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "max_tokens": 14638,
+                "messages": [{"role": "user", "content": "contexto " * 11000}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+            },
+            stream=False,
+        )
+
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        self.assertLess(outgoing["max_tokens"], 14638)
+        self.assertLessEqual(
+            estimated_input + outgoing["max_tokens"],
+            settings.vps_openai_chat_context_tokens - 512,
+        )
 
     def test_vps_openai_chat_trims_large_history_to_fit_input_budget(self) -> None:
         settings = make_settings()
@@ -637,7 +660,7 @@ class GatewayTestCase(unittest.TestCase):
         joined = "\n".join(message["content"] for message in outgoing["messages"])
         estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
         self.assertLessEqual(estimated_input, 18000)
-        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 32768 - 512)
+        self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
         self.assertIn("como vc ta", joined)
         self.assertNotIn("historico antigo historico antigo", joined)
         self.assertIn("previous content omitted", joined)

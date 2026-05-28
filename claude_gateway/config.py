@@ -59,6 +59,7 @@ class Settings:
     vps_strong_model_api_key: str = ""
     vps_model_timeout_seconds: float = 55.0
     vps_model_slow_fallback_seconds: float = 6.0
+    vps_openai_chat_context_tokens: int = 24_576
     runpod_api_key: str = ""
     runpod_pod_id: str = ""
     vps_scheduler_interval_seconds: int = 60
@@ -181,6 +182,7 @@ class Settings:
             vps_model_slow_fallback_seconds=float(
                 os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "6")
             ),
+            vps_openai_chat_context_tokens=int(os.getenv("VPS_OPENAI_CHAT_CONTEXT_TOKENS", "24576")),
             runpod_api_key=os.getenv("RUNPOD_API_KEY", ""),
             runpod_pod_id=os.getenv("RUNPOD_POD_ID", ""),
             vps_scheduler_interval_seconds=int(os.getenv("VPS_SCHEDULER_INTERVAL_SECONDS", "60")),

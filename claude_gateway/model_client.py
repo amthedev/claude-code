@@ -16,7 +16,7 @@ from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
 
-OPENAI_CHAT_CONTEXT_TOKENS = 32_768
+OPENAI_CHAT_CONTEXT_TOKENS = 24_576
 OPENAI_CHAT_CONTEXT_MARGIN_TOKENS = 512
 OPENAI_CHAT_INPUT_BUDGET_TOKENS = 18_000
 OPENAI_CHAT_MIN_TRIMMED_CHARS = 1_200
@@ -586,8 +586,12 @@ class VPSAnthropicClient:
         requested_max_tokens: int,
     ) -> int:
         estimated_input_tokens = self._estimate_openai_chat_input_tokens(messages, tools)
-        available = OPENAI_CHAT_CONTEXT_TOKENS - estimated_input_tokens - OPENAI_CHAT_CONTEXT_MARGIN_TOKENS
+        available = self._openai_chat_context_tokens() - estimated_input_tokens - OPENAI_CHAT_CONTEXT_MARGIN_TOKENS
         return max(1, min(max(1, requested_max_tokens), available))
+
+    def _openai_chat_context_tokens(self) -> int:
+        configured = int(getattr(self.settings, "vps_openai_chat_context_tokens", 0) or 0)
+        return max(1, configured or OPENAI_CHAT_CONTEXT_TOKENS)
 
     def _trim_messages_for_openai_chat_context(
         self,
