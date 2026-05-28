@@ -177,7 +177,7 @@ class VPSAnthropicClient:
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = True
         timeout = httpx.Timeout(
-            connect=30.0,
+            connect=10.0,
             read=self.settings.vps_model_timeout_seconds,
             write=30.0,
             pool=30.0,
@@ -702,7 +702,7 @@ class VPSAnthropicClient:
         target = self._target_for_model(model)
         outgoing = self._openai_chat_payload(payload, stream=True, model=model)
         timeout = httpx.Timeout(
-            connect=30.0,
+            connect=10.0,
             read=self.settings.vps_model_timeout_seconds,
             write=30.0,
             pool=30.0,

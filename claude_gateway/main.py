@@ -382,6 +382,18 @@ def create_app(
                 return _sse_response(_stream_text_message(message))
             return JSONResponse(message)
 
+        quick_answer = _quick_local_answer(payload)
+        if quick_answer:
+            app.state.usage.record_request(decision)
+            message = build_text_message(
+                _public_model_label(decision.public_model, app.state.settings),
+                quick_answer,
+                usage={"input_tokens": 1, "output_tokens": len(quick_answer.split())},
+            )
+            if payload.get("stream"):
+                return _sse_response(_stream_text_message(message))
+            return JSONResponse(message)
+
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         reservation = None
         if not identity_answer:
@@ -1707,6 +1719,18 @@ async def _complete_gateway_message(
             decision.public_model,
         )
 
+    quick_answer = _quick_local_answer(payload)
+    if quick_answer:
+        app.state.usage.record_request(decision)
+        return (
+            build_text_message(
+                _public_model_label(decision.public_model, app.state.settings),
+                quick_answer,
+                usage={"input_tokens": 1, "output_tokens": len(quick_answer.split())},
+            ),
+            decision.public_model,
+        )
+
     identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
     reservation = None
     if not identity_answer:
@@ -2683,6 +2707,24 @@ def _literal_conversation_title(text: str) -> bool:
         "boa noite",
         "tudo bem",
     }
+
+
+def _quick_local_answer(payload: dict[str, Any]) -> str | None:
+    prompt = _normalize_text(_last_user_message_text(payload).replace("?", "").replace("!", ""))
+    if prompt in {
+        "oi",
+        "ola",
+        "opa",
+        "e ai",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "tudo bem",
+        "oi tudo bem",
+        "ola tudo bem",
+    }:
+        return "Oi! Estou aqui. O que vamos resolver?"
+    return None
 
 
 def _clean_generated_title(value: str) -> str:

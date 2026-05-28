@@ -319,7 +319,7 @@ class GatewayTestCase(unittest.TestCase):
                 "__gateway_route_decision": object(),
                 "reasoning": {"effort": "high"},
                 "include_reasoning": True,
-                "messages": [{"role": "user", "content": "Oi"}],
+                "messages": [{"role": "user", "content": "Explique uma função simples"}],
             },
             "deepseek/deepseek-v4-pro",
         )
@@ -751,6 +751,39 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"chamada de ferramenta valida", body)
         self.assertIn(b'"stop_reason": "end_turn"', body)
         self.assertNotIn(b'"stop_reason": "tool_use"', body)
+
+    def test_exact_greeting_returns_local_answer_without_upstream(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "oi"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["content"][0]["text"], "Oi! Estou aqui. O que vamos resolver?")
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
+    def test_streaming_exact_greeting_returns_local_answer_without_upstream(self) -> None:
+        with self.client.stream(
+            "POST",
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "oi"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b"Oi! Estou aqui", body)
+        self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_vps_is_primary_and_openrouter_is_emergency_fallback(self) -> None:
         settings = make_settings()
@@ -1300,7 +1333,7 @@ class GatewayTestCase(unittest.TestCase):
                 json={
                     "model": "claude-code-ultra",
                     "max_tokens": 16,
-                    "messages": [{"role": "user", "content": "Oi"}],
+                    "messages": [{"role": "user", "content": "Diga oi"}],
                 },
             )
             self.assertEqual(response.status_code, 200)
@@ -1639,7 +1672,7 @@ class GatewayTestCase(unittest.TestCase):
                 json={
                     "model": "claude-code-ultra",
                     "max_tokens": 16,
-                    "messages": [{"role": "user", "content": "Oi"}],
+                    "messages": [{"role": "user", "content": "Diga oi"}],
                 },
             )
             self.assertEqual(message.status_code, 200)
@@ -1988,7 +2021,7 @@ class GatewayTestCase(unittest.TestCase):
             json={
                 "model": "claude-code-pro",
                 "max_tokens": 128,
-                "messages": [{"role": "user", "content": "Oi"}],
+                "messages": [{"role": "user", "content": "Explique uma função simples"}],
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -3329,7 +3362,7 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-pro",
                 "stream": True,
                 "max_tokens": 128,
-                "messages": [{"role": "user", "content": "oi"}],
+                "messages": [{"role": "user", "content": "explique uma funcao"}],
             },
         ) as response:
             self.assertEqual(response.status_code, 200)
@@ -3362,7 +3395,7 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-pro",
                 "stream": True,
                 "max_tokens": 128,
-                "messages": [{"role": "user", "content": "oi"}],
+                "messages": [{"role": "user", "content": "explique uma funcao"}],
             },
         )
         self.assertEqual(response.status_code, 200)

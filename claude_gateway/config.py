@@ -57,8 +57,8 @@ class Settings:
     vps_strong_model_id: str = ""
     vps_strong_model_api_format: str = ""
     vps_strong_model_api_key: str = ""
-    vps_model_timeout_seconds: float = 90.0
-    vps_model_slow_fallback_seconds: float = 25.0
+    vps_model_timeout_seconds: float = 55.0
+    vps_model_slow_fallback_seconds: float = 6.0
     runpod_api_key: str = ""
     runpod_pod_id: str = ""
     vps_scheduler_interval_seconds: int = 60
@@ -177,9 +177,9 @@ class Settings:
             vps_strong_model_id=os.getenv("VPS_STRONG_MODEL_ID", ""),
             vps_strong_model_api_format=os.getenv("VPS_STRONG_MODEL_API_FORMAT", ""),
             vps_strong_model_api_key=os.getenv("VPS_STRONG_MODEL_API_KEY", ""),
-            vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "90")),
+            vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "55")),
             vps_model_slow_fallback_seconds=float(
-                os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "25")
+                os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "6")
             ),
             runpod_api_key=os.getenv("RUNPOD_API_KEY", ""),
             runpod_pod_id=os.getenv("RUNPOD_POD_ID", ""),
