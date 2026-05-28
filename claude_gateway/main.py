@@ -76,6 +76,36 @@ from .usage import UsageStore
 from .vps_scheduler import VPSScheduleStore, vps_scheduler_loop
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontier"
+CUSTOMER_FORCED_FAST_REQUESTS = 10
+HEAVY_MODE_REQUIRED_TERMS = (
+    "auth",
+    "autenticacao",
+    "autorizacao",
+    "critical",
+    "critico",
+    "crítico",
+    "corrupcao",
+    "corrupção",
+    "data loss",
+    "database",
+    "deploy",
+    "migration",
+    "migracao",
+    "migração",
+    "multiple files",
+    "pagamento",
+    "payment",
+    "producao",
+    "produção",
+    "production",
+    "race condition",
+    "seguranca",
+    "segurança",
+    "security",
+    "vazamento",
+    "varios arquivos",
+    "vários arquivos",
+)
 
 OPENAI_DESIGN_DIRECTOR_PROMPT = """You are a concise design director for a coding assistant.
 Return only tactical guidance that improves frontend implementation quality before code is written.
@@ -370,6 +400,7 @@ def create_app(
         if _is_claude_code_request(request, payload):
             payload = {**payload, "__gateway_client": "claude-code"}
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
+        payload = _with_customer_latency_policy(payload, app, auth)
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         control_answer = _prompt_control_answer(payload, app.state.settings)
@@ -1054,6 +1085,7 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = require_gateway_auth(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
+        payload = _with_customer_latency_policy(payload, app, auth)
         payload = _with_customer_power_tier(payload, app, auth)
         decision = app.state.planner.plan(payload)
         web_search = _web_search_debug(payload, app.state.settings, auth)
@@ -1073,6 +1105,7 @@ def create_app(
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_model_access(request, app.state.settings)
         payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
+        payload = _with_customer_latency_policy(payload, app, auth)
         payload = _with_customer_power_tier(payload, app, auth)
         if payload.get("stream"):
             payload = {**payload, "stream": False}
@@ -1782,6 +1815,7 @@ async def _complete_gateway_message(
     if _is_claude_code_request(request, payload):
         payload = {**payload, "__gateway_client": "claude-code"}
     payload = _prepare_payload(payload, app.state.settings, auth, app.state.account_store)
+    payload = _with_customer_latency_policy(payload, app, auth)
     payload = _with_customer_power_tier(payload, app, auth)
     decision = app.state.planner.plan(payload)
     control_answer = _prompt_control_answer(payload, app.state.settings)
@@ -1889,7 +1923,7 @@ def _prepare_payload(
     elif reasoning_value is None and auth.customer and auth.customer.preferred_reasoning:
         reasoning_value = auth.customer.preferred_reasoning
     if reasoning_value is None:
-        reasoning_value = "auto"
+        reasoning_value = "fast"
     limited["__gateway_reasoning_mode"] = normalize_reasoning_mode(reasoning_value)
     policy_value = limited.pop("gateway_web_search", None)
     if policy_value is None:
@@ -2191,6 +2225,8 @@ def _with_customer_power_tier(
 ) -> dict[str, Any]:
     if not auth.customer or auth.customer.allowed_model != "*":
         return payload
+    if payload.get("__gateway_latency_fast_locked") or normalize_reasoning_mode(payload.get("__gateway_reasoning_mode")) == "fast":
+        return {**payload, "model": app.state.settings.economy_public_model}
 
     settings = app.state.settings
     requested = str(payload.get("model") or "").strip()
@@ -2234,6 +2270,59 @@ def _with_customer_power_tier(
         "selected_public_model": target_model,
     }
     return outgoing
+
+
+def _with_customer_latency_policy(
+    payload: dict[str, Any],
+    app: FastAPI,
+    auth: AuthContext,
+) -> dict[str, Any]:
+    if not auth.customer:
+        return payload
+
+    snapshot = _customer_usage_snapshot(app, auth)
+    today = snapshot.get("today") if isinstance(snapshot, dict) else {}
+    try:
+        requests_today = int(today.get("requests") or 0) if isinstance(today, dict) else 0
+    except (TypeError, ValueError):
+        requests_today = 0
+
+    requested_reasoning = normalize_reasoning_mode(payload.get("__gateway_reasoning_mode"))
+    heavy_requested = requested_reasoning in {"medium", "strong", "xstrong"} or _requested_heavy_model(payload)
+    heavy_allowed = (
+        requests_today >= CUSTOMER_FORCED_FAST_REQUESTS
+        and heavy_requested
+        and _payload_requires_heavy_mode(payload)
+    )
+
+    outgoing = dict(payload)
+    outgoing["__gateway_customer_requests_today"] = requests_today
+    outgoing["__gateway_heavy_allowed"] = heavy_allowed
+    if heavy_allowed:
+        return outgoing
+
+    outgoing["model"] = app.state.settings.economy_public_model
+    outgoing["__gateway_reasoning_mode"] = "fast"
+    outgoing["__gateway_web_search_policy"] = "off"
+    outgoing["__gateway_latency_fast_locked"] = True
+    outgoing["__gateway_latency_policy"] = (
+        "first_10_customer_messages"
+        if requests_today < CUSTOMER_FORCED_FAST_REQUESTS
+        else "fast_default_heavy_gate"
+    )
+    return outgoing
+
+
+def _requested_heavy_model(payload: dict[str, Any]) -> bool:
+    requested = str(payload.get("model") or "").strip().lower()
+    return any(marker in requested for marker in ("opus", "ultra", "strong", "xstrong"))
+
+
+def _payload_requires_heavy_mode(payload: dict[str, Any]) -> bool:
+    text = _normalize_text(extract_prompt_text(payload))
+    if not text:
+        return False
+    return any(term in text for term in HEAVY_MODE_REQUIRED_TERMS)
 
 
 def _customer_time_pacing_ratio(snapshot: dict[str, Any]) -> float:
@@ -2853,28 +2942,9 @@ def _clean_generated_title(value: str) -> str:
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:
     outgoing = dict(payload)
-    mode = normalize_reasoning_mode(outgoing.get("__gateway_reasoning_mode"))
-    if mode == "fast":
-        outgoing["__gateway_reasoning"] = "none"
-    elif decision.mode == "economy" and mode in {"auto", "normal"}:
-        outgoing["__gateway_reasoning"] = "none"
-    elif mode == "medium":
-        outgoing["__gateway_reasoning"] = "low"
-    elif mode == "strong":
-        outgoing["__gateway_reasoning"] = "medium"
-    elif mode == "xstrong":
-        outgoing["__gateway_reasoning"] = "high"
-    elif decision.complexity == "critical" or decision.mode == "ultra":
-        outgoing["__gateway_reasoning"] = "medium"
-    elif decision.complexity == "high" or decision.task_type in {
-        "architecture",
-        "debugging",
-        "frontend",
-        "review",
-    }:
-        outgoing["__gateway_reasoning"] = "low"
-    else:
-        outgoing["__gateway_reasoning"] = "none"
+    outgoing["__gateway_reasoning"] = "none"
+    outgoing.pop("reasoning", None)
+    outgoing.pop("include_reasoning", None)
     return outgoing
 
 

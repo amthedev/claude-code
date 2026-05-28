@@ -764,6 +764,7 @@ class AccountStore:
                 """
                 UPDATE accounts
                    SET used_today = used_today + ?,
+                       requests_today = requests_today + 1,
                        usage_day = ?
                  WHERE id = ?
                 """,
@@ -773,9 +774,15 @@ class AccountStore:
         return AccountUsageReservation(token=token, usage_day=today, estimated_tokens=estimated_tokens)
 
     def rollback_usage(self, reservation: AccountUsageReservation | None) -> None:
-        self.settle_usage(reservation, actual_tokens=0)
+        self.settle_usage(reservation, actual_tokens=0, decrement_request=True)
 
-    def settle_usage(self, reservation: AccountUsageReservation | None, *, actual_tokens: int) -> None:
+    def settle_usage(
+        self,
+        reservation: AccountUsageReservation | None,
+        *,
+        actual_tokens: int,
+        decrement_request: bool = False,
+    ) -> None:
         if reservation is None:
             return
         with self._lock, self._connect() as db:
@@ -785,10 +792,12 @@ class AccountStore:
             account = _account_from_row(row)
             if account.get("usageDay") != reservation.usage_day:
                 return
+            request_delta = 1 if decrement_request else 0
             db.execute(
                 """
                 UPDATE accounts
-                   SET used_today = ?
+                   SET used_today = ?,
+                       requests_today = ?
                  WHERE id = ?
                 """,
                 (
@@ -798,6 +807,7 @@ class AccountStore:
                         - reservation.estimated_tokens
                         + max(0, actual_tokens),
                     ),
+                    max(0, int(account.get("requestsToday") or 0) - request_delta),
                     account["id"],
                 ),
             )
@@ -832,7 +842,7 @@ class AccountStore:
             },
             "today": {
                 "date": account.get("usageDay") or _today(),
-                "requests": None,
+                "requests": int(account.get("requestsToday") or 0),
                 "reserved_cost_usd": None,
                 "daily_cost_budget_usd": round(daily_cost_budget_usd, 8),
                 "reserved_tokens": used_today,
@@ -882,6 +892,7 @@ class AccountStore:
                     active INTEGER NOT NULL,
                     gift_card_code TEXT NOT NULL,
                     used_today INTEGER NOT NULL DEFAULT 0,
+                    requests_today INTEGER NOT NULL DEFAULT 0,
                     usage_day TEXT NOT NULL DEFAULT '',
                     daily_limit INTEGER NOT NULL,
                     computed_daily_tokens INTEGER NOT NULL,
@@ -896,6 +907,8 @@ class AccountStore:
             )
             if not _column_exists(db, "accounts", "usage_day"):
                 db.execute("ALTER TABLE accounts ADD COLUMN usage_day TEXT NOT NULL DEFAULT ''")
+            if not _column_exists(db, "accounts", "requests_today"):
+                db.execute("ALTER TABLE accounts ADD COLUMN requests_today INTEGER NOT NULL DEFAULT 0")
             if not _column_exists(db, "accounts", "trial_expires_at"):
                 db.execute("ALTER TABLE accounts ADD COLUMN trial_expires_at TEXT NOT NULL DEFAULT ''")
             if not _column_exists(db, "accounts", "preferred_model"):
@@ -1011,6 +1024,7 @@ class AccountStore:
             """
             UPDATE accounts
                SET used_today = 0,
+                   requests_today = 0,
                    usage_day = ?
              WHERE usage_day <> ?
             """,
@@ -1529,6 +1543,7 @@ def _account_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "active": bool(row["active"]),
         "giftCardCode": row["gift_card_code"],
         "usedToday": row["used_today"],
+        "requestsToday": row["requests_today"] if "requests_today" in row.keys() else 0,
         "usageDay": row["usage_day"],
         "dailyLimit": row["daily_limit"],
         "computedDailyTokens": row["computed_daily_tokens"],

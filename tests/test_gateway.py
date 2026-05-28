@@ -2456,7 +2456,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-    def test_auto_routes_frontend_to_ui(self) -> None:
+    def test_auto_defaults_frontend_to_fast_route(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
@@ -2468,7 +2468,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["mode"], "ui")
+        self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertNotIn("agents", data)
@@ -2499,7 +2499,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertFalse(data["use_orchestration"])
 
-    def test_default_reasoning_mode_is_auto(self) -> None:
+    def test_default_reasoning_mode_is_fast_without_hidden_thinking(self) -> None:
         response = self.client.post(
             "/v1/messages",
             headers=self.headers,
@@ -2511,7 +2511,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertEqual(payload["__gateway_reasoning_mode"], "auto")
+        self.assertEqual(payload["__gateway_reasoning_mode"], "fast")
         self.assertEqual(payload["__gateway_reasoning"], "none")
 
     def test_simple_frontend_fix_uses_deepseek_flash(self) -> None:
@@ -2588,11 +2588,11 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["content"][0]["text"], "model=qwen/qwen3-coder-next")
+        self.assertEqual(response.json()["content"][0]["text"], "model=deepseek/deepseek-v4-flash")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertNotIn("Internal Gemini coding guidance", str(self.app.state.openrouter.calls[-1][1]))
 
-    def test_auto_routes_terminal_file_edits_to_pro_coder(self) -> None:
+    def test_auto_defaults_terminal_file_edits_to_fast_route(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
@@ -2609,13 +2609,13 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["mode"], "pro")
+        self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "file_edit")
         self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertFalse(data["use_orchestration"])
 
-    def test_non_streaming_pro_uses_agent_pipeline(self) -> None:
+    def test_non_streaming_pro_uses_single_fast_call_by_default(self) -> None:
         response = self.client.post(
             "/v1/messages",
             headers=self.headers,
@@ -2623,6 +2623,21 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-pro",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": "Corrija esse bug difícil"}],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
+        self.assertEqual(len(self.app.state.openrouter.calls), 1)
+
+    def test_explicit_extra_strong_admin_request_can_use_agent_pipeline(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "gateway_reasoning_mode": "xstrong",
+                "max_tokens": 512,
+                "messages": [{"role": "user", "content": "Corrija esse bug difficult critical de auth"}],
             },
         )
         self.assertEqual(response.status_code, 200)
@@ -2659,6 +2674,7 @@ class GatewayTestCase(unittest.TestCase):
             headers=self.headers,
             json={
                 "model": "claude-code-pro",
+                "gateway_reasoning_mode": "xstrong",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": "Corrija esse bug difícil"}],
             },
@@ -2677,6 +2693,7 @@ class GatewayTestCase(unittest.TestCase):
             headers=self.headers,
             json={
                 "model": "claude-code-ultra",
+                "gateway_reasoning_mode": "xstrong",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": "Corrija esse bug crítico de auth"}],
             },
@@ -2712,9 +2729,9 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         stable = response.json()
-        self.assertEqual(stable["web_search_policy"], "auto")
+        self.assertEqual(stable["web_search_policy"], "off")
         self.assertFalse(stable["web_search_should_search"])
-        self.assertEqual(stable["web_search_reason"], "stable_request")
+        self.assertEqual(stable["web_search_reason"], "disabled")
         self.assertFalse(stable["use_orchestration"])
 
         response = self.client.post(
@@ -2862,6 +2879,7 @@ class GatewayTestCase(unittest.TestCase):
             headers=self.headers,
             json={
                 "model": "claude-code-pro",
+                "gateway_web_search": "required",
                 "max_tokens": 128,
                 "messages": [{"role": "user", "content": "Quem é o presidente do Brasil hoje?"}],
             },
@@ -3319,7 +3337,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["requested_model"], "sonnet")
+            self.assertEqual(response.json()["requested_model"], "claude-code-pro")
             self.assertEqual(response.json()["public_model"], "claude-code-pro")
 
     def test_admin_can_recharge_account_with_tokens_or_brl(self) -> None:
@@ -3451,6 +3469,65 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["requested_model"], "claude-code-pro")
             self.assertEqual(response.json()["public_model"], "claude-code-pro")
+
+    def test_customer_first_10_requests_are_forced_fast_even_when_heavy_is_requested(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = make_settings()
+            settings.account_data_file = f"{tmpdir}/accounts.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            account = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Fornecedor API", "price": 500, "durationHours": 28, "model": "opus"},
+            ).json()["account"]
+            headers = {"Authorization": f"Bearer {account['apiToken']}"}
+
+            locked = client.post(
+                "/v1/router/debug",
+                headers=headers,
+                json={
+                    "model": "claude-code-ultra",
+                    "gateway_reasoning_mode": "xstrong",
+                    "max_tokens": 128,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Corrija bug critical de auth em production com multiple files",
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(locked.status_code, 200)
+            self.assertEqual(locked.json()["mode"], "economy")
+            self.assertFalse(locked.json()["use_orchestration"])
+            self.assertEqual(locked.json()["web_search_policy"], "off")
+
+            with app.state.account_store._connect() as db:
+                db.execute(
+                    "UPDATE accounts SET requests_today = 10 WHERE id = ?",
+                    (account["id"],),
+                )
+                db.commit()
+
+            unlocked = client.post(
+                "/v1/router/debug",
+                headers=headers,
+                json={
+                    "model": "claude-code-ultra",
+                    "gateway_reasoning_mode": "xstrong",
+                    "max_tokens": 128,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Corrija bug critical de auth em production com multiple files",
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(unlocked.status_code, 200)
+            self.assertEqual(unlocked.json()["mode"], "ultra")
 
     def test_openai_responses_endpoint_accepts_gateway_token(self) -> None:
         response = self.client.post(
@@ -3796,9 +3873,9 @@ class GatewayTestCase(unittest.TestCase):
             body = b"".join(response.iter_bytes())
 
         self.assertIn(b"event: message_start", body)
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "low")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
 
-    def test_extra_strong_reasoning_requests_high_hidden_reasoning(self) -> None:
+    def test_extra_strong_reasoning_still_disables_hidden_thinking(self) -> None:
         with self.client.stream(
             "POST",
             "/v1/messages",
@@ -3815,7 +3892,7 @@ class GatewayTestCase(unittest.TestCase):
             body = b"".join(response.iter_bytes())
 
         self.assertIn(b"event: message_start", body)
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "high")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
 
     def test_streaming_complex_request_uses_direct_proxy_by_default(self) -> None:
         with self.client.stream(
@@ -3835,7 +3912,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"event: message_start", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "low")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
 
     def test_streaming_agent_pipeline_can_be_enabled_explicitly(self) -> None:
         settings = make_settings()
@@ -3851,6 +3928,7 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-pro",
                 "stream": True,
                 "max_tokens": 128,
+                "gateway_reasoning_mode": "xstrong",
                 "messages": [{"role": "user", "content": "corrija esse bug no projeto"}],
             },
         ) as response:
@@ -3859,7 +3937,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertIn(b"text_delta", body)
         self.assertGreaterEqual(len(app.state.openrouter.calls), 5)
-        self.assertEqual(app.state.openrouter.calls[0][1]["__gateway_reasoning"], "low")
+        self.assertEqual(app.state.openrouter.calls[0][1]["__gateway_reasoning"], "none")
 
     def test_streaming_payload_uses_public_model_identity(self) -> None:
         with self.client.stream(

@@ -436,11 +436,14 @@ See [docs/ANALISE_E_DEPLOY.md](docs/ANALISE_E_DEPLOY.md) and [docs/PRODUCTION_RE
 
 Claude Code relies heavily on streaming and tool calls. For that reason:
 
+- the gateway defaults to fast mode in code, independent of environment flags;
+- customer/API tokens are forced through the fast path for their first 10 daily requests;
+- hidden reasoning/think mode is disabled before payloads reach the model backend;
 - simple `stream: true` requests are proxied directly to the VPS model;
 - `stream: true` requests use the direct VPS path by default so terminal output starts faster;
 - set `ENABLE_STREAM_AGENT_ORCHESTRATION=true` only if you prefer slower streamed answers with the internal multi-agent pipeline;
 - requests with `tools`, `tool_choice`, `tool_use`, or `tool_result` are proxied directly;
-- text-only requests use the multi-agent pipeline only when the router sees real depth, such as debugging, architecture, review, file edits, testing, or frontend work.
+- text-only requests use heavier routing only after an explicit stronger reasoning request and a high-risk prompt such as production/auth/payment/security/database work.
 
 This keeps the gateway compatible with Claude Code, Cursor, Windsurf, and OpenAI-compatible clients while still supporting agent debate for normal API calls.
 
