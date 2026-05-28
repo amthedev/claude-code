@@ -509,6 +509,17 @@ def create_app(
         response = _with_public_response_model(response, decision.public_model, app.state.settings)
         return JSONResponse(response)
 
+    @app.post("/v1/messages/count_tokens")
+    async def count_message_tokens(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
+        _require_model_access(request, app.state.settings)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+        text = extract_prompt_text(payload)
+        tool_chars = len(json.dumps(payload.get("tools") or [], ensure_ascii=False))
+        token_count = max(1, (len(text) + tool_chars + 3) // 4)
+        return JSONResponse({"input_tokens": token_count})
+
     @app.post("/v1/auth/signup")
     async def signup(payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit_public_auth(app, payload)
@@ -1156,6 +1167,10 @@ def _mount_frontend(app: FastAPI) -> None:
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
         return RedirectResponse(url="/frontier/app.html")
+
+    @app.head("/", include_in_schema=False)
+    async def root_head() -> JSONResponse:
+        return JSONResponse({}, headers={"Cache-Control": "no-cache"})
 
     @app.get("/app", include_in_schema=False)
     async def app_page() -> FileResponse:
@@ -3295,6 +3310,7 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
 
 
 CLAUDE_CODE_TOOL_NAMES = {
+    "applypatch",
     "bash",
     "edit",
     "exitplanmode",
@@ -3308,6 +3324,10 @@ CLAUDE_CODE_TOOL_NAMES = {
     "todowrite",
     "webfetch",
     "write",
+    "writefile",
+    "readfile",
+    "listfiles",
+    "runtests",
 }
 
 

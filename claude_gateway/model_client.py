@@ -36,6 +36,13 @@ CLAUDE_CODE_AGENT_PROMPT = (
     "file contents in the chat as a substitute for editing files. Tool-call JSON must be complete and include "
     "all required fields such as file_path and content. Use enough tokens to finish the requested task."
 )
+LOCAL_TOOL_AGENT_PROMPT = (
+    "Local workspace tool behavior override: the user expects you to use the available file/workspace tools. "
+    "When the user asks to read, find, edit, create, patch, run tests, or change files, call the matching tool "
+    "first instead of summarizing or saying you cannot find files. Start by listing or reading files when the "
+    "exact path is unclear. Use read_file/list_files/apply_patch/write_file/run_tests when those are the tools "
+    "available. Do not answer with only a summary when an edit was requested."
+)
 CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
 CLAUDE_CODE_SESSION_RE = re.compile(r"(?is)<session>.*?</session>")
 
@@ -243,7 +250,7 @@ class VPSAnthropicClient:
             outgoing["chat_template_kwargs"] = {"enable_thinking": False}
         if tools:
             outgoing["tools"] = tools
-            if self._should_force_claude_code_tool_choice(payload):
+            if self._should_force_tool_choice(payload):
                 outgoing["tool_choice"] = "required"
             elif payload.get("tool_choice"):
                 outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
@@ -268,6 +275,9 @@ class VPSAnthropicClient:
     def _is_claude_code_action_request(self, payload: dict[str, Any]) -> bool:
         if not self._is_claude_code_client(payload):
             return False
+        return self._is_tool_action_request(payload, aggressive=True)
+
+    def _is_tool_action_request(self, payload: dict[str, Any], *, aggressive: bool = False) -> bool:
         if not payload.get("tools"):
             return False
         if self._payload_has_tool_result(payload):
@@ -350,10 +360,16 @@ class VPSAnthropicClient:
             return True
         if self._looks_like_smalltalk(text):
             return False
-        return True
+        return aggressive
+
+    def _should_force_tool_choice(self, payload: dict[str, Any]) -> bool:
+        return (
+            self._is_claude_code_action_request(payload)
+            or self._is_tool_action_request(payload, aggressive=False)
+        ) and not self._payload_has_tool_result(payload)
 
     def _should_force_claude_code_tool_choice(self, payload: dict[str, Any]) -> bool:
-        return self._is_claude_code_action_request(payload) and not self._payload_has_tool_result(payload)
+        return self._should_force_tool_choice(payload)
 
     def _looks_like_question(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split())
@@ -483,8 +499,9 @@ class VPSAnthropicClient:
     def _messages_to_openai(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = []
         system_text = self._content_to_text(payload.get("system"))
-        if self._is_claude_code_action_request(payload):
-            system_text = f"{system_text}\n\n{CLAUDE_CODE_AGENT_PROMPT}" if system_text else CLAUDE_CODE_AGENT_PROMPT
+        if self._is_claude_code_action_request(payload) or self._is_tool_action_request(payload, aggressive=False):
+            action_prompt = CLAUDE_CODE_AGENT_PROMPT if self._is_claude_code_client(payload) else LOCAL_TOOL_AGENT_PROMPT
+            system_text = f"{system_text}\n\n{action_prompt}" if system_text else action_prompt
         if system_text:
             messages.append({"role": "system", "content": system_text})
 
@@ -496,7 +513,7 @@ class VPSAnthropicClient:
                 role = "user"
             messages.append({"role": role, "content": self._content_to_text(message.get("content"))})
 
-        if self._is_claude_code_action_request(payload):
+        if self._is_claude_code_action_request(payload) or self._is_tool_action_request(payload, aggressive=False):
             messages = self._messages_with_claude_code_agent_nudge(messages)
 
         return messages or [{"role": "user", "content": ""}]
@@ -509,8 +526,8 @@ class VPSAnthropicClient:
             "'posso comecar?', or similar. Ignore .venv, .git, node_modules, __pycache__, and site-packages "
             "unless explicitly requested. For project analysis, inspect root files and likely manifests/source "
             "files, then give the answer. If the user asks to create, edit, modify, run, or test anything, "
-            "call the appropriate tool such as Bash, Write, Edit, or MultiEdit; do not answer with instructions "
-            "for the user to do it manually. If a Read call failed because line_offset, line_count, offset, "
+            "call the appropriate tool such as Bash, Write, Edit, MultiEdit, read_file, write_file, apply_patch, "
+            "or run_tests; do not answer with instructions for the user to do it manually. If a Read call failed because line_offset, line_count, offset, "
             "or limit was rejected, retry Read immediately with only the file path argument.</system-reminder>"
         )
         for message in reversed(copied):

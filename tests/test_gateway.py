@@ -714,6 +714,30 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(site_request["tool_choice"], "required")
 
+    def test_vps_openai_chat_guides_desktop_workspace_tools_for_file_edits(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "Me ajude com alterações em um arquivo."}],
+                "tools": [
+                    {"name": "read_file", "input_schema": {"type": "object"}},
+                    {"name": "apply_patch", "input_schema": {"type": "object"}},
+                ],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+
+        self.assertEqual(outgoing["tool_choice"], "required")
+        self.assertIn("Local workspace tool behavior override", outgoing["messages"][0]["content"])
+        self.assertIn("read_file/list_files/apply_patch/write_file/run_tests", outgoing["messages"][0]["content"])
+        self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
+
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -3583,6 +3607,24 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"data: [DONE]", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
+
+    def test_messages_count_tokens_endpoint_is_anthropic_compatible(self) -> None:
+        response = self.client.post(
+            "/v1/messages/count_tokens?beta=true",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "messages": [{"role": "user", "content": "Conte estes tokens"}],
+                "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.json()["input_tokens"], 1)
+
+    def test_root_head_is_supported_for_desktop_health_checks(self) -> None:
+        response = self.client.head("/")
+        self.assertEqual(response.status_code, 200)
 
     def test_gateway_trims_long_chat_history_before_upstream(self) -> None:
         messages = [
