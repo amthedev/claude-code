@@ -242,6 +242,8 @@ class VPSAnthropicClient:
             return False
         if str(payload.get("__gateway_reasoning") or "").strip().lower() == "none":
             return True
+        if self._is_claude_code_client(payload):
+            return True
         # Claude Code/tool-heavy requests can otherwise stream only hidden thinking blocks.
         return bool(payload.get("tools") or payload.get("tool_choice"))
 
