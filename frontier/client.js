@@ -1086,6 +1086,26 @@ async function customerRequest(path, options = {}) {
   return response.json();
 }
 
+async function customerAccountForApiToken(apiToken) {
+  const settings = ClaudeApp.apiSettings();
+  const baseUrl = settings.baseUrl.replace(/\/$/, "");
+  const token = String(apiToken || "").trim();
+  if (!token) throw new Error("Informe uma API para conectar.");
+  const response = await fetch(`${baseUrl}/v1/auth/me`, {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await responseErrorDetail(response, `API respondeu ${response.status}`);
+    throw new Error(detail);
+  }
+
+  return response.json();
+}
+
 async function codeRequest(path, options = {}) {
   return customerRequest(`/v1/code${path}`, options);
 }
@@ -1761,8 +1781,8 @@ function renderMarkdownTable(lines) {
   `;
 }
 
-function renderAssistantMarkdown(text) {
-  const cleaned = repairDuplicatedText(text);
+function renderAssistantMarkdown(text, options = {}) {
+  const cleaned = options.streaming ? String(text || "") : repairDuplicatedText(text);
   const lines = cleaned.split(/\r?\n/);
   const html = [];
   let listItems = [];
@@ -1862,12 +1882,12 @@ function renderMessageNode(node, role, text, options = {}) {
     const thinkingHtml = thinkingText
       ? `<details class="message-thinking" ${isTyping ? "open" : ""}>
           <summary>Pensamento</summary>
-          <div>${renderAssistantMarkdown(thinkingText)}</div>
+          <div>${renderAssistantMarkdown(thinkingText, { streaming: isTyping })}</div>
         </details>`
       : "";
     node.innerHTML = `
       ${thinkingHtml}
-      <div class="message-body">${renderAssistantMarkdown(text)}</div>
+      <div class="message-body">${renderAssistantMarkdown(text, { streaming: isTyping })}</div>
       <div class="message-actions ${isPending || isTyping ? "hidden" : ""}">
         <button type="button" class="message-copy-button" data-copy-message-index="${ClaudeApp.escapeHtml(messageIndex)}" aria-label="Copiar resposta">
           Copiar
@@ -1933,6 +1953,10 @@ function updateStreamingMessage(message, text) {
     messageTypewriterTimers.delete(message.node);
   }
   const nextText = text || "";
+  const previousDisplay = message.node.dataset.displayText || "";
+  if (previousDisplay && nextText.length < previousDisplay.length && previousDisplay.startsWith(nextText)) {
+    return;
+  }
   activeConversation[message.index].content = nextText;
   renderAssistantDisplay(message, nextText, true);
 }
@@ -4098,11 +4122,27 @@ document.querySelector("#bottomComposer").addEventListener("submit", async (even
   }
 });
 
-document.querySelector("#apiForm").addEventListener("submit", (event) => {
+document.querySelector("#apiForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget).entries());
   const current = account();
-  const manualToken = values.token === current?.apiToken ? "" : values.token;
+  const typedToken = String(values.token || "").trim();
+  let manualToken = typedToken === current?.apiToken ? "" : typedToken;
+  if (manualToken) {
+    try {
+      const data = await customerAccountForApiToken(manualToken);
+      const connected = saveServerAccount(data.account);
+      currentAccountId = connected.id;
+      localStorage.setItem(ClaudeApp.CLIENT_SESSION_KEY, connected.id);
+      manualToken = "";
+      showChatNotice(
+        `API conectada: ${ClaudeApp.integer.format(connected.dailyLimit || 0)} tokens/dia disponíveis na web.`,
+      );
+    } catch (error) {
+      showChatNotice(`Não foi possível conectar essa API: ${error.message}`);
+      return;
+    }
+  }
   ClaudeApp.saveApiSettings({
     baseUrl: values.baseUrl || "http://127.0.0.1:8787",
     token: manualToken || "",
@@ -4110,6 +4150,9 @@ document.querySelector("#apiForm").addEventListener("submit", (event) => {
   });
   fillModelSelects();
   loadApiForm();
+  renderAccount();
+  renderBilling();
+  renderSidePanels();
 });
 
 document.querySelector("#apiInstallGuide").addEventListener("click", async (event) => {

@@ -167,6 +167,9 @@ class AccountStore:
 
     def create_api_tokens(self, values: dict[str, Any]) -> list[dict[str, Any]]:
         quantity = max(1, min(100, int(float(values.get("quantity") or values.get("count") or 1))))
+        requested_api_token = _custom_api_token_from_values(values)
+        if requested_api_token and quantity > 1:
+            raise HTTPException(status_code=400, detail="Custom API token can only be used with quantity 1.")
         accounts = [_api_only_account_from_values(values, self.settings) for _ in range(quantity)]
         with self._lock, self._connect() as db:
             for index, account in enumerate(accounts, start=1):
@@ -175,7 +178,12 @@ class AccountStore:
                     account["displayName"] = account["name"]
                 while self._login_exists(db, account["login"]):
                     account["login"] = _api_only_login()
-                while db.execute("SELECT 1 FROM accounts WHERE api_token = ?", (account["apiToken"],)).fetchone():
+                if requested_api_token and db.execute(
+                    "SELECT 1 FROM accounts WHERE api_token = ?",
+                    (requested_api_token,),
+                ).fetchone():
+                    raise HTTPException(status_code=409, detail="API token already exists.")
+                while not requested_api_token and db.execute("SELECT 1 FROM accounts WHERE api_token = ?", (account["apiToken"],)).fetchone():
                     account["apiToken"] = _generate_api_token()
                 db.execute(
                     """
@@ -1194,7 +1202,7 @@ def _api_only_account_from_values(values: dict[str, Any], settings: Settings) ->
     expires_at = (_now_datetime() + timedelta(hours=duration_hours)).isoformat()
     return {
         "id": f"acct_{secrets.token_hex(12)}",
-        "apiToken": _generate_api_token(),
+        "apiToken": _custom_api_token_from_values(values) or _generate_api_token(),
         "name": name,
         "displayName": name,
         "login": _api_only_login(),
@@ -1214,6 +1222,15 @@ def _api_only_account_from_values(values: dict[str, Any], settings: Settings) ->
         "createdAt": _now(),
         "trialExpiresAt": expires_at,
     }
+
+
+def _custom_api_token_from_values(values: dict[str, Any]) -> str:
+    token = str(values.get("apiToken") or values.get("api_token") or values.get("token") or "").strip()
+    if not token:
+        return ""
+    if len(token) < 12 or len(token) > 256:
+        raise HTTPException(status_code=400, detail="Custom API token length is invalid.")
+    return token
 
 
 def _calculate_api_only_limit(price_brl: float, duration_hours: int, settings: Settings) -> dict[str, float | int]:

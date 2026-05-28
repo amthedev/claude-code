@@ -1955,6 +1955,43 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual({account["dailyLimit"] for account in accounts}, {123456})
             self.assertEqual(len({account["apiToken"] for account in accounts}), 3)
 
+    def test_admin_can_attach_existing_api_token_to_web_account_limits(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+            custom_token = "sk-existing-provider-token"
+
+            created = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={
+                    "name": "API Cliente",
+                    "price": 50,
+                    "durationHours": 24,
+                    "manualLimit": 987654,
+                    "apiToken": custom_token,
+                },
+            )
+
+            self.assertEqual(created.status_code, 200)
+            account = created.json()["account"]
+            self.assertEqual(account["apiToken"], custom_token)
+            self.assertEqual(account["dailyLimit"], 987654)
+
+            usage = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {custom_token}"})
+            self.assertEqual(usage.status_code, 200)
+            self.assertEqual(usage.json()["account"]["dailyLimit"], 987654)
+
+            duplicate = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "Duplicado", "price": 50, "apiToken": custom_token},
+            )
+            self.assertEqual(duplicate.status_code, 409)
+
     def test_unlimited_api_token_has_no_daily_cap_but_records_usage(self) -> None:
         with TemporaryDirectory() as directory:
             settings = make_settings()

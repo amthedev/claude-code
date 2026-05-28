@@ -908,6 +908,7 @@ apiTokenForm.addEventListener("submit", async (event) => {
   event.currentTarget.elements.price.value = "50.00";
   event.currentTarget.elements.quantity.value = "1";
   event.currentTarget.elements.manualLimit.value = "";
+  event.currentTarget.elements.apiToken.value = "";
   event.currentTarget.elements.durationHours.value = "28";
   event.currentTarget.elements.model.value = "opus";
   event.currentTarget.elements.unlimited.checked = false;
