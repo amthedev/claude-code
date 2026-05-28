@@ -76,9 +76,12 @@ class Settings:
     web_search_context_size: str = "low"
     web_search_for_customers: bool = True
     web_search_max_output_tokens: int = 900
+    web_search_timeout_seconds: float = 8.0
     web_search_allowed_domains: tuple[str, ...] = ()
     web_search_blocked_domains: tuple[str, ...] = ()
     request_timeout_seconds: float = 120.0
+    simple_request_max_output_tokens: int = 768
+    vps_disable_qwen_thinking: bool = True
     enable_agent_orchestration: bool = True
     enable_stream_agent_orchestration: bool = False
     max_cost_ratio_vs_claude: float = 0.50
@@ -199,9 +202,12 @@ class Settings:
             web_search_context_size=os.getenv("WEB_SEARCH_CONTEXT_SIZE", "low"),
             web_search_for_customers=_bool_env("WEB_SEARCH_FOR_CUSTOMERS", True),
             web_search_max_output_tokens=int(os.getenv("WEB_SEARCH_MAX_OUTPUT_TOKENS", "900")),
+            web_search_timeout_seconds=float(os.getenv("WEB_SEARCH_TIMEOUT_SECONDS", "8")),
             web_search_allowed_domains=_csv_env("WEB_SEARCH_ALLOWED_DOMAINS", ""),
             web_search_blocked_domains=_csv_env("WEB_SEARCH_BLOCKED_DOMAINS", ""),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "120")),
+            simple_request_max_output_tokens=int(os.getenv("SIMPLE_REQUEST_MAX_OUTPUT_TOKENS", "768")),
+            vps_disable_qwen_thinking=_bool_env("VPS_DISABLE_QWEN_THINKING", True),
             enable_agent_orchestration=_bool_env("ENABLE_AGENT_ORCHESTRATION", True),
             enable_stream_agent_orchestration=_bool_env("ENABLE_STREAM_AGENT_ORCHESTRATION", False),
             max_cost_ratio_vs_claude=float(os.getenv("MAX_COST_RATIO_VS_CLAUDE", "0.50")),

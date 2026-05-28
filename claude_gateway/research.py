@@ -88,7 +88,14 @@ class WebSearchClient:
             "Authorization": f"Bearer {self.settings.openai_api_key}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
+        timeout_seconds = max(0.05, float(self.settings.web_search_timeout_seconds or 8.0))
+        timeout = httpx.Timeout(
+            connect=min(5.0, timeout_seconds),
+            read=timeout_seconds,
+            write=min(10.0, timeout_seconds),
+            pool=min(10.0, timeout_seconds),
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(self.responses_url, headers=headers, json=body)
 
         if response.status_code >= 400:

@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import os
+import time
 import unittest
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -114,6 +115,17 @@ class FakeWebSearchClient:
             summary="Resultado atual confirmado por fontes.",
             sources=(WebSource(title="Fonte oficial", url="https://example.com/source"),),
         )
+
+
+class FakeHangingWebSearchClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.calls: list[dict[str, Any]] = []
+
+    async def search(self, query: str, *, required: bool = True) -> WebSearchResult:
+        self.calls.append({"query": query, "required": required})
+        await asyncio.sleep(1)
+        return WebSearchResult(summary="late", sources=())
 
 
 class FakeHttpResponse:
@@ -306,6 +318,26 @@ class GatewayTestCase(unittest.TestCase):
         sent_payload = app.state.openrouter.calls[-1][1]
         self.assertEqual(sent_payload["messages"], [{"role": "user", "content": "responda agora"}])
 
+    def test_quick_greeting_ignores_claude_code_system_reminders(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 16000,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "oi\n\n<system-reminder>hidden runtime note</system-reminder>",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["content"][0]["text"], "Oi! Estou aqui. O que vamos resolver?")
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
     def test_vps_payload_uses_single_configured_model_and_strips_internal_fields(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "vps-main"
@@ -381,6 +413,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda rapido.")
+        self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
 
     def test_vps_openai_chat_adds_no_think_for_qwen3_tool_requests(self) -> None:
         settings = make_settings()
@@ -399,6 +432,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nUse a ferramenta e responda.")
+        self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
         self.assertEqual(outgoing["tool_choice"], "auto")
 
     def test_vps_openai_chat_adds_no_think_for_claude_code_qwen3_requests(self) -> None:
@@ -418,6 +452,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nResponda no terminal.")
+        self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
         self.assertNotIn("tool_choice", outgoing)
 
     def test_vps_openai_chat_guides_claude_code_to_use_tools_without_asking(self) -> None:
@@ -1064,6 +1099,26 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(app.state.model_client.fallback_uses, 1)
         self.assertEqual(len(app.state.model_client.fallback.calls), 1)
+
+    def test_simple_requests_are_capped_to_fast_output_budget(self) -> None:
+        settings = make_settings()
+        settings.simple_request_max_output_tokens = 256
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 16000,
+                "messages": [{"role": "user", "content": "Diga quem é o presidente do Brasil"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = app.state.openrouter.calls[-1][1]
+        self.assertEqual(sent_payload["max_tokens"], 256)
 
     def test_vps_error_without_fallback_returns_error(self) -> None:
         settings = make_settings()
@@ -2390,7 +2445,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertEqual(payload["max_tokens"], 4096)
+        self.assertEqual(payload["max_tokens"], 768)
         self.assertNotIn("Internal Gemini coding guidance", str(payload))
 
     def test_openai_helper_can_review_agent_pipeline_for_admin(self) -> None:
@@ -2591,6 +2646,35 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
+        self.assertIn("web search was needed", payload["system"])
+
+    def test_web_search_timeout_falls_back_to_model_quickly(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        settings.web_search_timeout_seconds = 0.01
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            web_search_factory=FakeHangingWebSearchClient,
+        )
+        client = TestClient(app)
+
+        started = time.perf_counter()
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Quem é o presidente do Brasil hoje?"}],
+            },
+        )
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(len(app.state.web_search.calls), 1)
+        payload = app.state.openrouter.calls[-1][1]
         self.assertIn("web search was needed", payload["system"])
 
     def test_web_search_response_extracts_citations_and_sources(self) -> None:

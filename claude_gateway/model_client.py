@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from .anthropic import clean_model_text, split_thinking_text
+from .anthropic import split_thinking_text
 from .config import Settings
 from .openrouter import OpenRouterClient, OpenRouterError
 
@@ -211,7 +211,8 @@ class VPSAnthropicClient:
     ) -> dict[str, Any]:
         target = self._target_for_model(model)
         messages = self._messages_to_openai(payload)
-        if self._should_disable_qwen_thinking(payload, target):
+        disable_qwen_thinking = self._should_disable_qwen_thinking(payload, target)
+        if disable_qwen_thinking:
             messages = self._messages_with_no_think(messages)
         tools = self._tools_to_openai(payload.get("tools"))
         tools = self._compact_tools_for_openai_chat_context(messages, tools)
@@ -230,6 +231,8 @@ class VPSAnthropicClient:
         for key in ("temperature", "top_p", "presence_penalty", "frequency_penalty", "stop"):
             if key in payload:
                 outgoing[key] = payload[key]
+        if disable_qwen_thinking:
+            outgoing["chat_template_kwargs"] = {"enable_thinking": False}
         if tools:
             outgoing["tools"] = tools
             if self._is_claude_code_action_request(payload):
@@ -239,6 +242,8 @@ class VPSAnthropicClient:
         return outgoing
 
     def _should_disable_qwen_thinking(self, payload: dict[str, Any], target: VPSTarget) -> bool:
+        if not self.settings.vps_disable_qwen_thinking:
+            return False
         model_id = target.model_id.lower()
         if "qwen3" not in model_id and "qwen/qwen3" not in model_id:
             return False

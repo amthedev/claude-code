@@ -100,6 +100,9 @@ pagamento aprovado sem liberar plano, dado sensível exposto, ameaça jurídica,
 comece a resposta exatamente com "ESCALATE:" e explique em uma frase por que precisa de humano.
 Caso contrário, responda diretamente em até 5 frases, com tom calmo e prático. Não invente acesso a dados internos."""
 
+CLAUDE_CODE_SYSTEM_REMINDER_RE = re.compile(r"(?is)<system-reminder>.*?</system-reminder>")
+CLAUDE_CODE_SESSION_RE = re.compile(r"(?is)<session>.*?</session>")
+
 
 def create_app(
     settings: Settings | None = None,
@@ -398,6 +401,7 @@ def create_app(
         identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
         reservation = None
         if not identity_answer:
+            payload = _with_simple_response_budget(payload, decision, app.state.settings)
             reservation = _reserve_customer_budget(app, auth, payload, decision)
             payload = await _with_web_research(app, auth, payload)
         payload = _with_gateway_reasoning(payload, decision)
@@ -1052,6 +1056,7 @@ def create_app(
             payload = {**payload, "stream": False}
 
         decision = app.state.planner.plan(payload, force_orchestration=True)
+        payload = _with_simple_response_budget(payload, decision, app.state.settings)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = await _with_web_research(app, auth, payload)
         payload = _with_public_model_identity(payload, decision.public_model, app.state.settings)
@@ -1738,6 +1743,7 @@ async def _complete_gateway_message(
     identity_answer = _selected_model_identity_answer(payload, decision.public_model, app.state.settings)
     reservation = None
     if not identity_answer:
+        payload = _with_simple_response_budget(payload, decision, app.state.settings)
         reservation = _reserve_customer_budget(app, auth, payload, decision)
         payload = await _with_web_research(app, auth, payload)
     payload = _with_gateway_reasoning(payload, decision)
@@ -2409,7 +2415,10 @@ async def _with_web_research(
 
     prompt_text = extract_prompt_text(payload)
     try:
-        result = await app.state.web_search.search(prompt_text, required=True)
+        result = await asyncio.wait_for(
+            app.state.web_search.search(prompt_text, required=True),
+            timeout=max(0.05, float(app.state.settings.web_search_timeout_seconds or 8.0)),
+        )
     except Exception:
         return _append_system_prompt(outgoing, web_search_unavailable_context(decision))
 
@@ -2714,7 +2723,7 @@ def _literal_conversation_title(text: str) -> bool:
 
 
 def _quick_local_answer(payload: dict[str, Any]) -> str | None:
-    prompt = _normalize_text(_last_user_message_text(payload).replace("?", "").replace("!", ""))
+    prompt = _normalize_text(_visible_last_user_message_text(payload).replace("?", "").replace("!", ""))
     if prompt in {
         "oi",
         "ola",
@@ -2729,6 +2738,23 @@ def _quick_local_answer(payload: dict[str, Any]) -> str | None:
     }:
         return "Oi! Estou aqui. O que vamos resolver?"
     return None
+
+
+def _with_simple_response_budget(
+    payload: dict[str, Any],
+    decision: RouteDecision,
+    settings: Settings,
+) -> dict[str, Any]:
+    if payload_has_tool_contract(payload) or decision.use_orchestration:
+        return payload
+    if decision.complexity != "low" and decision.task_type != "explanation":
+        return payload
+
+    cap = max(64, int(settings.simple_request_max_output_tokens or 768))
+    current = int(payload.get("max_tokens") or cap)
+    if current <= cap:
+        return payload
+    return {**payload, "max_tokens": cap}
 
 
 def _clean_generated_title(value: str) -> str:
@@ -2811,7 +2837,7 @@ def _selected_model_identity_answer(
     public_model: str,
     settings: Settings,
 ) -> str | None:
-    prompt = _normalize_text(_last_user_message_text(payload))
+    prompt = _normalize_text(_visible_last_user_message_text(payload))
     identity_phrases = (
         "qual modelo e voce",
         "que modelo e voce",
@@ -2851,6 +2877,13 @@ def _last_user_message_text(payload: dict[str, Any]) -> str:
             return " ".join(parts)
         return str(content or "")
     return ""
+
+
+def _visible_last_user_message_text(payload: dict[str, Any]) -> str:
+    text = _last_user_message_text(payload)
+    text = CLAUDE_CODE_SYSTEM_REMINDER_RE.sub("\n", text)
+    text = CLAUDE_CODE_SESSION_RE.sub("\n", text)
+    return " ".join(line.strip() for line in text.splitlines() if line.strip())
 
 
 def _normalize_text(value: str) -> str:
