@@ -1135,8 +1135,7 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
   renderAll();
 });
 
-document.querySelector("#purgeAccounts").addEventListener("click", async () => {
-  const includeGiftCards = Boolean(document.querySelector("#purgeGiftCards")?.checked);
+async function purgeAdminData(includeGiftCards) {
   const targetLabel = includeGiftCards
     ? "todas as contas, API tokens e gift cards"
     : "todas as contas e API tokens";
@@ -1159,6 +1158,14 @@ document.querySelector("#purgeAccounts").addEventListener("click", async () => {
   } catch (error) {
     alert(error.fallback ? "API admin indisponível." : error.message);
   }
+}
+
+document.querySelector("#purgeAccounts").addEventListener("click", () => {
+  purgeAdminData(false);
+});
+
+document.querySelector("#purgeAllAdminData").addEventListener("click", () => {
+  purgeAdminData(true);
 });
 
 document.querySelector("#boostAccounts").addEventListener("click", async () => {

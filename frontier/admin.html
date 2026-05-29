@@ -6,7 +6,7 @@
     <title>Claude Admin</title>
     <link rel="icon" type="image/svg+xml" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
     <link rel="shortcut icon" href="/frontier/claude-mark.svg?v=claude-symbol-20260520c" />
-    <link rel="stylesheet" href="/frontier/styles.css?v=api-command-20260526a" />
+    <link rel="stylesheet" href="/frontier/styles.css?v=admin-purge-20260529a" />
   </head>
   <body class="admin-page">
     <main id="adminLogin" class="auth-screen">
@@ -251,11 +251,8 @@
                   <h2>Contas resgatadas</h2>
                 </div>
                 <button id="boostAccounts" class="primary" type="button">+50M tokens/dia</button>
-                <label class="checkbox-field compact-danger">
-                  <input id="purgeGiftCards" type="checkbox" />
-                  Incluir gift cards
-                </label>
-                <button id="purgeAccounts" class="danger" type="button">Apagar contas, APIs e gifts</button>
+                <button id="purgeAccounts" class="danger subtle-danger" type="button">Apagar contas/API</button>
+                <button id="purgeAllAdminData" class="danger" type="button">Apagar tudo</button>
               </div>
               <div class="table-scroll">
                 <table>
@@ -446,7 +443,7 @@
       </section>
     </main>
 
-    <script src="/frontier/shared.js?v=vps-control-20260527c"></script>
-    <script src="/frontier/admin.js?v=vps-control-20260527c"></script>
+    <script src="/frontier/shared.js?v=admin-purge-20260529a"></script>
+    <script src="/frontier/admin.js?v=admin-purge-20260529a"></script>
   </body>
 </html>
