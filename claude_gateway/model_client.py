@@ -1523,9 +1523,22 @@ class VPSAnthropicClient:
             "aspectos especificos",
             "aspectos específicos",
             "detalhes sobre os aspectos",
+            "nao consigo acessar ou analisar diretamente seu projeto",
+            "não consigo acessar ou analisar diretamente seu projeto",
+            "nao tenho acesso aos arquivos locais",
+            "não tenho acesso aos arquivos locais",
+            "arquivos locais do seu computador",
+            "fornecer mais informacoes sobre seu projeto",
+            "fornecer mais informações sobre seu projeto",
             "you'd like assistance with",
             "you would like assistance with",
             "use the appropriate tools to help",
+            "i do not have access to your local files",
+            "i don't have access to your local files",
+            "i cannot access your local files",
+            "i can't access your local files",
+            "i cannot directly access your project",
+            "i can't directly access your project",
         )
         if any(phrase in ascii_compact for phrase in generic_phrases):
             return True
@@ -1545,10 +1558,20 @@ class VPSAnthropicClient:
             "forneca mais detalhes",
             "aspectos especificos",
             "detalhes sobre os aspectos",
+            "nao consigo acessar ou analisar diretamente seu projeto",
+            "nao tenho acesso aos arquivos locais",
+            "arquivos locais do seu computador",
+            "fornecer mais informacoes sobre seu projeto",
             "please provide more details",
             "please provide the specific task",
             "provide the specific task",
             "provide the task or question",
+            "do not have access to your local files",
+            "don't have access to your local files",
+            "cannot access your local files",
+            "can't access your local files",
+            "cannot directly access your project",
+            "can't directly access your project",
         )
         return any(marker in compact for marker in markers)
 

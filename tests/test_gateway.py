@@ -516,6 +516,41 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(after.json()["data"], [])
             self.assertEqual(old_token_response.status_code, 403)
 
+    def test_admin_can_purge_accounts_and_gift_cards_together(self) -> None:
+        with TemporaryDirectory() as directory:
+            settings = make_settings()
+            settings.account_data_file = f"{directory}/gateway.sqlite3"
+            settings.quota_data_file = f"{directory}/gateway.sqlite3"
+            app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+            client = TestClient(app)
+
+            gift = client.post(
+                "/v1/admin/gift-cards",
+                headers=self.headers,
+                json={"code": "APAGAR-TUDO", "plan": "Pro", "price": 65, "model": "sonnet"},
+            )
+            token = client.post(
+                "/v1/admin/api-tokens",
+                headers=self.headers,
+                json={"name": "API", "price": 50, "durationHours": 24},
+            )
+            self.assertEqual(gift.status_code, 200)
+            self.assertEqual(token.status_code, 200)
+
+            purged = client.post(
+                "/v1/admin/accounts/purge",
+                headers=self.headers,
+                json={"includeGiftCards": True},
+            )
+            accounts = client.get("/v1/admin/accounts", headers=self.headers)
+            gift_cards = client.get("/v1/admin/gift-cards", headers=self.headers)
+
+            self.assertEqual(purged.status_code, 200)
+            self.assertEqual(purged.json()["accounts"], 1)
+            self.assertEqual(purged.json()["gift_cards"], 1)
+            self.assertEqual(accounts.json()["data"], [])
+            self.assertEqual(gift_cards.json()["data"], [])
+
     def test_api_rate_limit_defaults_to_shared_token_per_client_ip(self) -> None:
         settings = make_settings()
         settings.api_rate_limit = 1
@@ -1140,6 +1175,60 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(portuguese_detail_anthropic["stop_reason"], "tool_use")
         self.assertEqual(portuguese_detail_anthropic["content"][0]["name"], "LS")
+
+        portuguese_no_local_access_response = {
+            "id": "chatcmpl_portuguese_no_local_access",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Desculpe, mas parece que houve um mal-entendido. Eu não consigo acessar ou "
+                            "analisar diretamente seu projeto no momento, pois não tenho acesso aos arquivos "
+                            "locais do seu computador.\n\nPara poder ajudar de maneira eficaz, você precisará "
+                            "fornecer mais informações sobre seu projeto."
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 9, "completion_tokens": 35},
+        }
+        portuguese_no_access_anthropic = client._anthropic_from_openai_chat(
+            portuguese_no_local_access_response
+        )
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "analise meu projeto e veja oq eu preciso melhorrar",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_ls",
+                                "name": "LS",
+                                "input": {"path": "."},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_ls", "content": "README.md"}],
+                    },
+                ],
+                "tools": [
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                ],
+            },
+            portuguese_no_access_anthropic,
+        )
+        self.assertEqual(portuguese_no_access_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(portuguese_no_access_anthropic["content"][0]["name"], "LS")
 
         false_done_after_reading = {
             "id": "chatcmpl_false_done_after_reading",
