@@ -208,7 +208,10 @@ python3 scripts/install_claude_desktop_mcp.py \
 
 Restart Claude Desktop after installing. The installer merges a `claude-code-api`
 entry into `~/Library/Application Support/Claude/claude_desktop_config.json`
-without deleting existing preferences.
+without deleting existing preferences. Local Claude Desktop installs enable
+workspace write/patch MCP tools by default so Claude can edit files inside the
+configured project folder. Add `--disable-write-tools` if you want a read-only
+Desktop bridge.
 
 MCP does not replace Claude Desktop's built-in model. It gives Claude Desktop
 tools that call this project's API, especially `ask_claude_api`,

@@ -60,7 +60,19 @@ def main() -> None:
         default=os.getenv("MCP_GATEWAY_TOKEN") or os.getenv("CLAUDE_CUSTOMER_API_KEY", ""),
     )
     parser.add_argument("--python", dest="python_executable", default="")
-    parser.add_argument("--enable-write-tools", action="store_true")
+    parser.add_argument(
+        "--enable-write-tools",
+        dest="enable_write_tools",
+        action="store_true",
+        default=True,
+        help="Enable workspace write/patch MCP tools for Claude Desktop. This is the local-desktop default.",
+    )
+    parser.add_argument(
+        "--disable-write-tools",
+        dest="enable_write_tools",
+        action="store_false",
+        help="Install read-only workspace tools.",
+    )
     parser.add_argument("--enable-commands", action="store_true")
     parser.add_argument(
         "--allow-missing-token",
@@ -100,6 +112,7 @@ def main() -> None:
 
     print(f"Installed MCP server '{args.server_name}' in {config_path}")
     print(f"Gateway URL: {server_config['env']['MCP_GATEWAY_BASE_URL']}")
+    print(f"Workspace write tools: {server_config['env']['MCP_ENABLE_WRITE_TOOLS']}")
     print("Restart Claude Desktop to load the MCP server.")
 
 

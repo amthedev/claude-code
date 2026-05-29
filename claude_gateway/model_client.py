@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -1295,6 +1296,11 @@ class VPSAnthropicClient:
                 return
         if self._payload_has_tool_result(payload) and not _response_has_tool_use(response):
             response_text = self._response_text(response)
+            file_write_tools = self._textual_file_write_tool_uses(response_text, payload)
+            if file_write_tools:
+                response["content"] = file_write_tools
+                response["stop_reason"] = "tool_use"
+                return
             if self._is_change_status_question(payload):
                 response["content"] = [
                     {
@@ -1351,6 +1357,12 @@ class VPSAnthropicClient:
                 response["stop_reason"] = "end_turn"
                 return
         if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
+            response_text = self._response_text(response)
+            file_write_tools = self._textual_file_write_tool_uses(response_text, payload)
+            if file_write_tools:
+                response["content"] = file_write_tools
+                response["stop_reason"] = "tool_use"
+                return
             fallback_tool = self._fallback_tool_use_for_required_action(payload)
             if fallback_tool:
                 response["content"] = [fallback_tool]
@@ -1600,6 +1612,39 @@ class VPSAnthropicClient:
             if not self._has_previous_fallback(previous_fallbacks, candidate):
                 return candidate
         return None
+
+    def _textual_file_write_tool_uses(self, text: str, payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+        if not payload or not self._is_file_change_request(payload):
+            return []
+        tool_name = self._preferred_write_tool_name(payload)
+        if not tool_name:
+            return []
+        files = _file_contents_from_text(text)
+        if not files:
+            return []
+        blocks: list[dict[str, Any]] = []
+        for index, (path, content) in enumerate(files):
+            tool_input = (
+                {"path": path, "content": content}
+                if tool_name.lower() == "write_file"
+                else {"file_path": path, "content": content}
+            )
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": f"call_gateway_write_{index}",
+                    "name": tool_name,
+                    "input": tool_input,
+                }
+            )
+        return blocks
+
+    def _preferred_write_tool_name(self, payload: dict[str, Any]) -> str:
+        for wanted in ("Write", "write_file"):
+            for tool_name in self._available_tool_names(payload):
+                if tool_name.lower() == wanted.lower():
+                    return tool_name
+        return ""
 
     def _previous_gateway_tool_fallbacks(self, payload: dict[str, Any]) -> set[tuple[str, str]]:
         fallbacks: set[tuple[str, str]] = set()
@@ -1920,6 +1965,10 @@ class VPSAnthropicClient:
             if textual_tool_calls:
                 for outgoing in tool_state.feed(self._validated_textual_tool_calls(textual_tool_calls, payload)):
                     yield outgoing
+            elif payload and (file_write_tools := self._textual_file_write_tool_uses(textual_tool_buffer, payload)):
+                for index, tool_use in enumerate(file_write_tools):
+                    for outgoing in tool_state.feed([_openai_tool_call_from_anthropic_tool_use(tool_use, index)]):
+                        yield outgoing
             elif require_tool_call and payload:
                 fallback_tool = self._fallback_tool_use_for_required_action(payload)
                 if fallback_tool:
@@ -1934,6 +1983,10 @@ class VPSAnthropicClient:
             if textual_tool_calls:
                 for outgoing in tool_state.feed(self._validated_textual_tool_calls(textual_tool_calls, payload)):
                     yield outgoing
+            elif payload and (file_write_tools := self._textual_file_write_tool_uses(post_tool_text_buffer, payload)):
+                for index, tool_use in enumerate(file_write_tools):
+                    for outgoing in tool_state.feed([_openai_tool_call_from_anthropic_tool_use(tool_use, index)]):
+                        yield outgoing
             elif payload and self._is_change_status_question(payload):
                 post_tool_text_buffer = self._physical_change_status_text(payload)
             elif self._is_generic_help_response(post_tool_text_buffer) and payload:
@@ -2280,6 +2333,60 @@ def _strip_accents(text: str) -> str:
         for char in unicodedata.normalize("NFKD", str(text or ""))
         if not unicodedata.combining(char)
     )
+
+
+_FILE_LABEL_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:`{1,3}|\*\*)?([A-Za-z0-9_.\-/]+\.(?:css|html|js|jsx|json|md|py|sh|toml|ts|tsx|txt|yaml|yml))(?:`{1,3}|\*\*)?\s*:?\s*$"
+)
+_FENCED_CODE_RE = re.compile(r"\A\s*```[A-Za-z0-9_-]*\s*\n(?P<code>.*?)\n```\s*\Z", re.DOTALL)
+
+
+def _file_contents_from_text(text: str) -> list[tuple[str, str]]:
+    raw = str(text or "")
+    if not raw.strip():
+        return []
+    matches = list(_FILE_LABEL_RE.finditer(raw))
+    if not matches:
+        return []
+
+    files: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for index, match in enumerate(matches):
+        path = match.group(1).strip().strip("`*")
+        if not path or path.startswith(("/", "~")) or ".." in Path(path).parts:
+            continue
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(raw)
+        content = raw[start:end].strip()
+        fenced = _FENCED_CODE_RE.match(content)
+        if fenced:
+            content = fenced.group("code")
+        content = content.strip("\n")
+        if not content or path in seen:
+            continue
+        if not _looks_like_file_body(path, content):
+            continue
+        seen.add(path)
+        files.append((path, content + ("\n" if not content.endswith("\n") else "")))
+    return files[:5]
+
+
+def _looks_like_file_body(path: str, content: str) -> bool:
+    suffix = Path(path).suffix.lower()
+    stripped = content.lstrip()
+    if suffix == ".html":
+        return "<" in content and ">" in content
+    if suffix == ".css":
+        return "{" in content and "}" in content
+    if suffix in {".js", ".jsx", ".ts", ".tsx"}:
+        return any(marker in content for marker in ("function ", "const ", "let ", "import ", "export ", "=>", "document."))
+    if suffix == ".py":
+        return any(marker in content for marker in ("def ", "import ", "print(", "if __name__", "class "))
+    if suffix in {".json"}:
+        return stripped.startswith(("{", "["))
+    if suffix in {".yml", ".yaml", ".toml", ".sh"}:
+        return len(content.splitlines()) >= 1
+    return len(content.splitlines()) >= 2 or len(content) >= 20
 
 
 def _textual_tool_calls_from_text(text: str) -> list[dict[str, Any]]:

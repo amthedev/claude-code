@@ -1990,6 +1990,86 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(fenced_json_response["content"][0]["name"], "EnterWorktree")
         self.assertEqual(fenced_json_response["content"][0]["input"], {})
 
+    def test_vps_openai_chat_converts_file_code_blocks_to_write_tools(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [{"role": "user", "content": "fassa o site do neymar"}],
+            "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+        }
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_file_blocks",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "index.html\n\n"
+                                "```html\n"
+                                "<!doctype html>\n<title>Neymar</title>\n"
+                                "```\n\n"
+                                "styles.css\n\n"
+                                "```css\n"
+                                "body { margin: 0; }\n"
+                                "```\n"
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+
+        client._ensure_required_tool_call(payload, response)
+
+        self.assertEqual(response["stop_reason"], "tool_use")
+        self.assertEqual([block["name"] for block in response["content"]], ["Write", "Write"])
+        self.assertEqual(response["content"][0]["input"]["file_path"], "index.html")
+        self.assertIn("<!doctype html>", response["content"][0]["input"]["content"])
+        self.assertEqual(response["content"][1]["input"]["file_path"], "styles.css")
+        self.assertIn("body { margin: 0; }", response["content"][1]["input"]["content"])
+
+    def test_vps_openai_chat_converts_file_code_blocks_to_mcp_write_file(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        payload = {
+            "messages": [{"role": "user", "content": "crie uma calculadora em python"}],
+            "tools": [{"name": "write_file", "input_schema": {"type": "object"}}],
+        }
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_mcp_file_block",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "calculadora.py\n\n"
+                                "```python\n"
+                                "def somar(a, b):\n"
+                                "    return a + b\n"
+                                "```\n"
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+
+        client._ensure_required_tool_call(payload, response)
+
+        self.assertEqual(response["stop_reason"], "tool_use")
+        self.assertEqual(response["content"][0]["name"], "write_file")
+        self.assertEqual(response["content"][0]["input"]["path"], "calculadora.py")
+        self.assertIn("def somar", response["content"][0]["input"]["content"])
+
     def test_vps_openai_chat_preserves_tool_history_as_native_openai_messages(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
