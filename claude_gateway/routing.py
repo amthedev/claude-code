@@ -186,9 +186,15 @@ def model_profiles(settings: Settings) -> list[ModelProfile]:
     profiles = [
         ModelProfile(
             id=settings.pro_public_model,
-            display_name=settings.public_model_label,
+            display_name=settings.legacy_public_model_label,
             mode="pro",
-            description="Modelo disponível para código, análise e trabalho diário.",
+            description="Modelo padrão para código, análise e trabalho diário.",
+        ),
+        ModelProfile(
+            id=settings.ultra_public_model,
+            display_name=settings.public_model_label,
+            mode="ultra",
+            description="Modelo com raciocínio e pensamento reforçados; consome 1.5x mais tokens.",
         ),
     ]
     seen: set[str] = set()

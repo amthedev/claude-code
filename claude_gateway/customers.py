@@ -41,6 +41,7 @@ class CustomerReservation:
 
 
 TOKEN_VALUE_MULTIPLIER = 8
+ADVANCED_MODEL_TOKEN_MULTIPLIER = 1.5
 REASONING_TOKEN_MULTIPLIERS = {
     "fast": 4,
     "normal": TOKEN_VALUE_MULTIPLIER,
@@ -96,6 +97,21 @@ def reasoning_token_multiplier(mode: str, decision: RouteDecision | None = None)
     return TOKEN_VALUE_MULTIPLIER
 
 
+def model_token_multiplier(payload: dict[str, Any], decision: RouteDecision | None = None) -> float:
+    public_model = str(getattr(decision, "public_model", "") or payload.get("model") or "").strip().lower()
+    mode = str(getattr(decision, "mode", "") or "").strip().lower()
+    if mode == "ultra" or "claude-code-ultra" in public_model or "4.7" in public_model:
+        return ADVANCED_MODEL_TOKEN_MULTIPLIER
+    return 1.0
+
+
+def _apply_model_token_multiplier(tokens: int, payload: dict[str, Any], decision: RouteDecision | None) -> int:
+    multiplier = model_token_multiplier(payload, decision)
+    if multiplier <= 1:
+        return tokens
+    return max(1, math.ceil(tokens * multiplier))
+
+
 def estimate_reserved_tokens(
     payload: dict[str, Any],
     settings: Settings,
@@ -103,11 +119,12 @@ def estimate_reserved_tokens(
 ) -> int:
     base_tokens = estimate_request_tokens(payload, settings)
     if payload_has_tool_contract(payload):
-        return base_tokens
-    return base_tokens * reasoning_token_multiplier(
+        return _apply_model_token_multiplier(base_tokens, payload, decision)
+    reserved = base_tokens * reasoning_token_multiplier(
         str(payload.get("__gateway_reasoning_mode") or "auto"),
         decision,
     )
+    return _apply_model_token_multiplier(reserved, payload, decision)
 
 
 def actual_reserved_tokens_from_response(
@@ -123,11 +140,12 @@ def actual_reserved_tokens_from_response(
     if actual_tokens <= 0:
         return None
     if payload_has_tool_contract(payload) or (decision and decision.use_orchestration):
-        return actual_tokens
-    return actual_tokens * reasoning_token_multiplier(
+        return _apply_model_token_multiplier(actual_tokens, payload, decision)
+    reserved = actual_tokens * reasoning_token_multiplier(
         str(payload.get("__gateway_reasoning_mode") or "auto"),
         decision,
     )
+    return _apply_model_token_multiplier(reserved, payload, decision)
 
 
 def parse_customer_accounts(settings: Settings) -> dict[str, CustomerPlan]:

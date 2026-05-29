@@ -18,18 +18,21 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-pro",
-      label: "Claude Opus 4.7",
+      label: "Claude 4.5",
       usdPerToken: 0.000000224,
+      tokenMultiplier: 1,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude Opus 4.7",
+      label: "Claude 4.5",
       usdPerToken: 0.00000087,
+      tokenMultiplier: 1,
     },
     opus: {
-      publicModel: "claude-code-pro",
+      publicModel: "claude-code-ultra",
       label: "Claude Opus 4.7",
       usdPerToken: 0.00000087,
+      tokenMultiplier: 1.5,
     },
   };
 
@@ -126,13 +129,13 @@ const ClaudeApp = (() => {
 
   function normalizePublicModel(publicModel) {
     const value = String(publicModel || "").toLowerCase();
+    if (value.includes("4.7") || value.includes("ultra") || value.includes("opus")) return models.opus.publicModel;
     if (value === "qwen-14b" || value.includes("qwen")) return models.sonnet.publicModel;
+    if (value === "claude-code-ultra") return models.opus.publicModel;
     if (value.includes("claude-code")) return models.sonnet.publicModel;
-    if (value.includes("opus")) return models.sonnet.publicModel;
     if (value.includes("haiku")) return models.sonnet.publicModel;
     if (value.includes("sonnet")) return models.sonnet.publicModel;
     if (value.includes("economy")) return models.sonnet.publicModel;
-    if (value.includes("ultra")) return models.sonnet.publicModel;
     return models.sonnet.publicModel;
   }
 
@@ -374,7 +377,7 @@ const ClaudeApp = (() => {
   }
 
   function allowedPublicModelsForAccount(account) {
-    return [models.sonnet.publicModel];
+    return [models.sonnet.publicModel, models.opus.publicModel];
   }
 
   function modelOptionsForAccount(account, selectedPublicModel) {

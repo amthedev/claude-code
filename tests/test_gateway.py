@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import time
 import unittest
@@ -1933,7 +1934,7 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
-        self.assertEqual(model_ids, {"claude-code-pro"})
+        self.assertEqual(model_ids, {"claude-code-pro", "claude-code-ultra"})
         self.assertEqual({model["object"] for model in response.json()["data"]}, {"model"})
         self.assertNotIn("cost_target", response.json()["data"][0])
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
@@ -1969,7 +1970,7 @@ class GatewayTestCase(unittest.TestCase):
         admin_response = self.client.get("/v1/admin/health", headers=self.headers)
         self.assertEqual(admin_response.status_code, 200)
         admin_data = admin_response.json()
-        self.assertEqual(admin_data["public_model"], "Claude Opus 4.7")
+        self.assertEqual(admin_data["public_model"], "Claude 4.5")
         self.assertTrue(admin_data["model_backend_configured"])
         self.assertFalse(admin_data["external_fallback_configured"])
         self.assertNotIn("vps_model_id", admin_data)
@@ -3130,7 +3131,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["mode"], "economy")
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertNotIn("agents", data)
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
@@ -3157,7 +3158,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "explanation")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude 4.5")
         self.assertFalse(data["use_orchestration"])
 
     def test_default_reasoning_mode_is_fast_without_hidden_thinking_for_simple_requests(self) -> None:
@@ -3190,7 +3191,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "ui")
         self.assertEqual(data["task_type"], "frontend")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude 4.5")
 
     def test_integral_project_analysis_avoids_expensive_thinking_defaults(self) -> None:
         response = self.client.post(
@@ -3272,7 +3273,7 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "file_edit")
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertFalse(data["use_orchestration"])
 
@@ -3287,8 +3288,24 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude 4.5")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
+
+    def test_ultra_model_uses_stronger_thinking_by_default(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-ultra",
+                "max_tokens": 512,
+                "messages": [{"role": "user", "content": "Explique uma funcao"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        final_payload = self.app.state.openrouter.calls[-1][1]
+        self.assertEqual(final_payload["__gateway_reasoning"], "high")
 
     def test_explicit_extra_strong_admin_request_can_use_agent_pipeline(self) -> None:
         response = self.client.post(
@@ -3970,6 +3987,21 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(base_reserved, tool_reserved * 8)
         self.assertLess(tool_reserved, 20000)
 
+    def test_ultra_model_reservation_costs_one_point_five_x_tokens(self) -> None:
+        settings = make_settings()
+        planner = create_app(settings=settings, client_factory=FakeOpenRouterClient).state.planner
+        base_payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 512,
+            "__gateway_reasoning_mode": "normal",
+            "messages": [{"role": "user", "content": "Explique uma funcao"}],
+        }
+        ultra_payload = {**base_payload, "model": "claude-code-ultra"}
+        base_reserved = estimate_reserved_tokens(base_payload, settings, planner.plan(base_payload))
+        ultra_reserved = estimate_reserved_tokens(ultra_payload, settings, planner.plan(ultra_payload))
+
+        self.assertEqual(ultra_reserved, math.ceil(base_reserved * 1.5))
+
     def test_account_usage_is_settled_to_actual_response_usage(self) -> None:
         with TemporaryDirectory() as tmpdir:
             settings = make_settings()
@@ -4249,7 +4281,7 @@ class GatewayTestCase(unittest.TestCase):
                 },
             )
             self.assertEqual(locked.status_code, 200)
-            self.assertEqual(locked.json()["mode"], "economy")
+            self.assertEqual(locked.json()["mode"], "ultra")
             self.assertFalse(locked.json()["use_orchestration"])
             self.assertEqual(locked.json()["web_search_policy"], "auto")
 
@@ -4841,7 +4873,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b'"model": "Claude Opus 4.7"', body)
+        self.assertIn(b'"model": "Claude 4.5"', body)
 
     def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
         response = self.client.post(
@@ -4856,7 +4888,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("Claude Opus 4.7", payload["system"])
+        self.assertIn("Claude 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 256)
 
@@ -4961,7 +4993,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"Claude Opus 4.7", body)
+        self.assertIn(b"Claude 4.5", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

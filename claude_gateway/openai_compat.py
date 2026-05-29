@@ -10,6 +10,7 @@ from .anthropic import extract_response_text
 
 OPENAI_COMPAT_MODELS = (
     "claude-code-pro",
+    "claude-code-ultra",
 )
 
 

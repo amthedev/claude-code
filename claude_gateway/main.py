@@ -2532,6 +2532,10 @@ def _command_model(value: str, settings: Settings) -> str:
         return public_models[raw.lower()]
     if "auto" in normalized or "automatico" in normalized:
         return settings.auto_public_model
+    if "4 7" in normalized or "4.7" in raw or "opus 4 7" in normalized:
+        return settings.ultra_public_model
+    if "4 5" in normalized or "4.5" in raw:
+        return settings.pro_public_model
     if "ui" in normalized or "interface" in normalized:
         return settings.ui_public_model
     if "haiku" in normalized or "economy" in normalized or "economico" in normalized:
@@ -2623,6 +2627,9 @@ async def _with_customer_latency_policy(
     outgoing = dict(payload)
     outgoing["__gateway_customer_requests_today"] = requests_today
     outgoing["__gateway_heavy_allowed"] = heavy_allowed
+    if str(payload.get("model") or "").strip().lower() == app.state.settings.ultra_public_model.lower():
+        outgoing["__gateway_heavy_allowed"] = True
+        return outgoing
     if heavy_allowed:
         return outgoing
 
@@ -2640,7 +2647,7 @@ async def _with_customer_latency_policy(
 
 def _requested_heavy_model(payload: dict[str, Any]) -> bool:
     requested = str(payload.get("model") or "").strip().lower()
-    return any(marker in requested for marker in ("opus", "ultra", "strong", "xstrong"))
+    return any(marker in requested for marker in ("opus", "ultra", "4.7", "strong", "xstrong"))
 
 
 def _payload_requires_heavy_mode(payload: dict[str, Any]) -> bool:
@@ -3305,6 +3312,9 @@ def _reasoning_effort_for_request(payload: dict[str, Any], decision: Any) -> str
     if payload_has_tool_contract(payload) or _is_claude_code_payload(payload):
         return "none"
 
+    if str(getattr(decision, "mode", "") or "").lower() == "ultra":
+        return "high"
+
     mode = normalize_reasoning_mode(
         payload.get("__gateway_hidden_reasoning_mode")
         or payload.get("__gateway_reasoning_mode")
@@ -3789,24 +3799,28 @@ def _append_system_prompt(payload: dict[str, Any], prompt: str) -> dict[str, Any
 def _public_model_label(public_model: str, settings: Settings) -> str:
     public = str(public_model or "").strip()
     lowered = public.lower()
+    legacy_label = settings.legacy_public_model_label
+    advanced_label = settings.public_model_label
     labels = {
-        settings.economy_public_model.lower(): settings.public_model_label,
-        settings.pro_public_model.lower(): settings.public_model_label,
-        settings.ultra_public_model.lower(): settings.public_model_label,
-        settings.ui_public_model.lower(): settings.public_model_label,
-        settings.auto_public_model.lower(): settings.public_model_label,
-        "claude-code-economy": settings.public_model_label,
-        "claude-code-pro": settings.public_model_label,
-        "claude-code-ultra": settings.public_model_label,
-        "claude-code-ui": settings.public_model_label,
-        "claude-code-auto": settings.public_model_label,
-        "qwen-14b": settings.public_model_label,
+        settings.economy_public_model.lower(): legacy_label,
+        settings.pro_public_model.lower(): legacy_label,
+        settings.ultra_public_model.lower(): advanced_label,
+        settings.ui_public_model.lower(): legacy_label,
+        settings.auto_public_model.lower(): legacy_label,
+        "claude-code-economy": legacy_label,
+        "claude-code-pro": legacy_label,
+        "claude-code-ultra": advanced_label,
+        "claude-code-ui": legacy_label,
+        "claude-code-auto": legacy_label,
+        "qwen-14b": legacy_label,
     }
     if lowered in labels:
         return labels[lowered]
     if "qwen" in lowered:
-        return settings.public_model_label
-    return public if public.startswith("claude-code-") else settings.public_model_label
+        return legacy_label
+    if "ultra" in lowered or "opus" in lowered or "4.7" in lowered:
+        return advanced_label
+    return public if public.startswith("claude-code-") else legacy_label
 
 
 def _with_public_response_model(response: dict[str, Any], public_model: str, settings: Settings) -> dict[str, Any]:

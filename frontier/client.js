@@ -24,7 +24,7 @@ let webSearchMode =
       localStorage.getItem("frontier_web_search_mode") ||
       "auto"
     : "off";
-let reasoningMode = localStorage.getItem("claude_reasoning_mode") || "strong";
+let reasoningMode = localStorage.getItem("claude_reasoning_mode") || "auto";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -529,13 +529,13 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Claude Opus 4.7";
+  return option?.textContent || "Claude 4.5";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Claude Opus 4.7";
+    label.textContent = select ? modelLabel(select.value) : "Claude 4.5";
   });
 }
 
@@ -559,6 +559,11 @@ function normalizeReasoningMode(value) {
 
 function reasoningTokenMultiplier(value) {
   return reasoningModes[normalizeReasoningMode(value)].multiplier;
+}
+
+function modelTokenMultiplier(selectedModel) {
+  const model = String(selectedModel || "").toLocaleLowerCase("pt-BR");
+  return model.includes("ultra") || model.includes("opus") || model.includes("4.7") ? 1.5 : 1;
 }
 
 function isFastResponsePath(mode = reasoningMode, selectedModel = "") {
@@ -979,6 +984,7 @@ function renderApiInstallGuide() {
       </div>
       <div class="api-kv">
         <strong>Comandos no chat</strong>
+        <code>/modelo Claude 4.5</code>
         <code>/modelo Claude Opus 4.7</code>
         <code>/raciocinio Automatico | Rapido | Normal | Medio | Forte | Extra forte</code>
       </div>
@@ -1234,7 +1240,7 @@ function syncCustomerApiToken(current) {
 }
 
 function modelKeyLabel(modelKey) {
-  return "Claude Opus 4.7";
+  return ClaudeApp.models[ClaudeApp.normalizeModelKey(modelKey)]?.label || "Claude 4.5";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1259,7 +1265,7 @@ function renderPlanCards() {
       : "";
     const upgradeText =
       highlightedPlanId === "ultra"
-        ? "Claude Opus 4.7 está disponível em todos os planos; o 30X libera mais limite."
+        ? "Claude Opus 4.7 usa 1.5x mais tokens e fica melhor nos planos com mais limite."
         : "";
     notice.classList.toggle("hidden", !trialText && !highlightedPlanId);
     notice.textContent = trialText || upgradeText;
@@ -1288,7 +1294,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">Inclui Claude Opus 4.7.</p>
+            <p class="plan-model-note">Inclui ${modelKeyLabel(plan.modelKey)}.</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -2501,9 +2507,11 @@ function createStreamUiScheduler(onText, onThinking) {
   };
 }
 
-function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMode) {
+function outputTokenLimitForAccount(current, estimatedInput, mode = reasoningMode, selectedModel = "") {
   const remaining = Math.max(0, Number(current?.dailyLimit || 0) - Number(current?.usedToday || 0));
-  const availableRawTokens = Math.floor(remaining / reasoningTokenMultiplier(mode));
+  const availableRawTokens = Math.floor(
+    remaining / (reasoningTokenMultiplier(mode) * modelTokenMultiplier(selectedModel)),
+  );
   const availableOutput = availableRawTokens - estimatedInput;
   if (availableOutput <= 0) return 0;
   return Math.max(1, Math.min(outputTokenCapForMode(mode), availableOutput));
@@ -2637,8 +2645,8 @@ async function submitPrompt(prompt, selectedModel, attachments = []) {
   const selectedReasoningMode = normalizeReasoningMode(reasoningMode);
   const tokenMultiplier = reasoningTokenMultiplier(selectedReasoningMode);
   const estimatedInput = ClaudeApp.estimateTokens(prompt);
-  const reservedOutput = outputTokenLimitForAccount(current, estimatedInput, selectedReasoningMode);
-  const reservedTotal = (estimatedInput + reservedOutput) * tokenMultiplier;
+  const reservedOutput = outputTokenLimitForAccount(current, estimatedInput, selectedReasoningMode, selectedModel);
+  const reservedTotal = Math.ceil((estimatedInput + reservedOutput) * tokenMultiplier * modelTokenMultiplier(selectedModel));
   const remaining = current.dailyLimit - current.usedToday;
 
   if (reservedOutput <= 0 || reservedTotal > remaining) {
@@ -4019,7 +4027,7 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
     setPanel("plansPanel");
     focusHighlightedPlan();
     showChatNotice(
-      "Claude Opus 4.7 é o único modelo disponível.",
+      "Esse modelo não está liberado para esta conta.",
     );
     return;
   }
