@@ -61,7 +61,14 @@ from .research import (
     web_search_context,
     web_search_unavailable_context,
 )
-from .routing import RouteDecision, RoutePlanner, extract_prompt_text, model_profiles, payload_has_tool_contract
+from .routing import (
+    RouteDecision,
+    RoutePlanner,
+    extract_prompt_text,
+    model_profiles,
+    normalize_requested_model_id,
+    payload_has_tool_contract,
+)
 from .security import (
     InMemoryRateLimiter,
     OperationalLoggingMiddleware,
@@ -323,6 +330,33 @@ def create_app(
             filtered = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
             profiles = filtered or profiles
         return {"data": {"count": len(profiles)}}
+
+    @app.get("/v1/models/{model_id:path}")
+    @app.get("/api/v1/models/{model_id:path}", include_in_schema=False)
+    @app.get("/models/{model_id:path}", include_in_schema=False)
+    async def retrieve_model(model_id: str, request: Request) -> dict[str, Any]:
+        auth: AuthContext | None = None
+        try:
+            auth = require_gateway_auth(request, app.state.settings)
+        except HTTPException as exc:
+            if exc.status_code not in {401, 403}:
+                raise
+
+        requested = normalize_requested_model_id(model_id)
+        profiles = model_profiles(app.state.settings)
+        if auth and auth.customer and auth.customer.allowed_model != "*":
+            filtered = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
+            profiles = filtered or profiles
+        for profile in profiles:
+            if normalize_requested_model_id(profile.id).lower() == requested.lower():
+                return {
+                    "id": profile.id,
+                    "object": "model",
+                    "type": "model",
+                    "display_name": profile.display_name,
+                    "description": profile.description,
+                }
+        raise HTTPException(status_code=404, detail="Model not found.")
 
     @app.get("/v1/key")
     @app.get("/api/v1/key", include_in_schema=False)
@@ -2486,6 +2520,11 @@ def _prepare_payload(
         limited["model"] = controls["model"]
         limited["__gateway_model_locked"] = True
 
+    if "model" in limited:
+        normalized_model = normalize_requested_model_id(limited.get("model"))
+        if normalized_model:
+            limited["model"] = normalized_model
+
     limited = _limit_payload_context(limited, settings)
     prompt_text = extract_prompt_text(limited)
     if len(prompt_text) > settings.max_request_input_chars:
@@ -2768,7 +2807,7 @@ def _reasoning_label(value: str) -> str:
 
 
 def _command_model(value: str, settings: Settings) -> str:
-    raw = str(value or "").strip()
+    raw = normalize_requested_model_id(value)
     normalized = _normalize_text(raw)
     if not normalized:
         return ""

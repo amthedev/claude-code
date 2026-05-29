@@ -3322,6 +3322,27 @@ class GatewayTestCase(unittest.TestCase):
         self.assertNotIn("localhost", response.headers["content-security-policy"])
         self.assertNotIn("127.0.0.1", response.headers["content-security-policy"])
 
+    def test_model_retrieve_accepts_ansi_suffix_from_desktop_client(self) -> None:
+        response = self.client.get("/v1/models/claude-code-pro%5B1m%5D", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "claude-code-pro")
+
+    def test_router_normalizes_ansi_suffix_from_selected_model(self) -> None:
+        response = self.client.post(
+            "/v1/router/debug",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro[1m]",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "meu nome e allan"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["requested_model"], "claude-code-pro")
+        self.assertEqual(response.json()["public_model"], "claude-code-pro")
+
     def test_skill_catalog_has_many_automatic_situations(self) -> None:
         self.assertGreaterEqual(len(SKILL_CATALOG), 40)
         selected = select_skills(

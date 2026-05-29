@@ -33,6 +33,19 @@ class RouteDecision:
         return asdict(self)
 
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+ANSI_SUFFIX_RE = re.compile(r"(?:\[[0-9;]*[A-Za-z]\]?)+$")
+
+
+def normalize_requested_model_id(value: Any) -> str:
+    raw = str(value or "").strip().strip("\"'")
+    if not raw:
+        return ""
+    normalized = ANSI_ESCAPE_RE.sub("", raw).strip()
+    normalized = ANSI_SUFFIX_RE.sub("", normalized).strip()
+    return normalized
+
+
 FRONTEND_KEYWORDS = {
     "frontend",
     "front-end",
@@ -263,7 +276,7 @@ class RoutePlanner:
         self.cost_policy = CostPolicy(max_ratio_vs_claude=settings.max_cost_ratio_vs_claude)
 
     def plan(self, payload: dict[str, Any], *, force_orchestration: bool = False) -> RouteDecision:
-        requested_model = str(payload.get("model") or self.settings.auto_public_model)
+        requested_model = normalize_requested_model_id(payload.get("model")) or self.settings.auto_public_model
         requested_auto = (
             requested_model == self.settings.auto_public_model
             or requested_model.lower() in {"auto", "claude-code-auto"}
