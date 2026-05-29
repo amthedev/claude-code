@@ -1075,6 +1075,45 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("choose a simple filename", outgoing["messages"][0]["content"])
         self.assertIn("Execute the user's project request now", outgoing["messages"][-1]["content"])
 
+    def test_vps_required_tool_fallback_reads_explicit_absolute_path(self) -> None:
+        settings = make_settings()
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "oq e o arquivo /Users/allanmatheus/Documents/claudecode/claude_gateway/vps_scheduler.py",
+                }
+            ],
+            "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+        }
+
+        fallback = client._fallback_tool_use_for_required_action(payload)
+
+        self.assertIsNotNone(fallback)
+        assert fallback is not None
+        self.assertEqual(fallback["name"], "Read")
+        self.assertEqual(
+            fallback["input"],
+            {"file_path": "/Users/allanmatheus/Documents/claudecode/claude_gateway/vps_scheduler.py"},
+        )
+
+    def test_vps_required_tool_fallback_uses_path_for_mcp_read_file(self) -> None:
+        settings = make_settings()
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "messages": [{"role": "user", "content": "leia claude_gateway/vps_scheduler.py"}],
+            "tools": [{"name": "read_file", "input_schema": {"type": "object"}}],
+        }
+
+        fallback = client._fallback_tool_use_for_required_action(payload)
+
+        self.assertIsNotNone(fallback)
+        assert fallback is not None
+        self.assertEqual(fallback["name"], "read_file")
+        self.assertEqual(fallback["input"], {"path": "claude_gateway/vps_scheduler.py"})
+
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"

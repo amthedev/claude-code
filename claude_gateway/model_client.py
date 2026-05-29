@@ -1250,6 +1250,15 @@ class VPSAnthropicClient:
                     "name": tool_name,
                     "input": {"name": self._fallback_worktree_name(payload)},
                 }
+        requested_path = self._requested_file_path(payload)
+        if requested_path:
+            if tool_name := first_available("Read", "read_file"):
+                return {
+                    "type": "tool_use",
+                    "id": "call_gateway_read_0",
+                    "name": tool_name,
+                    "input": self._read_tool_input(tool_name, requested_path),
+                }
         if tool_name := first_available("LS", "list_files"):
             return {
                 "type": "tool_use",
@@ -1280,9 +1289,29 @@ class VPSAnthropicClient:
                 "type": "tool_use",
                 "id": "call_gateway_inspect_0",
                 "name": tool_name,
-                "input": {"file_path": "README.md"},
+                "input": self._read_tool_input(tool_name, "README.md"),
             }
         return None
+
+    def _read_tool_input(self, tool_name: str, path: str) -> dict[str, str]:
+        if tool_name.strip().lower() == "read_file":
+            return {"path": path}
+        return {"file_path": path}
+
+    def _requested_file_path(self, payload: dict[str, Any]) -> str:
+        text = self._task_request_text(payload)
+        if not text:
+            return ""
+        patterns = (
+            r"(/Users/[^\s`'\"<>]+)",
+            r"((?:\.{1,2}/)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9_+-]+)",
+            r"(/[A-Za-z0-9._~/-]+\.[A-Za-z0-9_+-]+)",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).rstrip(".,;:)")
+        return ""
 
     def _latest_tool_result_needs_worktree(self, payload: dict[str, Any]) -> bool:
         error_text = self._latest_tool_result_error_text(payload).lower()
