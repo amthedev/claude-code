@@ -1365,6 +1365,21 @@ class VPSAnthropicClient:
         promise_markers = (
             "estou pronto",
             "pronto para ajudar",
+            "i will follow",
+            "i will get started",
+            "i will start",
+            "i'll follow",
+            "i'll get started",
+            "i'll start",
+            "ill follow",
+            "ill get started",
+            "ill start",
+            "let's get started",
+            "lets get started",
+            "understood! i'll",
+            "understood, i'll",
+            "understood! i will",
+            "understood, i will",
             "vou ajudar",
             "vou auxiliar",
             "vou comecar",
@@ -1384,6 +1399,8 @@ class VPSAnthropicClient:
             "entendido, vou ",
             "entendi! vou ",
             "entendido! vou ",
+            "understood, i ",
+            "understood! i ",
         )
         return compact.startswith(starts)
 

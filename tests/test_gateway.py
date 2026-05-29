@@ -943,6 +943,73 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(non_executing_anthropic["content"][0]["type"], "tool_use")
         self.assertEqual(non_executing_anthropic["content"][0]["name"], "LS")
 
+        english_non_executing_after_instruction = {
+            "id": "chatcmpl_english_non_executing_after_instruction",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Understood! I'll follow the instructions carefully and ensure that I use the "
+                            "latest tool result exactly once. Let's get started!"
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 20},
+        }
+        english_non_executing_anthropic = client._anthropic_from_openai_chat(
+            english_non_executing_after_instruction
+        )
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Aqui temos a pasta, voce tem as orientacoes certo? trabalhe",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_read",
+                                "name": "Read",
+                                "input": {"file_path": "README.md"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_read",
+                                "content": "# Projeto\nUse scripts/importar.txt e scripts/exportar.txt.",
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Por favor, execute as seguintes etapas com base nos documentos que voce leu: "
+                            "analise, proponha a arquitetura do bot e liste os proximos passos."
+                        ),
+                    },
+                ],
+                "tools": [
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Write", "input_schema": {"type": "object"}},
+                ],
+            },
+            english_non_executing_anthropic,
+        )
+        self.assertEqual(english_non_executing_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(english_non_executing_anthropic["content"][0]["type"], "tool_use")
+        self.assertEqual(english_non_executing_anthropic["content"][0]["name"], "LS")
+
         false_done_after_reading = {
             "id": "chatcmpl_false_done_after_reading",
             "choices": [{"message": {"content": "Criei os arquivos e esta tudo pronto."}, "finish_reason": "stop"}],
@@ -2235,6 +2302,38 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"content_block": {"type": "tool_use"', body)
         self.assertIn(b'"name": "LS"', body)
         self.assertNotIn("Entendido!".encode(), body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
+
+        async def english_chunks():
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": (
+                                        "Understood! I'll follow the instructions carefully and ensure that "
+                                        "I use the latest tool result exactly once. Let's get started!"
+                                    )
+                                }
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            ).encode()
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(
+            asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(english_chunks(), payload=payload)))
+        )
+
+        self.assertIn(b'"content_block": {"type": "tool_use"', body)
+        self.assertIn(b'"name": "LS"', body)
+        self.assertNotIn(b"Understood!", body)
         self.assertIn(b'"stop_reason": "tool_use"', body)
 
     def test_vps_openai_chat_stream_converts_post_error_textual_worktree_to_valid_tool_call(self) -> None:
