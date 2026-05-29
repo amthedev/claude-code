@@ -3427,6 +3427,18 @@ async function readAttachment(file) {
     throw new Error(`${file.name} é maior que 4 MB.`);
   }
 
+  if (file.type.startsWith("image/")) {
+    const dataUrl = await fileToDataUrl(file);
+    const [, base64 = ""] = dataUrl.split(",", 2);
+    return {
+      name: file.name,
+      kind: "image",
+      mediaType: file.type || "image/png",
+      data: base64,
+      truncated: false,
+    };
+  }
+
   const text = await fileToText(file);
   return {
     name: file.name,
@@ -3446,6 +3458,22 @@ function buildMessageContent(prompt, attachments) {
 
   const content = [{ type: "text", text: prompt }];
   attachments.forEach((attachment) => {
+    if (attachment.kind === "image" && attachment.data) {
+      content.push({
+        type: "text",
+        text: `Imagem anexada: ${attachment.name}`,
+      });
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: attachment.mediaType || "image/png",
+          data: attachment.data,
+        },
+      });
+      return;
+    }
+
     content.push({
       type: "text",
       text: [

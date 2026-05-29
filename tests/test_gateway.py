@@ -2192,6 +2192,42 @@ class GatewayTestCase(unittest.TestCase):
             outgoing["messages"],
         )
 
+    def test_vps_openai_chat_preserves_image_attachments_as_image_url_parts(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Analise esta imagem."},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": "aW1hZ2U=",
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
+            stream=False,
+        )
+
+        content = outgoing["messages"][0]["content"]
+        self.assertIsInstance(content, list)
+        self.assertEqual(content[0], {"type": "text", "text": "Analise esta imagem."})
+        self.assertEqual(
+            content[1],
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aW1hZ2U="}},
+        )
+
     def test_vps_openai_chat_normalizes_claude_code_tool_aliases(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"

@@ -909,9 +909,25 @@ class VPSAnthropicClient:
         for message in copied:
             if message.get("role") != "user":
                 continue
-            content = str(message.get("content") or "")
-            if not content.lstrip().startswith("/no_think"):
-                message["content"] = f"/no_think\n\n{content}"
+            content = message.get("content")
+            if isinstance(content, list):
+                first_text = next(
+                    (
+                        part
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+                    ),
+                    None,
+                )
+                if first_text is not None:
+                    if not first_text["text"].lstrip().startswith("/no_think"):
+                        first_text["text"] = f"/no_think\n\n{first_text['text']}"
+                else:
+                    content.insert(0, {"type": "text", "text": "/no_think"})
+            else:
+                text_content = str(content or "")
+                if not text_content.lstrip().startswith("/no_think"):
+                    message["content"] = f"/no_think\n\n{text_content}"
             return copied
         copied.append({"role": "user", "content": "/no_think"})
         return copied
@@ -993,14 +1009,14 @@ class VPSAnthropicClient:
             return [outgoing]
 
         messages: list[dict[str, Any]] = []
-        text_parts = []
+        parts: list[dict[str, Any]] = []
         for block in content:
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_result":
-                if text_parts:
-                    messages.append({"role": role, "content": "\n".join(text_parts)})
-                    text_parts = []
+                if parts:
+                    messages.append({"role": role, "content": self._openai_user_content(parts)})
+                    parts = []
                 messages.append(
                     {
                         "role": "tool",
@@ -1009,12 +1025,36 @@ class VPSAnthropicClient:
                     }
                 )
             else:
-                text = self._content_to_text(block)
-                if text:
-                    text_parts.append(text)
-        if text_parts:
-            messages.append({"role": role, "content": "\n".join(text_parts)})
+                openai_part = self._content_block_to_openai_user_part(block)
+                if openai_part:
+                    parts.append(openai_part)
+        if parts:
+            messages.append({"role": role, "content": self._openai_user_content(parts)})
         return messages
+
+    def _openai_user_content(self, parts: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        if len(parts) == 1 and parts[0].get("type") == "text":
+            return str(parts[0].get("text") or "")
+        return parts
+
+    def _content_block_to_openai_user_part(self, block: dict[str, Any]) -> dict[str, Any] | None:
+        block_type = str(block.get("type") or "")
+        if block_type == "text" or isinstance(block.get("text"), str):
+            text = self._content_to_text(block)
+            return {"type": "text", "text": text} if text else None
+        if block_type == "image":
+            source = block.get("source") if isinstance(block.get("source"), dict) else {}
+            media_type = str(source.get("media_type") or source.get("mediaType") or "").strip()
+            data = str(source.get("data") or "").strip()
+            if data and media_type.startswith("image/"):
+                return {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data}"}}
+        if block_type == "image_url":
+            image_url = block.get("image_url") if isinstance(block.get("image_url"), dict) else {}
+            url = str(image_url.get("url") or block.get("url") or "").strip()
+            if url:
+                return {"type": "image_url", "image_url": {"url": url}}
+        text = self._content_to_text(block)
+        return {"type": "text", "text": text} if text else None
 
     def _messages_with_claude_code_agent_nudge(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         copied = deepcopy(messages)
@@ -1037,8 +1077,12 @@ class VPSAnthropicClient:
         )
         for message in reversed(copied):
             if message.get("role") == "user":
-                content = str(message.get("content") or "")
-                message["content"] = f"{content}\n\n{reminder}" if content else reminder
+                content = message.get("content")
+                if isinstance(content, list):
+                    content.append({"type": "text", "text": reminder})
+                else:
+                    text_content = str(content or "")
+                    message["content"] = f"{text_content}\n\n{reminder}" if text_content else reminder
                 return copied
         copied.append({"role": "user", "content": reminder})
         return copied
@@ -1084,6 +1128,12 @@ class VPSAnthropicClient:
                         ensure_ascii=True,
                     )
                 )
+            elif block_type == "image":
+                source = block.get("source") if isinstance(block.get("source"), dict) else {}
+                media_type = str(source.get("media_type") or source.get("mediaType") or "image").strip()
+                parts.append(f"[Imagem anexada: {media_type}]")
+            elif block_type == "image_url":
+                parts.append("[Imagem anexada]")
         return "\n".join(part for part in parts if part)
 
     def _tools_to_openai(self, tools: Any) -> list[dict[str, Any]]:
