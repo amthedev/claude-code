@@ -18,17 +18,17 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-pro",
-      label: "Claude Sonnet 4.5",
+      label: "Claude Opus 4.7",
       usdPerToken: 0.000000224,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude Sonnet 4.5",
+      label: "Claude Opus 4.7",
       usdPerToken: 0.00000087,
     },
     opus: {
       publicModel: "claude-code-pro",
-      label: "Claude Sonnet 4.5",
+      label: "Claude Opus 4.7",
       usdPerToken: 0.00000087,
     },
   };

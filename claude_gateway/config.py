@@ -215,7 +215,8 @@ class Settings:
     openai_helper_for_customers: bool = False
     enable_openai_design_director: bool = True
     enable_openai_decision_director: bool = True
-    enable_web_search: bool = True
+    enable_web_search: bool = False
+    public_model_label: str = "Claude Opus 4.7"
     web_search_model: str = "gpt-5.5"
     web_search_openrouter_model: str = ""
     web_search_context_size: str = "low"
@@ -346,7 +347,8 @@ class Settings:
             openai_helper_for_customers=False,
             enable_openai_design_director=_bool_env("ENABLE_OPENAI_DESIGN_DIRECTOR", True),
             enable_openai_decision_director=_bool_env("ENABLE_OPENAI_DECISION_DIRECTOR", True),
-            enable_web_search=_bool_env("ENABLE_WEB_SEARCH", True),
+            enable_web_search=_bool_env("ENABLE_WEB_SEARCH", False),
+            public_model_label=os.getenv("PUBLIC_MODEL_LABEL", "Claude Opus 4.7"),
             web_search_model=os.getenv("WEB_SEARCH_MODEL", "gpt-5.5"),
             web_search_openrouter_model=os.getenv("WEB_SEARCH_OPENROUTER_MODEL", ""),
             web_search_context_size=os.getenv("WEB_SEARCH_CONTEXT_SIZE", "low"),

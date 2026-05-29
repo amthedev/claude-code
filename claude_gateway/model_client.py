@@ -311,6 +311,8 @@ class VPSAnthropicClient:
         text = self._current_user_request_text(payload).lower()
         if not text:
             return False
+        if self._looks_like_workspace_access_question(text):
+            return True
         if self._looks_like_question(text):
             return False
         action_terms = (
@@ -452,6 +454,43 @@ class VPSAnthropicClient:
             "você pode explicar ",
         )
         return compact.startswith(question_prefixes)
+
+    def _looks_like_workspace_access_question(self, text: str) -> bool:
+        compact = " ".join(str(text or "").strip().lower().split())
+        if not compact or "?" not in compact:
+            return False
+        workspace_terms = (
+            "arquivo",
+            "arquivos",
+            "diretorio",
+            "diretório",
+            "folder",
+            "github",
+            "pasta",
+            "projeto",
+            "repo",
+            "repositorio",
+            "repositório",
+            "workspace",
+        )
+        access_terms = (
+            "abre",
+            "acessar",
+            "acessa",
+            "consegue",
+            "encontra",
+            "encontrar",
+            "ler",
+            "le",
+            "lê",
+            "listar",
+            "mexer",
+            "modificar",
+            "ver",
+        )
+        return any(term in compact for term in workspace_terms) and any(
+            term in compact for term in access_terms
+        )
 
     def _looks_like_smalltalk(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split())

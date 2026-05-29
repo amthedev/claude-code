@@ -17,11 +17,14 @@ let activeCodeFiles = [];
 let activeChatMode = localStorage.getItem("claude_frontier_active_chat_mode") || "chat";
 let codeEditMode = localStorage.getItem("claude_frontier_code_edit_mode") || "full";
 let codeOutputMode = localStorage.getItem("claude_frontier_code_output_mode") || "normal";
+const WEB_SEARCH_ENABLED = false;
 let webSearchMode =
-  localStorage.getItem("claude_web_search_mode") ||
-  localStorage.getItem("frontier_web_search_mode") ||
-  "auto";
-let reasoningMode = localStorage.getItem("claude_reasoning_mode") || "auto";
+  WEB_SEARCH_ENABLED
+    ? localStorage.getItem("claude_web_search_mode") ||
+      localStorage.getItem("frontier_web_search_mode") ||
+      "auto"
+    : "off";
+let reasoningMode = localStorage.getItem("claude_reasoning_mode") || "strong";
 let activeFloatingMenu = null;
 let activeModelSelectId = "heroModel";
 let incognitoMode = false;
@@ -526,23 +529,24 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Claude Sonnet 4.5";
+  return option?.textContent || "Claude Opus 4.7";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet 4.5";
+    label.textContent = select ? modelLabel(select.value) : "Claude Opus 4.7";
   });
 }
 
 function renderWebSearchControls() {
-  const allowed = new Set(["auto", "required", "off"]);
-  if (!allowed.has(webSearchMode)) webSearchMode = "auto";
+  const allowed = WEB_SEARCH_ENABLED ? new Set(["auto", "required", "off"]) : new Set(["off"]);
+  if (!allowed.has(webSearchMode)) webSearchMode = "off";
   document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
     const active = button.dataset.webSearchMode === webSearchMode;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
+    button.disabled = !WEB_SEARCH_ENABLED && button.dataset.webSearchMode !== "off";
     if (button.dataset.webSearchMode === "auto") button.title = "Pesquisar só quando a resposta precisar de dados atuais";
     if (button.dataset.webSearchMode === "required") button.title = "Forçar pesquisa web nesta conversa";
     if (button.dataset.webSearchMode === "off") button.title = "Responder sem pesquisa web";
@@ -975,7 +979,7 @@ function renderApiInstallGuide() {
       </div>
       <div class="api-kv">
         <strong>Comandos no chat</strong>
-        <code>/modelo Claude Sonnet 4.5</code>
+        <code>/modelo Claude Opus 4.7</code>
         <code>/raciocinio Automatico | Rapido | Normal | Medio | Forte | Extra forte</code>
       </div>
     </section>
@@ -1230,7 +1234,7 @@ function syncCustomerApiToken(current) {
 }
 
 function modelKeyLabel(modelKey) {
-  return "Claude Sonnet 4.5";
+  return "Claude Opus 4.7";
 }
 
 function isCurrentPaidPlan(current, plan) {
@@ -1255,7 +1259,7 @@ function renderPlanCards() {
       : "";
     const upgradeText =
       highlightedPlanId === "ultra"
-        ? "Claude Sonnet 4.5 está disponível em todos os planos; o 30X libera mais limite."
+        ? "Claude Opus 4.7 está disponível em todos os planos; o 30X libera mais limite."
         : "";
     notice.classList.toggle("hidden", !trialText && !highlightedPlanId);
     notice.textContent = trialText || upgradeText;
@@ -1284,7 +1288,7 @@ function renderPlanCards() {
             <span class="overline">${modelKeyLabel(plan.modelKey)}</span>
             <h2>${ClaudeApp.escapeHtml(plan.name)}</h2>
             <p>${ClaudeApp.escapeHtml(plan.description)}</p>
-            <p class="plan-model-note">Inclui Claude Sonnet 4.5.</p>
+            <p class="plan-model-note">Inclui Claude Opus 4.7.</p>
           </div>
           <strong>${ClaudeApp.brl.format(plan.price)}<small>/mês</small></strong>
           <span>${ClaudeApp.integer.format(plan.manualLimit)} tokens/dia</span>
@@ -2523,7 +2527,11 @@ async function callGateway(
   onThinking = () => {},
 ) {
   const settings = ClaudeApp.apiSettings();
-  const searchMode = selectedReasoningMode === "fast" && webSearchMode === "auto" ? "off" : webSearchMode;
+  const searchMode = WEB_SEARCH_ENABLED
+    ? selectedReasoningMode === "fast" && webSearchMode === "auto"
+      ? "off"
+      : webSearchMode
+    : "off";
   const response = await fetch(`${settings.baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
     headers: {
@@ -3957,6 +3965,13 @@ document.querySelector("#codeOutputMenu").addEventListener("click", (event) => {
 
 document.querySelectorAll("[data-web-search-mode]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (!WEB_SEARCH_ENABLED) {
+      webSearchMode = "off";
+      localStorage.setItem("claude_web_search_mode", webSearchMode);
+      localStorage.removeItem("frontier_web_search_mode");
+      renderWebSearchControls();
+      return;
+    }
     webSearchMode = button.dataset.webSearchMode || "auto";
     localStorage.setItem("claude_web_search_mode", webSearchMode);
     localStorage.removeItem("frontier_web_search_mode");
@@ -4004,7 +4019,7 @@ document.querySelector("#modelMenu").addEventListener("click", (event) => {
     setPanel("plansPanel");
     focusHighlightedPlan();
     showChatNotice(
-      "Claude Sonnet 4.5 é o único modelo disponível.",
+      "Claude Opus 4.7 é o único modelo disponível.",
     );
     return;
   }

@@ -186,7 +186,7 @@ def model_profiles(settings: Settings) -> list[ModelProfile]:
     profiles = [
         ModelProfile(
             id=settings.pro_public_model,
-            display_name="Claude Sonnet 4.5",
+            display_name=settings.public_model_label,
             mode="pro",
             description="Modelo disponível para código, análise e trabalho diário.",
         ),

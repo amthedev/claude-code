@@ -1116,7 +1116,7 @@ def create_app(
         decision = app.state.planner.plan(payload)
         web_search = _web_search_debug(payload, app.state.settings, auth)
         return {
-            **_public_route_decision(decision),
+            **_public_route_decision(decision, app.state.settings),
             "web_search_policy": web_search["policy"],
             "web_search_reason": web_search["reason"],
             "web_search_enabled": web_search["enabled"],
@@ -1156,7 +1156,7 @@ def create_app(
             raise
 
         await _settle_customer_budget(app, reservation, payload, decision, response)
-        return JSONResponse({"decision": _public_route_decision(decision), "response": response})
+        return JSONResponse({"decision": _public_route_decision(decision, app.state.settings), "response": response})
 
     return app
 
@@ -2706,6 +2706,12 @@ def _with_public_model_identity(
     prompt = (
         f"Public model: {label}. "
         f"Current date for user-facing and factual work: {today}, timezone America/Recife. "
+        f"Read the full conversation carefully and answer the user's latest message directly. "
+        f"Do not respond with a generic readiness message when the user has already asked a concrete "
+        f"question or given a concrete task. If the user asks about local files, folders, directories, "
+        f"or workspace access and no file/shell tools are present in the request, say clearly that this "
+        f"chat surface did not provide file tools, then give the exact next best path instead of pretending "
+        f"to inspect the machine. "
         f"Keep Anthropic-compatible API behavior while being helpful, "
         f"direct, careful with code, concise by default, and explicit about files, commands, "
         f"verification, and uncertainty. Preserve Anthropic Messages API and tool-use compatibility. "
@@ -3100,7 +3106,7 @@ def _benchmark_route_rows(app: FastAPI, auth: AuthContext) -> list[dict[str, Any
         started = time.perf_counter()
         payload = _prepare_payload(benchmark_payload(case), app.state.settings, auth, app.state.account_store)
         decision_obj = app.state.planner.plan(payload)
-        decision = _public_route_decision(decision_obj)
+        decision = _public_route_decision(decision_obj, app.state.settings)
         web_search = _web_search_debug(payload, app.state.settings, auth)
         elapsed_ms = (time.perf_counter() - started) * 1000
         data = {
@@ -3221,6 +3227,21 @@ def _literal_conversation_title(text: str) -> bool:
 
 def _quick_local_answer(payload: dict[str, Any]) -> str | None:
     prompt = _normalize_text(_visible_last_user_message_text(payload).replace("?", "").replace("!", ""))
+    if (
+        not payload_has_tool_contract(payload)
+        and ("diretorio" in prompt or "pasta" in prompt or "arquivo" in prompt)
+        and (
+            "acessar" in prompt
+            or "ler" in prompt
+            or "enxergar" in prompt
+            or "consegue" in prompt
+        )
+    ):
+        return (
+            "Nesta conversa eu não recebi ferramentas de arquivo ou terminal, então não consigo acessar "
+            "diretórios nem ler arquivos do seu computador por aqui. Para mexer no projeto de verdade, "
+            "abra pelo Claude Code/Codex no diretório do projeto ou envie uma sessão com ferramentas de arquivo habilitadas."
+        )
     if prompt in {
         "eae",
         "iae",
@@ -3769,23 +3790,23 @@ def _public_model_label(public_model: str, settings: Settings) -> str:
     public = str(public_model or "").strip()
     lowered = public.lower()
     labels = {
-        settings.economy_public_model.lower(): "Claude Sonnet 4.5",
-        settings.pro_public_model.lower(): "Claude Sonnet 4.5",
-        settings.ultra_public_model.lower(): "Claude Sonnet 4.5",
-        settings.ui_public_model.lower(): "Claude Sonnet 4.5",
-        settings.auto_public_model.lower(): "Claude Sonnet 4.5",
-        "claude-code-economy": "Claude Sonnet 4.5",
-        "claude-code-pro": "Claude Sonnet 4.5",
-        "claude-code-ultra": "Claude Sonnet 4.5",
-        "claude-code-ui": "Claude Sonnet 4.5",
-        "claude-code-auto": "Claude Sonnet 4.5",
-        "qwen-14b": "Claude Sonnet 4.5",
+        settings.economy_public_model.lower(): settings.public_model_label,
+        settings.pro_public_model.lower(): settings.public_model_label,
+        settings.ultra_public_model.lower(): settings.public_model_label,
+        settings.ui_public_model.lower(): settings.public_model_label,
+        settings.auto_public_model.lower(): settings.public_model_label,
+        "claude-code-economy": settings.public_model_label,
+        "claude-code-pro": settings.public_model_label,
+        "claude-code-ultra": settings.public_model_label,
+        "claude-code-ui": settings.public_model_label,
+        "claude-code-auto": settings.public_model_label,
+        "qwen-14b": settings.public_model_label,
     }
     if lowered in labels:
         return labels[lowered]
     if "qwen" in lowered:
-        return "Claude Sonnet 4.5"
-    return public if public.startswith("claude-code-") else "Claude Sonnet 4.5"
+        return settings.public_model_label
+    return public if public.startswith("claude-code-") else settings.public_model_label
 
 
 def _with_public_response_model(response: dict[str, Any], public_model: str, settings: Settings) -> dict[str, Any]:
@@ -3885,13 +3906,13 @@ def _public_usage_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _public_route_decision(decision: RouteDecision) -> dict[str, Any]:
+def _public_route_decision(decision: RouteDecision, settings: Settings) -> dict[str, Any]:
     effective_path = (decision.cost_estimate.get("effective_path") or {}) if decision.cost_estimate else {}
     pipeline = (decision.cost_estimate.get("pipeline") or {}) if decision.cost_estimate else {}
     return {
         "requested_model": decision.requested_model,
         "public_model": decision.public_model,
-        "model_label": "Claude Sonnet 4.5",
+        "model_label": _public_model_label(decision.public_model, settings),
         "mode": decision.mode,
         "task_type": decision.task_type,
         "complexity": decision.complexity,

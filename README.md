@@ -122,7 +122,7 @@ Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark
 
 ## Public Model
 
-- `claude-code-pro`: Claude Sonnet 4.5 public identity, backed by `VPS_MODEL_ID`.
+- `claude-code-pro`: Claude Opus 4.7 public identity, backed by `VPS_MODEL_ID`.
 
 The visible model name stays stable for clients. The VPS receives `VPS_MODEL_ID`.
 
