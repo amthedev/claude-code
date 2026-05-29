@@ -2042,6 +2042,11 @@ async def _anthropic_stream_to_response_sse(chunks: Any, model: str):
     item_id = f"msg_{int(time.time() * 1000)}"
     created = int(time.time())
     text_started = False
+    text = ""
+    text_done = False
+    output_items: list[dict[str, Any]] = []
+    tool_items: dict[int, dict[str, Any]] = {}
+    tool_arguments: dict[int, str] = {}
     final_response = {
         "id": response_id,
         "object": "response",
@@ -2064,46 +2069,162 @@ async def _anthropic_stream_to_response_sse(chunks: Any, model: str):
             if not payload:
                 continue
             event_type = str(payload.get("type") or "")
-            if event_type == "content_block_delta":
-                delta = payload.get("delta")
-                if not isinstance(delta, dict) or not isinstance(delta.get("text"), str) or not delta["text"]:
-                    continue
-                if not text_started:
-                    text_started = True
+            if event_type == "content_block_start":
+                block = payload.get("content_block")
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    output_index = int(payload.get("index") or len(output_items))
+                    call_id = str(block.get("id") or f"call_{output_index}")
+                    item = {
+                        "id": call_id,
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": str(block.get("name") or ""),
+                        "arguments": "",
+                        "status": "in_progress",
+                    }
+                    tool_items[output_index] = item
+                    tool_arguments[output_index] = ""
                     yield _response_sse_event(
                         "response.output_item.added",
                         {
                             "type": "response.output_item.added",
-                            "output_index": 0,
-                            "item": {"id": item_id, "type": "message", "role": "assistant", "status": "in_progress", "content": []},
+                            "response_id": response_id,
+                            "output_index": output_index,
+                            "item": item,
                         },
                     )
+                continue
+            if event_type == "content_block_delta":
+                delta = payload.get("delta")
+                if not isinstance(delta, dict):
+                    continue
+                if isinstance(delta.get("text"), str) and delta["text"]:
+                    if not text_started:
+                        text_started = True
+                        yield _response_sse_event(
+                            "response.output_item.added",
+                            {
+                                "type": "response.output_item.added",
+                                "response_id": response_id,
+                                "output_index": 0,
+                                "item": {
+                                    "id": item_id,
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "status": "in_progress",
+                                    "content": [],
+                                },
+                            },
+                        )
+                        yield _response_sse_event(
+                            "response.content_part.added",
+                            {
+                                "type": "response.content_part.added",
+                                "item_id": item_id,
+                                "output_index": 0,
+                                "content_index": 0,
+                                "part": {"type": "output_text", "text": "", "annotations": []},
+                            },
+                        )
+                    text += delta["text"]
                     yield _response_sse_event(
-                        "response.content_part.added",
+                        "response.output_text.delta",
                         {
-                            "type": "response.content_part.added",
+                            "type": "response.output_text.delta",
+                            "response_id": response_id,
                             "item_id": item_id,
                             "output_index": 0,
                             "content_index": 0,
-                            "part": {"type": "output_text", "text": "", "annotations": []},
+                            "delta": delta["text"],
+                        },
+                    )
+                    continue
+                if isinstance(delta.get("partial_json"), str):
+                    output_index = int(payload.get("index") or 0)
+                    tool_arguments[output_index] = tool_arguments.get(output_index, "") + delta["partial_json"]
+                    yield _response_sse_event(
+                        "response.function_call_arguments.delta",
+                        {
+                            "type": "response.function_call_arguments.delta",
+                            "response_id": response_id,
+                            "item_id": tool_items.get(output_index, {}).get("id", f"call_{output_index}"),
+                            "output_index": output_index,
+                            "delta": delta["partial_json"],
+                        },
+                    )
+                continue
+            if event_type == "content_block_stop":
+                output_index = int(payload.get("index") or 0)
+                if output_index in tool_items:
+                    item = {
+                        **tool_items[output_index],
+                        "arguments": tool_arguments.get(output_index, ""),
+                        "status": "completed",
+                    }
+                    tool_items[output_index] = item
+                    output_items.append(item)
+                    yield _response_sse_event(
+                        "response.function_call_arguments.done",
+                        {
+                            "type": "response.function_call_arguments.done",
+                            "response_id": response_id,
+                            "item_id": item["id"],
+                            "output_index": output_index,
+                            "arguments": item["arguments"],
+                        },
+                    )
+                    yield _response_sse_event(
+                        "response.output_item.done",
+                        {
+                            "type": "response.output_item.done",
+                            "response_id": response_id,
+                            "output_index": output_index,
+                            "item": item,
+                        },
+                    )
+                continue
+            if event_type == "message_stop":
+                if text_started and not text_done:
+                    text_done = True
+                    message_item = {
+                        "id": item_id,
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text, "annotations": []}],
+                    }
+                    output_items.insert(0, message_item)
+                    yield _response_sse_event(
+                        "response.output_text.done",
+                        {
+                            "type": "response.output_text.done",
+                            "response_id": response_id,
+                            "item_id": item_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "text": text,
+                        },
+                    )
+                    yield _response_sse_event(
+                        "response.output_item.done",
+                        {
+                            "type": "response.output_item.done",
+                            "response_id": response_id,
+                            "output_index": 0,
+                            "item": message_item,
                         },
                     )
                 yield _response_sse_event(
-                    "response.output_text.delta",
-                    {
-                        "type": "response.output_text.delta",
-                        "item_id": item_id,
-                        "output_index": 0,
-                        "content_index": 0,
-                        "delta": delta["text"],
-                    },
+                    "response.completed",
+                    {"type": "response.completed", "response": {**final_response, "output": output_items}},
                 )
-            elif event_type == "message_stop":
-                yield _response_sse_event("response.completed", {"type": "response.completed", "response": final_response})
                 yield b"data: [DONE]\n\n"
                 return
 
-    yield _response_sse_event("response.completed", {"type": "response.completed", "response": final_response})
+    yield _response_sse_event(
+        "response.completed",
+        {"type": "response.completed", "response": {**final_response, "output": output_items}},
+    )
     yield b"data: [DONE]\n\n"
 
 

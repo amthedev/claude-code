@@ -48,6 +48,11 @@ def responses_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
     tools = _responses_tools_to_anthropic(payload.get("tools"))
     if tools:
         outgoing["tools"] = tools
+        tool_choice = _responses_tool_choice_to_anthropic(payload.get("tool_choice"))
+        if tool_choice:
+            outgoing["tool_choice"] = _with_parallel_tool_setting(tool_choice, payload)
+        elif payload.get("parallel_tool_calls") is False:
+            outgoing["tool_choice"] = {"type": "auto", "disable_parallel_tool_use": True}
 
     return outgoing
 
@@ -69,7 +74,13 @@ def chat_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
         if role in {"system", "developer"}:
             system_parts.append(_content_to_text(content))
         elif role == "assistant":
-            messages.append({"role": "assistant", "content": _content_to_anthropic_blocks(content)})
+            blocks = _content_to_anthropic_blocks(content)
+            if isinstance(blocks, str):
+                assistant_blocks: list[dict[str, Any]] = [{"type": "text", "text": blocks}] if blocks else []
+            else:
+                assistant_blocks = blocks
+            assistant_blocks.extend(_chat_tool_calls_to_anthropic_blocks(message.get("tool_calls")))
+            messages.append({"role": "assistant", "content": assistant_blocks or ""})
         elif role == "tool":
             messages.append(
                 {
@@ -93,6 +104,11 @@ def chat_to_anthropic(payload: dict[str, Any]) -> dict[str, Any]:
     tools = _chat_tools_to_anthropic(payload.get("tools"))
     if tools:
         outgoing["tools"] = tools
+        tool_choice = _chat_tool_choice_to_anthropic(payload.get("tool_choice"))
+        if tool_choice:
+            outgoing["tool_choice"] = _with_parallel_tool_setting(tool_choice, payload)
+        elif payload.get("parallel_tool_calls") is False:
+            outgoing["tool_choice"] = {"type": "auto", "disable_parallel_tool_use": True}
 
     return outgoing
 
@@ -269,6 +285,21 @@ def _responses_input_to_messages(value: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
+        if item_type == "function_call":
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": str(item.get("call_id") or item.get("id") or ""),
+                            "name": str(item.get("name") or ""),
+                            "input": _json_object_from_string(item.get("arguments")),
+                        }
+                    ],
+                }
+            )
+            continue
         if item_type == "function_call_output":
             messages.append(
                 {
@@ -309,6 +340,30 @@ def _content_to_anthropic_blocks(content: Any) -> str | list[dict[str, Any]]:
         elif part_type == "tool_result":
             blocks.append(part)
     return blocks or ""
+
+
+def _chat_tool_calls_to_anthropic_blocks(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    blocks: list[dict[str, Any]] = []
+    for tool_call in value:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = str(function.get("name") or "")
+        if not name:
+            continue
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": str(tool_call.get("id") or ""),
+                "name": name,
+                "input": _json_object_from_string(function.get("arguments")),
+            }
+        )
+    return blocks
 
 
 def _content_to_text(content: Any) -> str:
@@ -359,6 +414,74 @@ def _chat_tools_to_anthropic(value: Any) -> list[dict[str, Any]]:
             }
         )
     return tools
+
+
+def _responses_tool_choice_to_anthropic(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        choice = value.strip().lower()
+        return {
+            "auto": {"type": "auto"},
+            "required": {"type": "any"},
+            "none": {"type": "none"},
+        }.get(choice)
+    if not isinstance(value, dict):
+        return None
+    choice_type = str(value.get("type") or "").strip().lower()
+    if choice_type in {"auto", "none"}:
+        return {"type": choice_type}
+    if choice_type in {"required", "any"}:
+        return {"type": "any"}
+    if choice_type == "function" and value.get("name"):
+        return {"type": "tool", "name": str(value["name"])}
+    return None
+
+
+def _chat_tool_choice_to_anthropic(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        choice = value.strip().lower()
+        return {
+            "auto": {"type": "auto"},
+            "required": {"type": "any"},
+            "none": {"type": "none"},
+        }.get(choice)
+    if not isinstance(value, dict):
+        return None
+    choice_type = str(value.get("type") or "").strip().lower()
+    if choice_type in {"auto", "none"}:
+        return {"type": choice_type}
+    if choice_type in {"required", "any"}:
+        return {"type": "any"}
+    if choice_type == "function":
+        function = value.get("function")
+        if isinstance(function, dict) and function.get("name"):
+            return {"type": "tool", "name": str(function["name"])}
+        if value.get("name"):
+            return {"type": "tool", "name": str(value["name"])}
+    return None
+
+
+def _with_parallel_tool_setting(tool_choice: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("parallel_tool_calls") is not False:
+        return tool_choice
+    if tool_choice.get("type") in {"auto", "any", "tool"}:
+        return {**tool_choice, "disable_parallel_tool_use": True}
+    return tool_choice
+
+
+def _json_object_from_string(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _anthropic_content_to_response_output(response: dict[str, Any]) -> list[dict[str, Any]]:

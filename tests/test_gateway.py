@@ -22,9 +22,10 @@ from claude_gateway.anthropic import clean_model_text
 from claude_gateway.accounts import _calculate_limit
 from claude_gateway.config import Settings
 from claude_gateway.customers import _today, daily_cost_budget_usd, estimate_reserved_tokens, parse_customer_accounts
-from claude_gateway.main import _public_model_stream, create_app
+from claude_gateway.main import _anthropic_stream_to_response_sse, _public_model_stream, create_app
 from claude_gateway.model_client import VPSAnthropicClient
 from claude_gateway.openrouter import OpenRouterClient, OpenRouterError
+from claude_gateway.openai_compat import chat_to_anthropic, responses_to_anthropic
 from claude_gateway.research import (
     WebSearchResult,
     WebSource,
@@ -5214,6 +5215,138 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"data: [DONE]", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
+
+    def test_openai_responses_stream_converts_anthropic_tool_use_to_function_call_events(self) -> None:
+        async def chunks():
+            yield (
+                b'event: message_start\ndata: {"type":"message_start","message":{"model":"qwen","role":"assistant","content":[]}}\n\n'
+            )
+            yield (
+                b'event: content_block_start\n'
+                b'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_read","name":"read_file","input":{}}}\n\n'
+            )
+            yield (
+                b'event: content_block_delta\n'
+                b'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"README.md\\"}"}}\n\n'
+            )
+            yield b'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n'
+            yield (
+                b'event: message_delta\n'
+                b'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":0}}\n\n'
+            )
+            yield b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+        body = b"".join(asyncio.run(_collect_async_bytes(_anthropic_stream_to_response_sse(chunks(), "claude-code-pro"))))
+
+        self.assertIn(b"response.output_item.added", body)
+        self.assertIn(b'"type": "function_call"', body)
+        self.assertIn(b'"name": "read_file"', body)
+        self.assertIn(b"response.function_call_arguments.delta", body)
+        self.assertIn(b'\\"path\\":\\"README.md\\"', body)
+        self.assertIn(b"response.function_call_arguments.done", body)
+        self.assertIn(b"response.completed", body)
+
+    def test_openai_chat_tool_history_maps_to_anthropic_tool_use_before_result(self) -> None:
+        outgoing = chat_to_anthropic(
+            {
+                "model": "claude-code-pro",
+                "messages": [
+                    {"role": "user", "content": "Qual o clima?"},
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_weather",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": "{\"city\":\"Recife\"}",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_weather",
+                        "content": "{\"temperature\":29}",
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ],
+                "tool_choice": "required",
+                "parallel_tool_calls": False,
+            }
+        )
+
+        self.assertEqual(outgoing["tool_choice"], {"type": "any", "disable_parallel_tool_use": True})
+        self.assertEqual(outgoing["messages"][1]["role"], "assistant")
+        self.assertEqual(
+            outgoing["messages"][1]["content"],
+            [
+                {
+                    "type": "tool_use",
+                    "id": "call_weather",
+                    "name": "get_weather",
+                    "input": {"city": "Recife"},
+                }
+            ],
+        )
+        self.assertEqual(outgoing["messages"][2]["content"][0]["tool_use_id"], "call_weather")
+
+    def test_openai_responses_function_call_history_maps_to_anthropic_tool_use_before_result(self) -> None:
+        outgoing = responses_to_anthropic(
+            {
+                "model": "claude-code-pro",
+                "input": [
+                    {"role": "user", "content": "Qual o clima?"},
+                    {
+                        "type": "function_call",
+                        "call_id": "call_weather",
+                        "name": "get_weather",
+                        "arguments": "{\"city\":\"Recife\"}",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_weather",
+                        "output": "{\"temperature\":29}",
+                    },
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "get_weather",
+                        "parameters": {"type": "object"},
+                    }
+                ],
+                "tool_choice": {"type": "function", "name": "get_weather"},
+                "parallel_tool_calls": False,
+            }
+        )
+
+        self.assertEqual(
+            outgoing["tool_choice"],
+            {"type": "tool", "name": "get_weather", "disable_parallel_tool_use": True},
+        )
+        self.assertEqual(
+            outgoing["messages"][1]["content"],
+            [
+                {
+                    "type": "tool_use",
+                    "id": "call_weather",
+                    "name": "get_weather",
+                    "input": {"city": "Recife"},
+                }
+            ],
+        )
+        self.assertEqual(outgoing["messages"][2]["content"][0]["tool_use_id"], "call_weather")
 
     def test_messages_count_tokens_endpoint_is_anthropic_compatible(self) -> None:
         response = self.client.post(
