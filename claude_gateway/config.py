@@ -216,7 +216,7 @@ class Settings:
     enable_openai_design_director: bool = True
     enable_openai_decision_director: bool = True
     enable_web_search: bool = False
-    legacy_public_model_label: str = "Claude 4.5"
+    legacy_public_model_label: str = "Claude Sonnet 4.5"
     public_model_label: str = "Claude Opus 4.7"
     web_search_model: str = "gpt-5.5"
     web_search_openrouter_model: str = ""
@@ -352,7 +352,7 @@ class Settings:
                 _bool_env("ENABLE_WEB_SEARCH", False)
                 and _bool_env("ALLOW_WEB_SEARCH_CREDITS", False)
             ),
-            legacy_public_model_label=os.getenv("LEGACY_PUBLIC_MODEL_LABEL", "Claude 4.5"),
+            legacy_public_model_label=os.getenv("LEGACY_PUBLIC_MODEL_LABEL", "Claude Sonnet 4.5"),
             public_model_label=os.getenv("PUBLIC_MODEL_LABEL", "Claude Opus 4.7"),
             web_search_model=os.getenv("WEB_SEARCH_MODEL", "gpt-5.5"),
             web_search_openrouter_model=os.getenv("WEB_SEARCH_OPENROUTER_MODEL", ""),

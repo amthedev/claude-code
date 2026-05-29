@@ -1998,7 +1998,7 @@ class GatewayTestCase(unittest.TestCase):
         admin_response = self.client.get("/v1/admin/health", headers=self.headers)
         self.assertEqual(admin_response.status_code, 200)
         admin_data = admin_response.json()
-        self.assertEqual(admin_data["public_model"], "Claude 4.5")
+        self.assertEqual(admin_data["public_model"], "Claude Sonnet 4.5")
         self.assertTrue(admin_data["model_backend_configured"])
         self.assertFalse(admin_data["external_fallback_configured"])
         self.assertNotIn("vps_model_id", admin_data)
@@ -3159,7 +3159,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["mode"], "economy")
-        self.assertEqual(data["model_label"], "Claude 4.5")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertNotIn("agents", data)
         self.assertTrue(data["cost_estimate"]["effective_path"]["within_budget"])
@@ -3186,7 +3186,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "explanation")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["model_label"], "Claude 4.5")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertFalse(data["use_orchestration"])
 
     def test_default_reasoning_mode_is_fast_without_hidden_thinking_for_simple_requests(self) -> None:
@@ -3219,7 +3219,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["mode"], "ui")
         self.assertEqual(data["task_type"], "frontend")
         self.assertEqual(data["complexity"], "low")
-        self.assertEqual(data["model_label"], "Claude 4.5")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
 
     def test_integral_project_analysis_avoids_expensive_thinking_defaults(self) -> None:
         response = self.client.post(
@@ -3301,7 +3301,7 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "economy")
         self.assertEqual(data["task_type"], "file_edit")
-        self.assertEqual(data["model_label"], "Claude 4.5")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertNotIn("selected_openrouter_model", data)
         self.assertFalse(data["use_orchestration"])
 
@@ -3316,7 +3316,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude 4.5")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.5")
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
 
     def test_ultra_model_uses_stronger_thinking_by_default(self) -> None:
@@ -4901,7 +4901,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b'"model": "Claude 4.5"', body)
+        self.assertIn(b'"model": "Claude Sonnet 4.5"', body)
 
     def test_tool_payload_uses_anthropic_compatible_style_prompt(self) -> None:
         response = self.client.post(
@@ -4916,7 +4916,7 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = self.app.state.openrouter.calls[-1][1]
-        self.assertIn("Claude 4.5", payload["system"])
+        self.assertIn("Claude Sonnet 4.5", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertEqual(payload["max_tokens"], 256)
 
@@ -5038,7 +5038,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             body = b"".join(response.iter_bytes())
 
-        self.assertIn(b"Claude 4.5", body)
+        self.assertIn(b"Claude Sonnet 4.5", body)
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_openrouter_payload_disables_reasoning_for_latency(self) -> None:

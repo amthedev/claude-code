@@ -529,13 +529,13 @@ function modelLabel(value) {
   const option = Array.from(document.querySelectorAll("#heroModel option")).find(
     (item) => item.value === value,
   );
-  return option?.textContent || "Claude 4.5";
+  return option?.textContent || "Claude Sonnet 4.5";
 }
 
 function updateModelButtons() {
   document.querySelectorAll("[data-model-label]").forEach((label) => {
     const select = document.querySelector(`#${label.dataset.modelLabel}`);
-    label.textContent = select ? modelLabel(select.value) : "Claude 4.5";
+    label.textContent = select ? modelLabel(select.value) : "Claude Sonnet 4.5";
   });
 }
 
@@ -984,7 +984,7 @@ function renderApiInstallGuide() {
       </div>
       <div class="api-kv">
         <strong>Comandos no chat</strong>
-        <code>/modelo Claude 4.5</code>
+        <code>/modelo Claude Sonnet 4.5</code>
         <code>/modelo Claude Opus 4.7</code>
         <code>/raciocinio Automatico | Rapido | Normal | Medio | Forte | Extra forte</code>
       </div>
@@ -1240,7 +1240,7 @@ function syncCustomerApiToken(current) {
 }
 
 function modelKeyLabel(modelKey) {
-  return ClaudeApp.models[ClaudeApp.normalizeModelKey(modelKey)]?.label || "Claude 4.5";
+  return ClaudeApp.models[ClaudeApp.normalizeModelKey(modelKey)]?.label || "Claude Sonnet 4.5";
 }
 
 function isCurrentPaidPlan(current, plan) {

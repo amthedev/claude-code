@@ -18,13 +18,13 @@ const ClaudeApp = (() => {
   const models = {
     haiku: {
       publicModel: "claude-code-pro",
-      label: "Claude 4.5",
+      label: "Claude Sonnet 4.5",
       usdPerToken: 0.000000224,
       tokenMultiplier: 1,
     },
     sonnet: {
       publicModel: "claude-code-pro",
-      label: "Claude 4.5",
+      label: "Claude Sonnet 4.5",
       usdPerToken: 0.00000087,
       tokenMultiplier: 1,
     },
