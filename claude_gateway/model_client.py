@@ -241,6 +241,9 @@ class VPSAnthropicClient:
         if disable_hidden_thinking:
             messages = self._messages_with_no_think(messages)
         tools = self._tools_to_openai(payload.get("tools"))
+        disable_tools = bool(tools and self._should_disable_tool_choice(payload))
+        if disable_tools:
+            tools = []
         tools = self._compact_tools_for_openai_chat_context(messages, tools)
         messages = self._trim_messages_for_openai_chat_context(messages, tools)
         requested_max_tokens = int(payload.get("max_tokens") or 4096)
@@ -259,9 +262,13 @@ class VPSAnthropicClient:
                 outgoing[key] = payload[key]
         if disable_hidden_thinking and self._supports_chat_template_thinking_toggle(target):
             outgoing["chat_template_kwargs"] = {"enable_thinking": False}
-        if tools:
+        if disable_tools:
+            outgoing["tool_choice"] = "none"
+        elif tools:
             outgoing["tools"] = tools
-            if self._should_force_tool_choice(payload):
+            if payload.get("tool_choice") and not self._is_auto_tool_choice(payload["tool_choice"]):
+                outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
+            elif self._should_force_tool_choice(payload):
                 outgoing["tool_choice"] = "required"
             elif payload.get("tool_choice"):
                 outgoing["tool_choice"] = self._tool_choice_to_openai(payload["tool_choice"])
@@ -287,7 +294,7 @@ class VPSAnthropicClient:
     def _is_claude_code_action_request(self, payload: dict[str, Any]) -> bool:
         if not self._is_claude_code_client(payload):
             return False
-        return self._is_tool_action_request(payload, aggressive=True)
+        return self._is_tool_action_request(payload, aggressive=False)
 
     def _is_tool_action_request(self, payload: dict[str, Any], *, aggressive: bool = False) -> bool:
         if not payload.get("tools"):
@@ -356,8 +363,10 @@ class VPSAnthropicClient:
             "teste",
             "tests",
             "terminal",
+            "tool",
             "verificar",
             "write",
+            "ferramenta",
             "inspect",
             "começar",
             "comecar",
@@ -387,6 +396,21 @@ class VPSAnthropicClient:
 
     def _should_force_claude_code_tool_choice(self, payload: dict[str, Any]) -> bool:
         return self._should_force_tool_choice(payload)
+
+    def _is_auto_tool_choice(self, value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() == "auto"
+        if isinstance(value, dict):
+            return str(value.get("type") or "").strip().lower() == "auto"
+        return False
+
+    def _should_disable_tool_choice(self, payload: dict[str, Any]) -> bool:
+        if not payload.get("tools"):
+            return False
+        return not (
+            self._is_claude_code_action_request(payload)
+            or self._is_tool_action_request(payload, aggressive=False)
+        )
 
     def _looks_like_question(self, text: str) -> bool:
         compact = " ".join(str(text or "").strip().lower().split())

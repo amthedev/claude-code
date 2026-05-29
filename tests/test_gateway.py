@@ -625,9 +625,10 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
 
-        self.assertEqual(outgoing["messages"][0]["content"], "/no_think\n\nUse a ferramenta e responda.")
+        self.assertIn("Local workspace tool behavior override", outgoing["messages"][0]["content"])
+        self.assertTrue(outgoing["messages"][1]["content"].startswith("/no_think\n\nUse a ferramenta e responda."))
         self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
-        self.assertEqual(outgoing["tool_choice"], "auto")
+        self.assertEqual(outgoing["tool_choice"], "required")
 
     def test_vps_openai_chat_adds_no_think_for_claude_code_qwen3_requests(self) -> None:
         settings = make_settings()
@@ -806,7 +807,7 @@ class GatewayTestCase(unittest.TestCase):
             },
             stream=True,
         )
-        self.assertNotIn("tool_choice", question_request)
+        self.assertEqual(question_request["tool_choice"], "none")
 
         greeting_request = client._openai_chat_payload(
             {
@@ -817,7 +818,19 @@ class GatewayTestCase(unittest.TestCase):
             },
             stream=True,
         )
-        self.assertNotIn("tool_choice", greeting_request)
+        self.assertEqual(greeting_request["tool_choice"], "none")
+
+        simple_text_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "responda apenas ping"}],
+                "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+        self.assertEqual(simple_text_request["tool_choice"], "none")
 
         auto_tool_choice_request = client._openai_chat_payload(
             {
@@ -895,7 +908,7 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
 
-        self.assertNotIn("tool_choice", outgoing)
+        self.assertEqual(outgoing["tool_choice"], "none")
         self.assertNotIn("Execute the user's project request now", str(outgoing["messages"]))
 
     def test_vps_openai_chat_compacts_large_tool_schemas_to_leave_output_room(self) -> None:
@@ -937,7 +950,7 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
 
-        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing.get("tools", []))
         self.assertLessEqual(estimated_input, 18000)
         self.assertGreater(outgoing["max_tokens"], 1000)
 
@@ -958,10 +971,10 @@ class GatewayTestCase(unittest.TestCase):
             stream=False,
         )
 
-        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing.get("tools", []))
         self.assertLess(outgoing["max_tokens"], 16000)
         self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
-        self.assertEqual(outgoing["tool_choice"], "auto")
+        self.assertEqual(outgoing["tool_choice"], "none")
 
     def test_vps_openai_chat_respects_configured_context_window(self) -> None:
         settings = make_settings()
@@ -979,7 +992,7 @@ class GatewayTestCase(unittest.TestCase):
             stream=False,
         )
 
-        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing.get("tools", []))
         self.assertLess(outgoing["max_tokens"], 14638)
         self.assertLessEqual(
             estimated_input + outgoing["max_tokens"],
@@ -1008,7 +1021,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         joined = "\n".join(message["content"] for message in outgoing["messages"])
-        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing["tools"])
+        estimated_input = client._estimate_openai_chat_input_tokens(outgoing["messages"], outgoing.get("tools", []))
         self.assertLessEqual(estimated_input, 18000)
         self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
         self.assertIn("como vc ta", joined)
@@ -1039,8 +1052,8 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(outgoing["model"], "qwen-14b")
         self.assertEqual(outgoing["messages"][0], {"role": "system", "content": "Seja direto."})
         self.assertEqual(outgoing["messages"][1], {"role": "user", "content": "/no_think\n\nOi"})
-        self.assertEqual(outgoing["tools"][0]["function"]["name"], "read_file")
-        self.assertEqual(outgoing["tool_choice"], "auto")
+        self.assertNotIn("tools", outgoing)
+        self.assertEqual(outgoing["tool_choice"], "none")
         self.assertNotIn("__gateway_reasoning", outgoing)
 
         tool_choice = client._openai_chat_payload(
