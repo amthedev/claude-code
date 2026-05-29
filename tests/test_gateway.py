@@ -708,6 +708,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(outgoing["chat_template_kwargs"], {"enable_thinking": False})
         self.assertNotIn("tool_choice", outgoing)
 
+    def test_vps_openai_chat_allows_qwen_thinking_for_high_text_only_requests(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        outgoing = client._openai_chat_payload(
+            {
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "Analise profundamente a arquitetura."}],
+            },
+            stream=True,
+        )
+
+        self.assertEqual(outgoing["messages"][0]["content"], "Analise profundamente a arquitetura.")
+        self.assertNotIn("chat_template_kwargs", outgoing)
+
     def test_vps_openai_chat_guides_claude_code_to_use_tools_without_asking(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -2513,7 +2530,8 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["requested_model"], "claude-code-pro")
         self.assertEqual(data["public_model"], "claude-code-pro")
-        self.assertEqual(data["web_search_policy"], "off")
+        self.assertEqual(data["web_search_policy"], "auto")
+        self.assertTrue(data["web_search_should_search"])
 
     def test_account_prompt_commands_are_saved_as_api_preferences(self) -> None:
         with TemporaryDirectory() as directory:
@@ -3125,7 +3143,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(data["model_label"], "Claude Sonnet 4.5")
         self.assertFalse(data["use_orchestration"])
 
-    def test_default_reasoning_mode_is_fast_without_hidden_thinking(self) -> None:
+    def test_default_reasoning_mode_is_fast_without_hidden_thinking_for_simple_requests(self) -> None:
         response = self.client.post(
             "/v1/messages",
             headers=self.headers,
@@ -3355,9 +3373,9 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         stable = response.json()
-        self.assertEqual(stable["web_search_policy"], "off")
+        self.assertEqual(stable["web_search_policy"], "auto")
         self.assertFalse(stable["web_search_should_search"])
-        self.assertEqual(stable["web_search_reason"], "disabled")
+        self.assertEqual(stable["web_search_reason"], "stable_request")
         self.assertFalse(stable["use_orchestration"])
 
         response = self.client.post(
@@ -3391,7 +3409,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(off["web_search_policy"], "off")
         self.assertFalse(off["web_search_should_search"])
 
-    def test_fast_reasoning_disables_auto_web_search_and_uses_economy_for_auto_model(self) -> None:
+    def test_fast_reasoning_keeps_auto_web_search_available_when_fresh_info_is_needed(self) -> None:
         response = self.client.post(
             "/v1/router/debug",
             headers=self.headers,
@@ -3406,8 +3424,8 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["public_model"], "claude-code-pro")
-        self.assertEqual(data["web_search_policy"], "off")
-        self.assertFalse(data["web_search_should_search"])
+        self.assertEqual(data["web_search_policy"], "auto")
+        self.assertTrue(data["web_search_should_search"])
         self.assertFalse(data["use_orchestration"])
 
     def test_web_search_context_is_injected_when_required(self) -> None:
@@ -3437,6 +3455,30 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Internal web research context", payload["system"])
         self.assertIn("https://example.com/source", payload["system"])
         self.assertNotIn("gateway_web_search", payload)
+
+    def test_auto_web_search_runs_only_for_fresh_information_requests(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = "test-openai-token"
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            web_search_factory=FakeWebSearchClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.web_search.calls), 1)
+        self.assertIn("Internal web research context", app.state.openrouter.calls[-1][1]["system"])
 
     def test_web_search_does_not_run_for_stable_or_off_requests(self) -> None:
         settings = make_settings()
@@ -4128,7 +4170,7 @@ class GatewayTestCase(unittest.TestCase):
             self.assertEqual(locked.status_code, 200)
             self.assertEqual(locked.json()["mode"], "economy")
             self.assertFalse(locked.json()["use_orchestration"])
-            self.assertEqual(locked.json()["web_search_policy"], "off")
+            self.assertEqual(locked.json()["web_search_policy"], "auto")
 
             with app.state.account_store._connect() as db:
                 db.execute(
@@ -4557,7 +4599,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
 
-    def test_economy_model_skips_hidden_reasoning_for_complex_default_request(self) -> None:
+    def test_economy_model_uses_auto_reasoning_for_complex_default_request(self) -> None:
         with self.client.stream(
             "POST",
             "/v1/messages",
@@ -4574,7 +4616,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertIn(b"event: message_start", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "medium")
 
     def test_economy_model_can_raise_reasoning_when_user_selects_higher_level(self) -> None:
         with self.client.stream(
@@ -4593,9 +4635,9 @@ class GatewayTestCase(unittest.TestCase):
             body = b"".join(response.iter_bytes())
 
         self.assertIn(b"event: message_start", body)
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "medium")
 
-    def test_extra_strong_reasoning_still_disables_hidden_thinking(self) -> None:
+    def test_extra_strong_reasoning_enables_hidden_thinking_for_text_only_requests(self) -> None:
         with self.client.stream(
             "POST",
             "/v1/messages",
@@ -4612,7 +4654,7 @@ class GatewayTestCase(unittest.TestCase):
             body = b"".join(response.iter_bytes())
 
         self.assertIn(b"event: message_start", body)
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "high")
 
     def test_streaming_complex_request_uses_direct_proxy_by_default(self) -> None:
         with self.client.stream(
@@ -4632,7 +4674,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"event: message_start", body)
         self.assertEqual(len(self.app.state.openrouter.calls), 1)
         self.assertTrue(self.app.state.openrouter.calls[-1][1]["stream"])
-        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "none")
+        self.assertEqual(self.app.state.openrouter.calls[-1][1]["__gateway_reasoning"], "medium")
 
     def test_streaming_agent_pipeline_can_be_enabled_explicitly(self) -> None:
         settings = make_settings()
@@ -4657,7 +4699,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertIn(b"text_delta", body)
         self.assertGreaterEqual(len(app.state.openrouter.calls), 5)
-        self.assertEqual(app.state.openrouter.calls[0][1]["__gateway_reasoning"], "none")
+        self.assertEqual(app.state.openrouter.calls[0][1]["__gateway_reasoning"], "high")
 
     def test_streaming_payload_uses_public_model_identity(self) -> None:
         with self.client.stream(

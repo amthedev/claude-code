@@ -2271,6 +2271,7 @@ def _prepare_payload(
         reasoning_value = auth.customer.preferred_reasoning
     if reasoning_value is None:
         reasoning_value = "fast"
+        limited["__gateway_reasoning_auto_default"] = True
     limited["__gateway_reasoning_mode"] = normalize_reasoning_mode(reasoning_value)
     policy_value = limited.pop("gateway_web_search", None)
     if policy_value is None:
@@ -2278,8 +2279,6 @@ def _prepare_payload(
     else:
         limited.pop("web_search", None)
     search_policy = normalize_web_search_policy(policy_value)
-    if limited["__gateway_reasoning_mode"] == "fast" and search_policy == "auto":
-        search_policy = "off"
     limited["__gateway_web_search_policy"] = search_policy
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
     if auth.customer:
@@ -2628,7 +2627,6 @@ async def _with_customer_latency_policy(
 
     outgoing["model"] = app.state.settings.economy_public_model
     outgoing["__gateway_reasoning_mode"] = "fast"
-    outgoing["__gateway_web_search_policy"] = "off"
     outgoing["__gateway_latency_fast_locked"] = True
     outgoing["__gateway_latency_policy"] = (
         "first_10_customer_messages"
@@ -3269,11 +3267,41 @@ def _clean_generated_title(value: str) -> str:
 
 def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str, Any]:
     outgoing = dict(payload)
-    outgoing["__gateway_reasoning"] = "none"
+    outgoing["__gateway_reasoning"] = _reasoning_effort_for_request(payload, decision)
     outgoing.pop("reasoning", None)
     outgoing.pop("include_reasoning", None)
     outgoing.pop("thinking", None)
     return outgoing
+
+
+def _reasoning_effort_for_request(payload: dict[str, Any], decision: Any) -> str:
+    if payload_has_tool_contract(payload) or _is_claude_code_payload(payload):
+        return "none"
+    if payload.get("__gateway_latency_fast_locked"):
+        return "none"
+
+    mode = normalize_reasoning_mode(payload.get("__gateway_reasoning_mode"))
+    auto_default = bool(payload.get("__gateway_reasoning_auto_default"))
+    if mode == "fast" and not auto_default:
+        return "none"
+    if mode == "medium":
+        return "medium"
+    if mode in {"strong", "xstrong"}:
+        return "high"
+    if mode == "normal":
+        return "low"
+
+    complexity = str(getattr(decision, "complexity", "") or "")
+    task_type = str(getattr(decision, "task_type", "") or "")
+    if complexity == "critical":
+        return "high"
+    if complexity == "high" or task_type in {"architecture", "debugging", "review", "testing"}:
+        return "medium"
+    return "none"
+
+
+def _is_claude_code_payload(payload: dict[str, Any]) -> bool:
+    return str(payload.get("__gateway_client") or "").strip().lower() == "claude-code"
 
 
 CLAUDE_CODE_TOOL_NAMES = {
