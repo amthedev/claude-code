@@ -1554,7 +1554,10 @@ class VPSAnthropicClient:
             stop_reason = "tool_use"
         elif state.is_empty:
             stop_reason = "end_turn"
-            fallback_text = "Nao consegui gerar uma chamada de ferramenta valida. Tente pedir novamente de forma mais direta."
+            if payload and self._payload_has_tool_result(payload):
+                fallback_text = self._fallback_summary_from_latest_tool_result(payload)
+            else:
+                fallback_text = "Nao consegui gerar uma chamada de ferramenta valida. Tente pedir novamente de forma mais direta."
             yield _anthropic_sse(
                 "content_block_start",
                 {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},

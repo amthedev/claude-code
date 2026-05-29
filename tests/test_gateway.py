@@ -1853,6 +1853,39 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b'"stop_reason": "end_turn"', body)
         self.assertNotIn(b'"stop_reason": "tool_use"', body)
 
+    def test_vps_openai_chat_stream_summarizes_tool_result_when_empty_after_reading(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {"role": "user", "content": "leia os arquivos e diga o que falta"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_read", "name": "Read", "input": {"file_path": "README.md"}}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "toolu_read", "content": "README.md: falta configurar deploy"}],
+                },
+            ],
+            "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+        }
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks(), payload=payload))))
+
+        self.assertIn(b"README.md", body)
+        self.assertIn(b"deploy", body)
+        self.assertNotIn(b"chamada de ferramenta valida", body)
+        self.assertIn(b'"stop_reason": "end_turn"', body)
+        self.assertNotIn(b'"stop_reason": "tool_use"', body)
+
     def test_exact_greeting_returns_local_answer_without_upstream(self) -> None:
         response = self.client.post(
             "/v1/messages",
