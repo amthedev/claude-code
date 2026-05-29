@@ -11,20 +11,21 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` and set your VPS model endpoint:
+Edit `.env` and set only the deployment secrets and the current RunPod pod id:
 
 ```env
-VPS_MODEL_BASE_URL=https://sua-vps.example.com
-VPS_MODEL_ID=local-model
-VPS_MODEL_API_FORMAT=anthropic
-VPS_MODEL_API_KEY=
 RUNPOD_API_KEY=
 RUNPOD_POD_ID=
+RUNPOD_VLLM_API_KEY=
 ```
 
-For RunPod vLLM templates, `VPS_MODEL_API_KEY` is the vLLM serving key, often
-`sk-[pod-id]`. The admin panel's "Ligar VPS" button needs `RUNPOD_API_KEY`,
-which is the account API key from RunPod settings, plus `RUNPOD_POD_ID`.
+The gateway intentionally ignores `VPS_MODEL_BASE_URL`, `VPS_MODEL_ID`,
+`VPS_MODEL_API_FORMAT`, `VPS_MODEL_API_KEY`, `VPS_FAST_*`, and `VPS_STRONG_*`
+environment variables. Those values are fixed in code so stale Square Cloud
+variables cannot accidentally route customers to OpenRouter or a third-party
+Anthropic proxy. `RUNPOD_API_KEY` is the account API key from RunPod settings,
+`RUNPOD_POD_ID` is the current pod, and `RUNPOD_VLLM_API_KEY` is optional only
+when the vLLM server itself requires a serving key.
 
 Run the API:
 
@@ -55,18 +56,17 @@ Open the web app:
 
 ## Provider Setup
 
-The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients pointed at this public API. Internally, the main model call goes to your VPS:
+The gateway keeps Claude Code, Cursor, Windsurf, and OpenAI-compatible clients pointed at this public API. Internally, the main model call goes to your RunPod vLLM VPS:
 
-- Primary Anthropic-compatible: `POST {VPS_MODEL_BASE_URL}/v1/messages`
-- Primary OpenAI-compatible/vLLM/RunPod: `POST {VPS_MODEL_BASE_URL}/chat/completions` when `VPS_MODEL_API_FORMAT=openai-chat`
+- Primary upstream: `POST https://{RUNPOD_POD_ID}-{RUNPOD_VLLM_PORT}.proxy.runpod.net/v1/chat/completions`
 - Public model: `claude-code-pro`
-- Actual VPS model id sent upstream: `VPS_MODEL_ID`
+- Actual VPS model id sent upstream: `qwen25-coder-14b`
 
 ```env
-VPS_MODEL_BASE_URL=https://sua-vps.example.com
-VPS_MODEL_ID=local-model
-VPS_MODEL_API_FORMAT=anthropic
-VPS_MODEL_API_KEY=
+RUNPOD_API_KEY=
+RUNPOD_POD_ID=
+RUNPOD_VLLM_PORT=8001
+RUNPOD_VLLM_API_KEY=
 VPS_MODEL_TIMEOUT_SECONDS=55
 VPS_MODEL_SLOW_FALLBACK_SECONDS=6
 VPS_DISABLE_QWEN_THINKING=true
@@ -75,21 +75,8 @@ OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 ```
 
-For OpenRouter's Anthropic-compatible endpoint, prefer the native `/v1/messages`
-path instead of the OpenAI-chat adapter:
-
-```env
-VPS_MODEL_BASE_URL=https://openrouter.ai/api
-VPS_MODEL_ID=~anthropic/claude-sonnet-latest
-VPS_MODEL_API_FORMAT=anthropic
-OPENROUTER_API_KEY=sk-or-v1...
-VPS_MODEL_API_KEY=
-```
-
-When `VPS_MODEL_BASE_URL` points to OpenRouter and `VPS_MODEL_API_KEY` is empty,
-the gateway reuses `OPENROUTER_API_KEY` and sends the OpenRouter attribution
-headers. Use `VPS_MODEL_API_FORMAT=openai-chat` only for providers that expose
-OpenAI Chat Completions, such as vLLM/RunPod/Ollama-compatible servers.
+OpenRouter is not used as a customer fallback. Keep `OPENROUTER_API_KEY` empty
+unless you are enabling an admin-only helper such as optional web search.
 
 ### Same-GPU fast + strong VPS models
 
@@ -101,20 +88,10 @@ To keep everything on one RunPod GPU, run two vLLM servers in the same pod:
 Gateway configuration:
 
 ```env
-VPS_MODEL_BASE_URL=https://SEU-POD-8000.proxy.runpod.net/v1
-VPS_MODEL_ID=qwen25-coder-14b
-VPS_MODEL_API_FORMAT=openai-chat
-VPS_MODEL_API_KEY=sk-SEU-POD
-
-VPS_FAST_MODEL_BASE_URL=https://SEU-POD-8000.proxy.runpod.net/v1
-VPS_FAST_MODEL_ID=qwen25-coder-14b
-VPS_FAST_MODEL_API_FORMAT=openai-chat
-VPS_FAST_MODEL_API_KEY=sk-SEU-POD
-
-VPS_STRONG_MODEL_BASE_URL=
-VPS_STRONG_MODEL_ID=
-VPS_STRONG_MODEL_API_FORMAT=
-VPS_STRONG_MODEL_API_KEY=
+RUNPOD_API_KEY=rpa_...
+RUNPOD_POD_ID=SEU-POD
+RUNPOD_VLLM_PORT=8001
+RUNPOD_VLLM_API_KEY=sk-SEU-POD
 ```
 
 Suggested pod command for an L40S:
@@ -123,15 +100,15 @@ Suggested pod command for an L40S:
 bash -lc 'python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8001 --model Qwen/Qwen2.5-Coder-14B-Instruct-AWQ --served-model-name qwen25-coder-14b --api-key "$VLLM_API_KEY" --max-model-len 16384 --gpu-memory-utilization 0.62 --trust-remote-code --enable-auto-tool-choice --tool-call-parser hermes'
 ```
 
-Use one fast code model by default under user load. If you later add a strong
-model, keep it on a separate port and only enable `VPS_STRONG_MODEL_*` after a
-smoke test on the same GPU.
+Use one code model by default under user load. The gateway ignores `VPS_FAST_*`
+and `VPS_STRONG_*` environment overrides so production keeps one predictable
+upstream.
 
 ## Coding Combo
 
-The public model combo is tuned for Claude Code terminal work, but the actual generation now uses your configured VPS model. The router still keeps public identity, token limits, tool behavior, and compatibility rules stable.
+The public model combo is tuned for Claude Code terminal work, but the actual generation now uses your RunPod vLLM model. The router still keeps public identity, token limits, tool behavior, and compatibility rules stable.
 
-- `VPS_MODEL_ID`: the single upstream model used by default.
+- `qwen25-coder-14b`: the single upstream model used by default.
 - OpenRouter fallback: disabled. Requests stay on the configured VPS.
 - `gpt-5.4-mini`: optional OpenAI decision/design-director pass when `OPENAI_API_KEY` is configured.
 
@@ -142,10 +119,10 @@ Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark
 
 ## Public Model
 
-- `claude-code-pro`: Claude Sonnet 4.5 public identity, backed by `VPS_MODEL_ID`.
+- `claude-code-pro`: Claude Sonnet 4.5 public identity, backed by the RunPod vLLM model.
 - `claude-sonnet-4.6`: Claude Sonnet 4.6 public identity with stronger reasoning and thinking defaults. It reserves/charges 1.5x tokens.
 
-The visible model name stays stable for clients. The VPS receives `VPS_MODEL_ID`.
+The visible model name stays stable for clients. The VPS receives `qwen25-coder-14b`.
 
 ## Cost Guard
 
@@ -474,10 +451,10 @@ uvicorn claude_gateway.main:app --host 0.0.0.0 --port 80
 Set these environment variables in Square Cloud:
 
 ```env
-VPS_MODEL_BASE_URL=https://your-vps.example.com
-VPS_MODEL_ID=local-model
-VPS_MODEL_API_FORMAT=anthropic
-VPS_MODEL_API_KEY=
+RUNPOD_API_KEY=rpa_...
+RUNPOD_POD_ID=your-current-pod-id
+RUNPOD_VLLM_PORT=8001
+RUNPOD_VLLM_API_KEY=
 VPS_CODE_TIMEOUT_SECONDS=8
 OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=

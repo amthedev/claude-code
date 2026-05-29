@@ -18,6 +18,8 @@ except ImportError:  # pragma: no cover - certifi is normally present via httpx
 
 DEFAULT_RUNPOD_CODER_MODEL_ID = "qwen25-coder-14b"
 DEFAULT_RUNPOD_VLLM_PORT = "8001"
+DEFAULT_LOCAL_VLLM_BASE_URL = "http://127.0.0.1:8000/v1"
+DEFAULT_VPS_API_FORMAT = "openai-chat"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -118,66 +120,47 @@ def _discover_active_runpod_pod_id(current_pod_id: str, port: str) -> str:
         for pod in pods
         if isinstance(pod, dict) and pod.get("desiredStatus") == "RUNNING" and pod_has_port(pod)
     ]
-    if not running:
+    fallback_running = [
+        pod for pod in pods if isinstance(pod, dict) and pod.get("desiredStatus") == "RUNNING"
+    ]
+    if not running and not fallback_running:
         return current_pod_id
 
     current_name = str(current.get("name") or "") if isinstance(current, dict) else ""
     if current_name:
         current_base = current_name.removesuffix("-migration")
-        for pod in running:
+        for pod in running or fallback_running:
             name = str(pod.get("name") or "")
             if name == f"{current_name}-migration" or name.removesuffix("-migration") == current_base:
                 return str(pod.get("id") or current_pod_id)
 
-    for pod in running:
+    for pod in running or fallback_running:
         name = str(pod.get("name") or "").lower()
         if "qwen" in name or "vllm" in name:
             return str(pod.get("id") or current_pod_id)
-    return str(running[0].get("id") or current_pod_id)
+    return str((running or fallback_running)[0].get("id") or current_pod_id)
 
 
 def _model_backend_env() -> dict[str, str]:
     runpod_pod_id = os.getenv("RUNPOD_POD_ID", "").strip()
     runpod_port = os.getenv("RUNPOD_VLLM_PORT", DEFAULT_RUNPOD_VLLM_PORT).strip() or DEFAULT_RUNPOD_VLLM_PORT
-    base_url = os.getenv("VPS_MODEL_BASE_URL", "http://127.0.0.1:8000").strip()
-    model_id = os.getenv("VPS_MODEL_ID", "local-model").strip()
-    api_format = os.getenv("VPS_MODEL_API_FORMAT", "anthropic").strip()
-    fast_base_url = os.getenv("VPS_FAST_MODEL_BASE_URL", "").strip()
-    fast_model_id = os.getenv("VPS_FAST_MODEL_ID", "").strip()
-    fast_api_format = os.getenv("VPS_FAST_MODEL_API_FORMAT", "").strip()
-    strong_base_url = os.getenv("VPS_STRONG_MODEL_BASE_URL", "").strip()
-    strong_model_id = os.getenv("VPS_STRONG_MODEL_ID", "").strip()
-    strong_api_format = os.getenv("VPS_STRONG_MODEL_API_FORMAT", "").strip()
-
-    if runpod_pod_id and (_looks_like_gateway_url(base_url) or _looks_like_runpod_proxy_url(base_url)):
+    model_id = DEFAULT_RUNPOD_CODER_MODEL_ID
+    if runpod_pod_id:
         runpod_pod_id = _discover_active_runpod_pod_id(runpod_pod_id, runpod_port)
         base_url = _runpod_vllm_base_url(runpod_pod_id, runpod_port)
-        model_id = (
-            fast_model_id
-            if fast_model_id and not (_looks_like_gateway_url(fast_base_url) or _looks_like_runpod_proxy_url(fast_base_url))
-            else DEFAULT_RUNPOD_CODER_MODEL_ID
-        )
-        api_format = "openai-chat"
-        if not fast_base_url or _looks_like_gateway_url(fast_base_url) or _looks_like_runpod_proxy_url(fast_base_url):
-            fast_base_url = base_url
-        if not fast_model_id or fast_model_id in {"local-model", "claude-code-pro"}:
-            fast_model_id = model_id
-        if not fast_api_format:
-            fast_api_format = api_format
-        strong_base_url = ""
-        strong_model_id = ""
-        strong_api_format = ""
+    else:
+        base_url = DEFAULT_LOCAL_VLLM_BASE_URL
 
     return {
         "vps_model_base_url": base_url,
         "vps_model_id": model_id,
-        "vps_model_api_format": api_format,
-        "vps_fast_model_base_url": fast_base_url,
-        "vps_fast_model_id": fast_model_id,
-        "vps_fast_model_api_format": fast_api_format,
-        "vps_strong_model_base_url": strong_base_url,
-        "vps_strong_model_id": strong_model_id,
-        "vps_strong_model_api_format": strong_api_format,
+        "vps_model_api_format": DEFAULT_VPS_API_FORMAT,
+        "vps_fast_model_base_url": base_url,
+        "vps_fast_model_id": model_id,
+        "vps_fast_model_api_format": DEFAULT_VPS_API_FORMAT,
+        "vps_strong_model_base_url": "",
+        "vps_strong_model_id": "",
+        "vps_strong_model_api_format": "",
     }
 
 
@@ -324,15 +307,15 @@ class Settings:
             vps_model_base_url=model_backend["vps_model_base_url"],
             vps_model_id=vps_model_id,
             vps_model_api_format=model_backend["vps_model_api_format"],
-            vps_model_api_key=os.getenv("VPS_MODEL_API_KEY", ""),
+            vps_model_api_key=os.getenv("RUNPOD_VLLM_API_KEY", ""),
             vps_fast_model_base_url=model_backend["vps_fast_model_base_url"],
             vps_fast_model_id=model_backend["vps_fast_model_id"],
             vps_fast_model_api_format=model_backend["vps_fast_model_api_format"],
-            vps_fast_model_api_key=os.getenv("VPS_FAST_MODEL_API_KEY", ""),
+            vps_fast_model_api_key=os.getenv("RUNPOD_VLLM_API_KEY", ""),
             vps_strong_model_base_url=model_backend["vps_strong_model_base_url"],
             vps_strong_model_id=model_backend["vps_strong_model_id"],
             vps_strong_model_api_format=model_backend["vps_strong_model_api_format"],
-            vps_strong_model_api_key=os.getenv("VPS_STRONG_MODEL_API_KEY", ""),
+            vps_strong_model_api_key="",
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "55")),
             vps_code_timeout_seconds=float(os.getenv("VPS_CODE_TIMEOUT_SECONDS", "55")),
             vps_model_slow_fallback_seconds=float(

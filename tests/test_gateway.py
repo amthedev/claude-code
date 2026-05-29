@@ -395,7 +395,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(admin_response.json()["detail"], "Customer API token required.")
         self.assertEqual(customer_response.status_code, 200)
 
-    def test_settings_recover_runpod_backend_when_vps_points_to_gateway(self) -> None:
+    def test_settings_ignore_vps_model_env_and_use_runpod_backend(self) -> None:
         with patch.dict(
             os.environ,
             {
@@ -403,15 +403,19 @@ class GatewayTestCase(unittest.TestCase):
                 "RUNPOD_AUTO_DISCOVER_ACTIVE": "false",
                 "RUNPOD_POD_ID": "pod123",
                 "RUNPOD_VLLM_PORT": "8001",
-                "VPS_MODEL_BASE_URL": "https://claude-code-api.squareweb.app/",
-                "VPS_MODEL_ID": "claude-code-pro",
-                "VPS_MODEL_API_FORMAT": "openai-chat",
-                "VPS_FAST_MODEL_BASE_URL": "",
-                "VPS_FAST_MODEL_ID": "",
-                "VPS_FAST_MODEL_API_FORMAT": "",
-                "VPS_STRONG_MODEL_BASE_URL": "https://old-strong.example/v1",
-                "VPS_STRONG_MODEL_ID": "qwen3-32b",
-                "VPS_STRONG_MODEL_API_FORMAT": "openai-chat",
+                "RUNPOD_VLLM_API_KEY": "vllm-secret",
+                "VPS_MODEL_BASE_URL": "https://ignored-provider.example/anthropic",
+                "VPS_MODEL_ID": "claude-sonnet-4-6",
+                "VPS_MODEL_API_FORMAT": "anthropic",
+                "VPS_MODEL_API_KEY": "tokies-key-one,tokies-key-two",
+                "VPS_FAST_MODEL_BASE_URL": "https://wrong-fast.example/v1",
+                "VPS_FAST_MODEL_ID": "wrong-fast-model",
+                "VPS_FAST_MODEL_API_FORMAT": "anthropic",
+                "VPS_FAST_MODEL_API_KEY": "wrong-fast-key",
+                "VPS_STRONG_MODEL_BASE_URL": "https://wrong-strong.example/v1",
+                "VPS_STRONG_MODEL_ID": "wrong-strong-model",
+                "VPS_STRONG_MODEL_API_FORMAT": "anthropic",
+                "VPS_STRONG_MODEL_API_KEY": "wrong-strong-key",
             },
             clear=False,
         ):
@@ -422,8 +426,11 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(settings.vps_model_api_format, "openai-chat")
         self.assertEqual(settings.vps_fast_model_base_url, "https://pod123-8001.proxy.runpod.net/v1")
         self.assertEqual(settings.vps_fast_model_id, "qwen25-coder-14b")
+        self.assertEqual(settings.vps_model_api_key, "vllm-secret")
+        self.assertEqual(settings.vps_fast_model_api_key, "vllm-secret")
         self.assertEqual(settings.vps_strong_model_base_url, "")
         self.assertEqual(settings.vps_strong_model_id, "")
+        self.assertEqual(settings.vps_strong_model_api_key, "")
 
     def test_settings_discovers_active_runpod_migration_when_pod_id_is_stale(self) -> None:
         body = json.dumps(
@@ -468,12 +475,58 @@ class GatewayTestCase(unittest.TestCase):
                 "RUNPOD_API_KEY": "rpa_test",
                 "RUNPOD_POD_ID": "oldpod",
                 "RUNPOD_VLLM_PORT": "8001",
-                "VPS_MODEL_BASE_URL": "https://oldpod-8001.proxy.runpod.net/v1",
-                "VPS_MODEL_ID": "qwen25-coder-14b",
-                "VPS_MODEL_API_FORMAT": "openai-chat",
-                "VPS_FAST_MODEL_BASE_URL": "https://oldpod-8001.proxy.runpod.net/v1",
-                "VPS_FAST_MODEL_ID": "qwen25-coder-14b",
-                "VPS_FAST_MODEL_API_FORMAT": "openai-chat",
+                "VPS_MODEL_BASE_URL": "https://ignored-provider.example/anthropic",
+                "VPS_MODEL_ID": "claude-sonnet-4-6",
+                "VPS_MODEL_API_FORMAT": "anthropic",
+            },
+            clear=False,
+        ), patch("claude_gateway.config.urlopen", return_value=FakeRunPodResponse()):
+            settings = Settings.from_env()
+
+        self.assertEqual(settings.vps_model_base_url, "https://newpod-8001.proxy.runpod.net/v1")
+        self.assertEqual(settings.vps_fast_model_base_url, "https://newpod-8001.proxy.runpod.net/v1")
+
+    def test_settings_discovers_active_runpod_pod_before_runtime_ports_are_ready(self) -> None:
+        body = json.dumps(
+            {
+                "data": {
+                    "myself": {
+                        "pods": [
+                            {
+                                "id": "oldpod",
+                                "name": "ia-qwen-14b-vllm",
+                                "desiredStatus": "EXITED",
+                                "runtime": None,
+                            },
+                            {
+                                "id": "newpod",
+                                "name": "ia-qwen-14b-vllm-migration",
+                                "desiredStatus": "RUNNING",
+                                "runtime": {"ports": []},
+                            },
+                        ]
+                    }
+                }
+            }
+        ).encode()
+
+        class FakeRunPodResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return body
+
+        with patch.dict(
+            os.environ,
+            {
+                "GATEWAY_SKIP_DOTENV": "1",
+                "RUNPOD_API_KEY": "rpa_test",
+                "RUNPOD_POD_ID": "oldpod",
+                "RUNPOD_VLLM_PORT": "8001",
             },
             clear=False,
         ), patch("claude_gateway.config.urlopen", return_value=FakeRunPodResponse()):
@@ -685,21 +738,7 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(client._headers()["Authorization"], "Bearer vps-secret")
         self.assertEqual(client._headers()["x-api-key"], "vps-secret")
 
-    def test_vps_api_key_list_rotates_between_requests(self) -> None:
-        settings = make_settings()
-        settings.vps_model_base_url = "https://api.tokies.example/anthropic/v1"
-        settings.vps_model_api_format = "anthropic"
-        settings.vps_model_api_key = "key-one,key-two\nkey-three"
-        client = VPSAnthropicClient(settings)
-
-        first = client._headers()["x-api-key"]
-        second = client._headers()["x-api-key"]
-        third = client._headers()["x-api-key"]
-        fourth = client._headers()["x-api-key"]
-
-        self.assertEqual([first, second, third, fourth], ["key-one", "key-two", "key-three", "key-one"])
-
-    def test_vps_retries_next_api_key_for_auth_or_balance_errors(self) -> None:
+    def test_vps_does_not_rotate_comma_separated_api_keys(self) -> None:
         class FakePostClient:
             def __init__(self) -> None:
                 self.keys: list[str] = []
@@ -707,25 +746,9 @@ class GatewayTestCase(unittest.TestCase):
             async def post(self, url: str, **kwargs: Any) -> FakeHttpResponse:
                 key = str(kwargs["headers"]["x-api-key"])
                 self.keys.append(key)
-                if key == "bad-key":
-                    return FakeHttpResponse(
-                        {"error": {"type": "authentication_error", "message": "Key not found"}},
-                        status_code=401,
-                    )
-                if key == "empty-key":
-                    return FakeHttpResponse(
-                        {
-                            "type": "error",
-                            "error": {
-                                "type": "invalid_request_error",
-                                "message": "Your credit balance is too low to access the Anthropic API.",
-                            },
-                        },
-                        status_code=400,
-                    )
                 return FakeHttpResponse(
                     {
-                        "id": "msg_retry",
+                        "id": "msg_single_key",
                         "type": "message",
                         "role": "assistant",
                         "model": "claude-test",
@@ -737,9 +760,9 @@ class GatewayTestCase(unittest.TestCase):
                 )
 
         settings = make_settings()
-        settings.vps_model_base_url = "https://api.tokies.example/anthropic"
+        settings.vps_model_base_url = "https://runpod.example/v1"
         settings.vps_model_api_format = "anthropic"
-        settings.vps_model_api_key = "bad-key,empty-key,good-key"
+        settings.vps_model_api_key = "one-key,two-key"
         client = VPSAnthropicClient(settings)
         fake_client = FakePostClient()
         client._client = fake_client  # type: ignore[assignment]
@@ -751,7 +774,7 @@ class GatewayTestCase(unittest.TestCase):
             )
         )
 
-        self.assertEqual(fake_client.keys, ["bad-key", "empty-key", "good-key"])
+        self.assertEqual(fake_client.keys, ["one-key,two-key"])
         self.assertEqual(response["content"][0]["text"], "ok")
 
     def test_vps_routes_fast_and_strong_models_when_configured(self) -> None:
