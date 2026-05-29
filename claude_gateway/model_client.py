@@ -311,8 +311,6 @@ class VPSAnthropicClient:
             return False
         if self._looks_like_workspace_access_question(text):
             return True
-        if self._looks_like_question(text):
-            return False
         action_terms = (
             "analis",
             "analise",
@@ -374,18 +372,26 @@ class VPSAnthropicClient:
             "verificar",
             "write",
             "ferramenta",
+            "continuar",
+            "continue",
             "inspect",
             "começar",
             "comecar",
             "fassa",
             "faça",
             "github",
+            "prossiga",
+            "prosseguir",
             "preciso",
             "push",
             "quero",
+            "trabalhe",
+            "trabalhar",
         )
         if any(term in text for term in action_terms):
             return True
+        if self._looks_like_question(text):
+            return False
         if self._looks_like_smalltalk(text):
             return False
         return aggressive
@@ -1257,6 +1263,15 @@ class VPSAnthropicClient:
                 response["stop_reason"] = "end_turn"
                 return
             if (
+                self._is_tool_action_request(payload, aggressive=False)
+                and self._looks_like_non_executing_action_response(response_text)
+            ):
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool:
+                    response["content"] = [fallback_tool]
+                    response["stop_reason"] = "tool_use"
+                    return
+            if (
                 self._is_file_change_request(payload)
                 and not self._payload_has_successful_mutating_tool_use(payload)
                 and self._looks_like_completed_file_change_response(response_text)
@@ -1342,6 +1357,35 @@ class VPSAnthropicClient:
             "ok.",
             "certo.",
         }
+
+    def _looks_like_non_executing_action_response(self, text: str) -> bool:
+        compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
+        if not compact:
+            return False
+        promise_markers = (
+            "estou pronto",
+            "pronto para ajudar",
+            "vou ajudar",
+            "vou auxiliar",
+            "vou comecar",
+            "vou continuar",
+            "vou prosseguir",
+            "vou responder",
+            "vou seguir",
+            "vou usar",
+            "irei ajudar",
+            "irei seguir",
+            "posso seguir",
+        )
+        if any(marker in compact for marker in promise_markers):
+            return True
+        starts = (
+            "entendi, vou ",
+            "entendido, vou ",
+            "entendi! vou ",
+            "entendido! vou ",
+        )
+        return compact.startswith(starts)
 
     def _looks_like_completed_file_change_response(self, text: str) -> bool:
         compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
@@ -1820,6 +1864,15 @@ class VPSAnthropicClient:
                 post_tool_text_buffer = self._physical_change_status_text(payload)
             elif self._is_generic_help_response(post_tool_text_buffer) and payload:
                 post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
+            elif (
+                payload
+                and self._is_tool_action_request(payload, aggressive=False)
+                and self._looks_like_non_executing_action_response(post_tool_text_buffer)
+            ):
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool:
+                    for outgoing in tool_state.feed([_openai_tool_call_from_anthropic_tool_use(fallback_tool, 0)]):
+                        yield outgoing
             elif (
                 payload
                 and self._is_file_change_request(payload)

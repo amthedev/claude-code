@@ -885,6 +885,64 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Resumo do repo", generic_pt_anthropic["content"][0]["text"])
         self.assertNotIn("ajudá-lo", generic_pt_anthropic["content"][0]["text"])
 
+        non_executing_after_reading = {
+            "id": "chatcmpl_non_executing_after_reading",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Entendido! Vou seguir as instruções fornecidas e usar as ferramentas "
+                            "disponíveis para auxiliar o usuário da melhor maneira possível."
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 18},
+        }
+        non_executing_anthropic = client._anthropic_from_openai_chat(non_executing_after_reading)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Aqui temos a pasta, voce tem as orientacoes certo? trabalhe",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_read",
+                                "name": "Read",
+                                "input": {"file_path": "README.md"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_read",
+                                "content": "# Projeto\nUse scripts/importar.txt e scripts/exportar.txt.",
+                            }
+                        ],
+                    },
+                ],
+                "tools": [
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Write", "input_schema": {"type": "object"}},
+                ],
+            },
+            non_executing_anthropic,
+        )
+        self.assertEqual(non_executing_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(non_executing_anthropic["content"][0]["type"], "tool_use")
+        self.assertEqual(non_executing_anthropic["content"][0]["name"], "LS")
+
         false_done_after_reading = {
             "id": "chatcmpl_false_done_after_reading",
             "choices": [{"message": {"content": "Criei os arquivos e esta tudo pronto."}, "finish_reason": "stop"}],
@@ -1152,6 +1210,22 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(workspace_question_request["tool_choice"], "required")
         self.assertIn("Execute the user's project request now", workspace_question_request["messages"][-1]["content"])
+
+        mixed_question_command_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Aqui temos a pasta, voce tem as orientacoes certo? trabalhe",
+                    }
+                ],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            },
+            stream=True,
+        )
+        self.assertEqual(mixed_question_command_request["tool_choice"], "required")
 
         greeting_request = client._openai_chat_payload(
             {
@@ -2091,6 +2165,77 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"README.md", body)
         self.assertNotIn(b"posso", body)
         self.assertIn(b'"stop_reason": "end_turn"', body)
+
+    def test_vps_openai_chat_stream_continues_when_model_only_promises_after_tool_result(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Aqui temos a pasta, voce tem as orientacoes certo? trabalhe",
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_read",
+                            "name": "Read",
+                            "input": {"file_path": "README.md"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_read",
+                            "content": "# Projeto\nUse scripts/importar.txt e scripts/exportar.txt.",
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {"name": "Read", "input_schema": {"type": "object"}},
+                {"name": "LS", "input_schema": {"type": "object"}},
+                {"name": "Write", "input_schema": {"type": "object"}},
+            ],
+        }
+
+        async def chunks():
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": (
+                                        "Entendido! Vou seguir as instruções fornecidas e usar as ferramentas "
+                                        "disponíveis para auxiliar o usuário da melhor maneira possível."
+                                    )
+                                }
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            ).encode()
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks(), payload=payload))))
+
+        self.assertIn(b'"content_block": {"type": "tool_use"', body)
+        self.assertIn(b'"name": "LS"', body)
+        self.assertNotIn("Entendido!".encode(), body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
 
     def test_vps_openai_chat_stream_converts_post_error_textual_worktree_to_valid_tool_call(self) -> None:
         settings = make_settings()
