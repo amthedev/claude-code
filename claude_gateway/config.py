@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
+import ssl
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - certifi is normally present via httpx
+    certifi = None
 
 
 DEFAULT_RUNPOD_CODER_MODEL_ID = "qwen25-coder-14b"
@@ -54,6 +63,79 @@ def _looks_like_gateway_url(value: str) -> bool:
     return host.endswith(".squareweb.app") or "claude-code-api" in host
 
 
+def _looks_like_runpod_proxy_url(value: str) -> bool:
+    return (urlparse(value).hostname or "").lower().endswith(".proxy.runpod.net")
+
+
+def _discover_active_runpod_pod_id(current_pod_id: str, port: str) -> str:
+    if not _bool_env("RUNPOD_AUTO_DISCOVER_ACTIVE", True):
+        return current_pod_id
+
+    api_key = os.getenv("RUNPOD_API_KEY", "").strip()
+    if not api_key:
+        return current_pod_id
+
+    query = {
+        "query": (
+            "query { myself { pods { id name desiredStatus runtime { ports { privatePort type } } } } }"
+        )
+    }
+    request = Request(
+        "https://api.runpod.io/graphql",
+        data=json.dumps(query).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "claude-code-gateway/1.0",
+        },
+        method="POST",
+    )
+    try:
+        timeout = float(os.getenv("RUNPOD_AUTO_DISCOVER_TIMEOUT_SECONDS", "4"))
+        context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+        with urlopen(request, timeout=timeout, context=context) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return current_pod_id
+
+    pods = (((data.get("data") or {}).get("myself") or {}).get("pods") or [])
+    if not isinstance(pods, list):
+        return current_pod_id
+
+    def pod_has_port(pod: dict[str, object]) -> bool:
+        runtime = pod.get("runtime") if isinstance(pod, dict) else None
+        ports = (runtime or {}).get("ports") if isinstance(runtime, dict) else []
+        if not isinstance(ports, list):
+            return False
+        return any(str((port_info or {}).get("privatePort") or "") == str(port) for port_info in ports)
+
+    current = next((pod for pod in pods if isinstance(pod, dict) and pod.get("id") == current_pod_id), None)
+    if isinstance(current, dict) and current.get("desiredStatus") == "RUNNING" and pod_has_port(current):
+        return current_pod_id
+
+    running = [
+        pod
+        for pod in pods
+        if isinstance(pod, dict) and pod.get("desiredStatus") == "RUNNING" and pod_has_port(pod)
+    ]
+    if not running:
+        return current_pod_id
+
+    current_name = str(current.get("name") or "") if isinstance(current, dict) else ""
+    if current_name:
+        current_base = current_name.removesuffix("-migration")
+        for pod in running:
+            name = str(pod.get("name") or "")
+            if name == f"{current_name}-migration" or name.removesuffix("-migration") == current_base:
+                return str(pod.get("id") or current_pod_id)
+
+    for pod in running:
+        name = str(pod.get("name") or "").lower()
+        if "qwen" in name or "vllm" in name:
+            return str(pod.get("id") or current_pod_id)
+    return str(running[0].get("id") or current_pod_id)
+
+
 def _model_backend_env() -> dict[str, str]:
     runpod_pod_id = os.getenv("RUNPOD_POD_ID", "").strip()
     runpod_port = os.getenv("RUNPOD_VLLM_PORT", DEFAULT_RUNPOD_VLLM_PORT).strip() or DEFAULT_RUNPOD_VLLM_PORT
@@ -67,15 +149,16 @@ def _model_backend_env() -> dict[str, str]:
     strong_model_id = os.getenv("VPS_STRONG_MODEL_ID", "").strip()
     strong_api_format = os.getenv("VPS_STRONG_MODEL_API_FORMAT", "").strip()
 
-    if runpod_pod_id and _looks_like_gateway_url(base_url):
+    if runpod_pod_id and (_looks_like_gateway_url(base_url) or _looks_like_runpod_proxy_url(base_url)):
+        runpod_pod_id = _discover_active_runpod_pod_id(runpod_pod_id, runpod_port)
         base_url = _runpod_vllm_base_url(runpod_pod_id, runpod_port)
         model_id = (
             fast_model_id
-            if fast_model_id and not _looks_like_gateway_url(fast_base_url)
+            if fast_model_id and not (_looks_like_gateway_url(fast_base_url) or _looks_like_runpod_proxy_url(fast_base_url))
             else DEFAULT_RUNPOD_CODER_MODEL_ID
         )
         api_format = "openai-chat"
-        if not fast_base_url or _looks_like_gateway_url(fast_base_url):
+        if not fast_base_url or _looks_like_gateway_url(fast_base_url) or _looks_like_runpod_proxy_url(fast_base_url):
             fast_base_url = base_url
         if not fast_model_id or fast_model_id in {"local-model", "claude-code-pro"}:
             fast_model_id = model_id

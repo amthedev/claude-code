@@ -327,6 +327,7 @@ class GatewayTestCase(unittest.TestCase):
             os.environ,
             {
                 "GATEWAY_SKIP_DOTENV": "1",
+                "RUNPOD_AUTO_DISCOVER_ACTIVE": "false",
                 "RUNPOD_POD_ID": "pod123",
                 "RUNPOD_VLLM_PORT": "8001",
                 "VPS_MODEL_BASE_URL": "https://claude-code-api.squareweb.app/",
@@ -350,6 +351,63 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(settings.vps_fast_model_id, "qwen25-coder-14b")
         self.assertEqual(settings.vps_strong_model_base_url, "")
         self.assertEqual(settings.vps_strong_model_id, "")
+
+    def test_settings_discovers_active_runpod_migration_when_pod_id_is_stale(self) -> None:
+        body = json.dumps(
+            {
+                "data": {
+                    "myself": {
+                        "pods": [
+                            {
+                                "id": "oldpod",
+                                "name": "ia-qwen3-32b-a40-vllm",
+                                "desiredStatus": "EXITED",
+                                "runtime": None,
+                            },
+                            {
+                                "id": "newpod",
+                                "name": "ia-qwen3-32b-a40-vllm-migration",
+                                "desiredStatus": "RUNNING",
+                                "runtime": {
+                                    "ports": [{"privatePort": 8001, "type": "http"}],
+                                },
+                            },
+                        ]
+                    }
+                }
+            }
+        ).encode()
+
+        class FakeRunPodResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return body
+
+        with patch.dict(
+            os.environ,
+            {
+                "GATEWAY_SKIP_DOTENV": "1",
+                "RUNPOD_API_KEY": "rpa_test",
+                "RUNPOD_POD_ID": "oldpod",
+                "RUNPOD_VLLM_PORT": "8001",
+                "VPS_MODEL_BASE_URL": "https://oldpod-8001.proxy.runpod.net/v1",
+                "VPS_MODEL_ID": "qwen25-coder-14b",
+                "VPS_MODEL_API_FORMAT": "openai-chat",
+                "VPS_FAST_MODEL_BASE_URL": "https://oldpod-8001.proxy.runpod.net/v1",
+                "VPS_FAST_MODEL_ID": "qwen25-coder-14b",
+                "VPS_FAST_MODEL_API_FORMAT": "openai-chat",
+            },
+            clear=False,
+        ), patch("claude_gateway.config.urlopen", return_value=FakeRunPodResponse()):
+            settings = Settings.from_env()
+
+        self.assertEqual(settings.vps_model_base_url, "https://newpod-8001.proxy.runpod.net/v1")
+        self.assertEqual(settings.vps_fast_model_base_url, "https://newpod-8001.proxy.runpod.net/v1")
 
     def test_admin_can_purge_accounts_and_old_api_tokens_stop_working(self) -> None:
         with TemporaryDirectory() as directory:

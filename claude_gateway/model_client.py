@@ -220,6 +220,13 @@ class VPSAnthropicClient:
             ) as response:
                 if response.status_code >= 400:
                     body = await response.aread()
+                    if response.status_code == 404:
+                        async for chunk in _anthropic_stream_error_message(
+                            self._target_for_model(model).model_id,
+                            "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                        ):
+                            yield chunk
+                        return
                     raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
                 async for chunk in response.aiter_bytes():
                     yield chunk
@@ -1289,6 +1296,13 @@ class VPSAnthropicClient:
             ) as response:
                 if response.status_code >= 400:
                     body = await response.aread()
+                    if response.status_code == 404:
+                        async for chunk in _anthropic_stream_error_message(
+                            target.model_id,
+                            "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                        ):
+                            yield chunk
+                        return
                     raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
                 async for chunk in self._openai_sse_to_anthropic(
                     response.aiter_bytes(),
@@ -1870,6 +1884,43 @@ def _normalize_claude_code_tool_input(tool_name: str, value: dict[str, Any]) -> 
 
 def _anthropic_sse(event: str, payload: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+async def _anthropic_stream_error_message(model: str, text: str) -> AsyncIterator[bytes]:
+    yield _anthropic_sse(
+        "message_start",
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_backend_error",
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            },
+        },
+    )
+    yield _anthropic_sse(
+        "content_block_start",
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    )
+    yield _anthropic_sse(
+        "content_block_delta",
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}},
+    )
+    yield _anthropic_sse("content_block_stop", {"type": "content_block_stop", "index": 0})
+    yield _anthropic_sse(
+        "message_delta",
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": 0},
+        },
+    )
+    yield _anthropic_sse("message_stop", {"type": "message_stop"})
 
 
 class EmergencyFallbackModelClient:
