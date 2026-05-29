@@ -294,6 +294,54 @@ class GatewayTestCase(unittest.TestCase):
         self.assertFalse(settings.openrouter_emergency_fallback)
         self.assertEqual(settings.api_rate_limit, 600)
 
+    def test_messages_strip_provider_cache_metadata_before_backend(self) -> None:
+        payload = {
+            "model": "claude-code-pro",
+            "max_tokens": 200,
+            "system": [
+                {
+                    "type": "text",
+                    "text": "System prompt",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Leia isso.",
+                            "cache_control": {"type": "ephemeral"},
+                            "cacheId": "provider-owned-cache",
+                        }
+                    ],
+                }
+            ],
+            "tools": [
+                {
+                    "name": "Read",
+                    "description": "Read files",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"file_path": {"type": "string"}},
+                        "cacheControl": {"type": "ephemeral"},
+                    },
+                    "container": {"id": "provider-container"},
+                }
+            ],
+        }
+
+        response = self.client.post("/v1/messages", headers=self.headers, json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        sent_payload = self.app.state.model_client.calls[-1][1]
+        serialized = json.dumps(sent_payload, default=str)
+        self.assertNotIn("cache_control", serialized)
+        self.assertNotIn("cacheControl", serialized)
+        self.assertNotIn("cacheId", serialized)
+        self.assertNotIn("container", serialized)
+
     def test_x_api_key_takes_priority_over_stale_authorization_header(self) -> None:
         response = self.client.get(
             "/v1/models",
@@ -1217,6 +1265,165 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(fallback["name"], "read_file")
         self.assertEqual(fallback["input"], {"path": "claude_gateway/vps_scheduler.py"})
 
+    def test_vps_required_tool_fallback_does_not_repeat_same_gateway_inspection(self) -> None:
+        settings = make_settings()
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {"role": "user", "content": "concordo pode fazer o batch dos txt"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_gateway_inspect_0",
+                            "name": "LS",
+                            "input": {"path": "."},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_gateway_inspect_0",
+                            "content": "importar.txt\nexportar.txt",
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {"name": "LS", "input_schema": {"type": "object"}},
+                {"name": "Glob", "input_schema": {"type": "object"}},
+                {"name": "Bash", "input_schema": {"type": "object"}},
+            ],
+        }
+
+        fallback = client._fallback_tool_use_for_required_action(payload)
+
+        self.assertIsNotNone(fallback)
+        assert fallback is not None
+        self.assertEqual(fallback["name"], "Glob")
+        self.assertEqual(fallback["input"], {"pattern": "**/*"})
+
+    def test_vps_openai_chat_retries_400_required_tool_choice_without_backend_flag(self) -> None:
+        class FakeResponse:
+            def __init__(self, status_code: int, data: dict[str, Any] | None = None, text: str = "") -> None:
+                self.status_code = status_code
+                self._data = data or {}
+                self.text = text
+
+            def json(self) -> dict[str, Any]:
+                return self._data
+
+        class FakePostClient:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            async def post(self, *_args, json: dict[str, Any], **_kwargs) -> FakeResponse:
+                self.calls.append(json)
+                if len(self.calls) == 1:
+                    return FakeResponse(400, text="tool_choice required is not supported")
+                return FakeResponse(
+                    200,
+                    {
+                        "id": "chatcmpl_retry",
+                        "choices": [{"message": {"content": "Vou inspecionar."}, "finish_reason": "stop"}],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 3},
+                    },
+                )
+
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        fake_client = FakePostClient()
+        client._client = fake_client  # type: ignore[assignment]
+
+        response = asyncio.run(
+            client._complete_openai_chat(
+                {
+                    "__gateway_client": "claude-code",
+                    "messages": [{"role": "user", "content": "analise o projeto"}],
+                    "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+                },
+                "claude-code-pro",
+            )
+        )
+
+        self.assertEqual(len(fake_client.calls), 2)
+        self.assertEqual(fake_client.calls[0]["tool_choice"], "required")
+        self.assertNotIn("tool_choice", fake_client.calls[1])
+        self.assertEqual(response["stop_reason"], "tool_use")
+        self.assertEqual(response["content"][0]["name"], "LS")
+
+    def test_vps_openai_chat_stream_retries_400_required_tool_choice_without_backend_flag(self) -> None:
+        class FakeStreamResponse:
+            def __init__(self, status_code: int, body: bytes = b"", chunks: list[bytes] | None = None) -> None:
+                self.status_code = status_code
+                self._body = body
+                self._chunks = chunks or []
+
+            async def __aenter__(self) -> "FakeStreamResponse":
+                return self
+
+            async def __aexit__(self, *_args) -> None:
+                return None
+
+            async def aread(self) -> bytes:
+                return self._body
+
+            async def aiter_bytes(self):
+                for chunk in self._chunks:
+                    yield chunk
+
+        class FakeStreamClient:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            def stream(self, *_args, json: dict[str, Any], **_kwargs) -> FakeStreamResponse:
+                self.calls.append(json)
+                if len(self.calls) == 1:
+                    return FakeStreamResponse(400, b"unsupported tool_choice required")
+                return FakeStreamResponse(
+                    200,
+                    chunks=[
+                        b'data: {"choices":[{"delta":{"content":"Vou inspecionar."},"finish_reason":null}]}\n\n',
+                        b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+                        b"data: [DONE]\n\n",
+                    ],
+                )
+
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        fake_client = FakeStreamClient()
+        client._client = fake_client  # type: ignore[assignment]
+
+        body = b"".join(
+            asyncio.run(
+                _collect_async_bytes(
+                    client._stream_openai_chat(
+                        {
+                            "__gateway_client": "claude-code",
+                            "messages": [{"role": "user", "content": "analise o projeto"}],
+                            "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+                        },
+                        "claude-code-pro",
+                    )
+                )
+            )
+        ).decode("utf-8")
+
+        self.assertEqual(len(fake_client.calls), 2)
+        self.assertEqual(fake_client.calls[0]["tool_choice"], "required")
+        self.assertNotIn("tool_choice", fake_client.calls[1])
+        self.assertIn('"name": "LS"', body)
+        self.assertIn('"stop_reason": "tool_use"', body)
+
     def test_vps_openai_chat_uses_current_claude_code_prompt_for_action_detection(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -1861,6 +2068,90 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn(b"README.md", body)
         self.assertNotIn(b"posso", body)
         self.assertIn(b'"stop_reason": "end_turn"', body)
+
+    def test_vps_openai_chat_stream_converts_post_error_textual_worktree_to_valid_tool_call(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {"role": "user", "content": "crie uma calculadora em python"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_failed",
+                            "name": "Write",
+                            "input": {"file_path": "calculadora.py", "content": "print('ok')"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_write_failed",
+                            "content": (
+                                "Error writing file\n"
+                                "This background session hasn't isolated its changes yet. "
+                                "Call EnterWorktree first."
+                            ),
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {"name": "EnterWorktree", "input_schema": {"type": "object"}},
+                {"name": "Write", "input_schema": {"type": "object"}},
+            ],
+        }
+
+        async def chunks():
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "content": (
+                                        "Entendi. Vou usar o EnterWorktre.\n"
+                                        "{\n"
+                                        '  "name": "EnterWorktre",\n'
+                                        '  "arguments": {}\n'
+                                        "}"
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                )
+                + "\n\n"
+            ).encode()
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(
+            asyncio.run(
+                _collect_async_bytes(
+                    client._openai_sse_to_anthropic(
+                        chunks(),
+                        require_tool_call=False,
+                        payload=payload,
+                    )
+                )
+            )
+        )
+
+        self.assertIn(b'"content_block": {"type": "tool_use"', body)
+        self.assertIn(b'"name": "EnterWorktree"', body)
+        self.assertIn(b'\\"name\\": \\"calculadora-worktree\\"', body)
+        self.assertNotIn(b"Entendi. Vou usar", body)
+        self.assertIn(b'"stop_reason": "tool_use"', body)
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
         settings = make_settings()

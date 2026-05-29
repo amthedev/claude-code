@@ -2235,7 +2235,7 @@ def _prepare_payload(
     auth: AuthContext,
     account_store: AccountStore | None = None,
 ) -> dict[str, Any]:
-    limited, controls = _apply_prompt_control_commands(dict(payload), settings)
+    limited, controls = _apply_prompt_control_commands(_strip_provider_cache_metadata(dict(payload)), settings)
     if auth.customer and account_store and (controls.get("model") is not None or controls.get("reasoning") is not None):
         account_store.update_preferences_for_token(
             auth.token,
@@ -2286,6 +2286,26 @@ def _prepare_payload(
         limited = clamp_customer_payload(limited, settings, auth.customer)
         limited["max_tokens"] = _safe_max_tokens(limited, settings)
     return limited
+
+
+def _strip_provider_cache_metadata(value: Any) -> Any:
+    """Drop provider-owned prompt cache fields before proxying to local/third-party backends."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_provider_cache_metadata(item)
+            for key, item in value.items()
+            if key
+            not in {
+                "cache_control",
+                "cacheControl",
+                "cache_id",
+                "cacheId",
+                "container",
+            }
+        }
+    if isinstance(value, list):
+        return [_strip_provider_cache_metadata(item) for item in value]
+    return value
 
 
 def _limit_payload_context(payload: dict[str, Any], settings: Settings) -> dict[str, Any]:

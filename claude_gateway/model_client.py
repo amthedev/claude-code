@@ -624,7 +624,16 @@ class VPSAnthropicClient:
         if bool(block.get("is_error")):
             return True
         text = self._content_to_text(block.get("content"))
-        return "<tool_use_error>" in text or "error:" in text.lower()
+        lowered = text.lower()
+        return (
+            "<tool_use_error>" in lowered
+            or "error:" in lowered
+            or lowered.startswith("error ")
+            or "error writing file" in lowered
+            or "failed to write" in lowered
+            or "falha ao escrever" in lowered
+            or "erro ao escrever" in lowered
+        )
 
     def _bash_command_can_mutate(self, command: str) -> bool:
         compact = " ".join(str(command or "").lower().split())
@@ -1196,6 +1205,14 @@ class VPSAnthropicClient:
                 json=outgoing,
                 timeout=timeout,
             )
+            if self._should_retry_without_required_tool_choice(response.status_code, response.text, outgoing):
+                outgoing = self._without_required_tool_choice(outgoing)
+                response = await self._client.post(
+                    self._url("/v1/chat/completions", target),
+                    headers=self._headers(target),
+                    json=outgoing,
+                    timeout=timeout,
+                )
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
@@ -1401,6 +1418,7 @@ class VPSAnthropicClient:
         tool_names = self._available_tool_names(payload)
         if not tool_names:
             return None
+        previous_fallbacks = self._previous_gateway_tool_fallbacks(payload)
 
         def first_available(*names: str) -> str | None:
             wanted = {name.lower() for name in names}
@@ -1420,29 +1438,35 @@ class VPSAnthropicClient:
         requested_path = self._requested_file_path(payload)
         if requested_path:
             if tool_name := first_available("Read", "read_file"):
-                return {
+                candidate = {
                     "type": "tool_use",
                     "id": "call_gateway_read_0",
                     "name": tool_name,
                     "input": self._read_tool_input(tool_name, requested_path),
                 }
+                if not self._has_previous_fallback(previous_fallbacks, candidate):
+                    return candidate
         if tool_name := first_available("LS", "list_files"):
-            return {
+            candidate = {
                 "type": "tool_use",
                 "id": "call_gateway_inspect_0",
                 "name": tool_name,
                 "input": {"path": "."},
             }
+            if not self._has_previous_fallback(previous_fallbacks, candidate):
+                return candidate
         if tool_name := first_available("Glob"):
-            return {
+            candidate = {
                 "type": "tool_use",
                 "id": "call_gateway_inspect_0",
                 "name": tool_name,
                 "input": {"pattern": "**/*"},
             }
+            if not self._has_previous_fallback(previous_fallbacks, candidate):
+                return candidate
         if tool_name := first_available("Bash", "run_command"):
             command_key = "command" if tool_name.lower() == "bash" else "cmd"
-            return {
+            candidate = {
                 "type": "tool_use",
                 "id": "call_gateway_inspect_0",
                 "name": tool_name,
@@ -1451,14 +1475,47 @@ class VPSAnthropicClient:
                     "description": "Inspect workspace files before editing",
                 },
             }
+            if not self._has_previous_fallback(previous_fallbacks, candidate):
+                return candidate
         if tool_name := first_available("read_file", "Read"):
-            return {
+            candidate = {
                 "type": "tool_use",
                 "id": "call_gateway_inspect_0",
                 "name": tool_name,
                 "input": self._read_tool_input(tool_name, "README.md"),
             }
+            if not self._has_previous_fallback(previous_fallbacks, candidate):
+                return candidate
         return None
+
+    def _previous_gateway_tool_fallbacks(self, payload: dict[str, Any]) -> set[tuple[str, str]]:
+        fallbacks: set[tuple[str, str]] = set()
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, dict):
+                content = [content]
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                block_id = str(block.get("id") or "")
+                if not block_id.startswith("call_gateway_"):
+                    continue
+                name = str(block.get("name") or "")
+                tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+                fallbacks.add((name.lower(), json.dumps(tool_input, sort_keys=True, ensure_ascii=True)))
+        return fallbacks
+
+    def _has_previous_fallback(self, previous: set[tuple[str, str]], candidate: dict[str, Any]) -> bool:
+        tool_input = candidate.get("input") if isinstance(candidate.get("input"), dict) else {}
+        key = (
+            str(candidate.get("name") or "").lower(),
+            json.dumps(tool_input, sort_keys=True, ensure_ascii=True),
+        )
+        return key in previous
 
     def _read_tool_input(self, tool_name: str, path: str) -> dict[str, str]:
         if tool_name.strip().lower() == "read_file":
@@ -1595,35 +1652,81 @@ class VPSAnthropicClient:
             write=30.0,
             pool=30.0,
         )
+        attempts = [outgoing]
+        if outgoing.get("tool_choice") == "required":
+            attempts.append(self._without_required_tool_choice(outgoing))
         try:
-            async with self._client.stream(
+            for attempt_index, attempt in enumerate(attempts):
+                async with self._client.stream(
                     "POST",
                     self._url("/v1/chat/completions", target),
                     headers=self._headers(target),
-                    json=outgoing,
+                    json=attempt,
                     timeout=timeout,
-            ) as response:
-                if response.status_code >= 400:
-                    body = await response.aread()
-                    if response.status_code == 404:
-                        async for chunk in _anthropic_stream_error_message(
-                            target.model_id,
-                            "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                ) as response:
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        body_text = body.decode("utf-8", "replace")
+                        if (
+                            attempt_index == 0
+                            and len(attempts) > 1
+                            and self._should_retry_without_required_tool_choice(
+                                response.status_code,
+                                body_text,
+                                attempt,
+                            )
                         ):
-                            yield chunk
-                        return
-                    raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
-                async for chunk in self._openai_sse_to_anthropic(
-                    response.aiter_bytes(),
-                    model=model,
-                    require_tool_call=self._should_force_tool_choice(payload),
-                    payload=payload,
-                ):
-                    yield chunk
+                            continue
+                        if response.status_code == 404:
+                            async for chunk in _anthropic_stream_error_message(
+                                target.model_id,
+                                "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                            ):
+                                yield chunk
+                            return
+                        raise OpenRouterError(body_text, response.status_code)
+                    async for chunk in self._openai_sse_to_anthropic(
+                        response.aiter_bytes(),
+                        model=model,
+                        require_tool_call=self._should_force_tool_choice(payload),
+                        payload=payload,
+                    ):
+                        yield chunk
+                    return
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model stream failed: {exc}", status_code=502) from exc
+
+    def _should_retry_without_required_tool_choice(
+        self,
+        status_code: int,
+        body_text: str,
+        outgoing: dict[str, Any],
+    ) -> bool:
+        if int(status_code or 0) != 400 or outgoing.get("tool_choice") != "required":
+            return False
+        text = str(body_text or "").lower()
+        if not text:
+            return True
+        retry_terms = (
+            "tool_choice",
+            "tool choice",
+            "required",
+            "auto tool",
+            "invalid request",
+            "bad request",
+            "extra inputs are not permitted",
+            "not supported",
+            "unsupported",
+        )
+        return any(term in text for term in retry_terms)
+
+    def _without_required_tool_choice(self, outgoing: dict[str, Any]) -> dict[str, Any]:
+        retried = deepcopy(outgoing)
+        if retried.get("tool_choice") == "required":
+            retried.pop("tool_choice", None)
+        return retried
 
     async def _openai_sse_to_anthropic(
         self,
@@ -1687,7 +1790,7 @@ class VPSAnthropicClient:
         if textual_tool_buffer and not tool_state.has_tool:
             textual_tool_calls = _textual_tool_calls_from_text(textual_tool_buffer)
             if textual_tool_calls:
-                for outgoing in tool_state.feed(textual_tool_calls):
+                for outgoing in tool_state.feed(self._validated_textual_tool_calls(textual_tool_calls, payload)):
                     yield outgoing
             elif require_tool_call and payload:
                 fallback_tool = self._fallback_tool_use_for_required_action(payload)
@@ -1699,7 +1802,11 @@ class VPSAnthropicClient:
                     yield outgoing
 
         if post_tool_text_buffer and not tool_state.has_tool:
-            if payload and self._is_change_status_question(payload):
+            textual_tool_calls = _textual_tool_calls_from_text(post_tool_text_buffer)
+            if textual_tool_calls:
+                for outgoing in tool_state.feed(self._validated_textual_tool_calls(textual_tool_calls, payload)):
+                    yield outgoing
+            elif payload and self._is_change_status_question(payload):
                 post_tool_text_buffer = self._physical_change_status_text(payload)
             elif self._is_generic_help_response(post_tool_text_buffer) and payload:
                 post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
@@ -1714,8 +1821,9 @@ class VPSAnthropicClient:
                     "Eu so li/inspecionei o projeto ate agora; para alterar de verdade preciso executar "
                     "Write, Edit, apply_patch ou um comando Bash que modifique arquivos."
                 )
-            for outgoing in state.feed(post_tool_text_buffer):
-                yield outgoing
+            if not tool_state.has_tool:
+                for outgoing in state.feed(post_tool_text_buffer):
+                    yield outgoing
 
         for outgoing in state.finish():
             yield outgoing
@@ -1751,6 +1859,32 @@ class VPSAnthropicClient:
     def _openai_text_delta(self, event: str) -> str:
         text_delta, _, _ = self._openai_stream_delta(event)
         return text_delta
+
+    def _validated_textual_tool_calls(
+        self,
+        tool_calls: list[dict[str, Any]],
+        payload: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        if not payload or not self._latest_tool_result_needs_worktree(payload):
+            return tool_calls
+        fallback_tool = self._fallback_tool_use_for_required_action(payload)
+        if not fallback_tool:
+            return tool_calls
+        fallback_call = _openai_tool_call_from_anthropic_tool_use(fallback_tool, 0)
+        validated: list[dict[str, Any]] = []
+        for index, tool_call in enumerate(tool_calls):
+            function = tool_call.get("function") if isinstance(tool_call, dict) else None
+            name = str((function or {}).get("name") or "")
+            arguments = _json_object_from_string((function or {}).get("arguments")) if isinstance(function, dict) else {}
+            if name.strip().lower() == "enterworktree" and not any(
+                str(arguments.get(key) or "").strip() for key in ("name", "path")
+            ):
+                replacement = deepcopy(fallback_call)
+                replacement["index"] = index
+                validated.append(replacement)
+            else:
+                validated.append(tool_call)
+        return validated
 
     def _openai_stream_delta(self, event: str) -> tuple[str, list[dict[str, Any]], str | None]:
         data_lines = [
