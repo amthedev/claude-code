@@ -123,7 +123,7 @@ class WebSearchClient:
                 {"role": "user", "content": query[:12000]},
             ],
             "max_tokens": self.settings.web_search_max_output_tokens,
-            "tools": [self._openrouter_web_search_tool()],
+            "plugins": [self._openrouter_web_search_plugin()],
         }
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
@@ -160,18 +160,21 @@ class WebSearchClient:
             tool["filters"] = filters
         return tool
 
-    def _openrouter_web_search_tool(self) -> dict[str, Any]:
-        parameters: dict[str, Any] = {}
-        if self.settings.web_search_context_size:
-            parameters["search_context_size"] = self.settings.web_search_context_size
+    def _openrouter_web_search_plugin(self) -> dict[str, Any]:
+        plugin: dict[str, Any] = {
+            "id": "web",
+            "engine": "exa",
+            "max_results": 5,
+            "search_prompt": (
+                "Web results gathered for the user's current-information request. "
+                "Summarize them concisely and cite sources with Markdown links."
+            ),
+        }
         if self.settings.web_search_allowed_domains:
-            parameters["allowed_domains"] = list(self.settings.web_search_allowed_domains[:100])
+            plugin["include_domains"] = list(self.settings.web_search_allowed_domains[:100])
         if self.settings.web_search_blocked_domains:
-            parameters["excluded_domains"] = list(self.settings.web_search_blocked_domains[:100])
-        tool: dict[str, Any] = {"type": "openrouter:web_search"}
-        if parameters:
-            tool["parameters"] = parameters
-        return tool
+            plugin["exclude_domains"] = list(self.settings.web_search_blocked_domains[:100])
+        return plugin
 
 
 WEB_SEARCH_PROMPT = """You are a concise research pass for a coding/chat gateway.
