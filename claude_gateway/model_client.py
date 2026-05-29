@@ -668,8 +668,16 @@ class VPSAnthropicClient:
 
     def _is_file_change_request(self, payload: dict[str, Any]) -> bool:
         text = self._task_request_text(payload).lower()
-        if not text or self._looks_like_question(text):
+        if not text:
             return False
+        if self._looks_like_change_continuation(text):
+            return self._payload_has_prior_file_change_request(payload)
+        if self._looks_like_question(text):
+            return False
+        return self._has_file_change_terms(text)
+
+    def _has_file_change_terms(self, text: str) -> bool:
+        compact = str(text or "").lower()
         change_terms = (
             "alter",
             "aplicar patch",
@@ -698,7 +706,64 @@ class VPSAnthropicClient:
             "site",
             "write",
         )
-        return any(term in text for term in change_terms)
+        return any(term in compact for term in change_terms)
+
+    def _looks_like_change_continuation(self, text: str) -> bool:
+        compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
+        if not compact:
+            return False
+        continuation_terms = (
+            "concordo",
+            "pode comecar",
+            "pode fazer",
+            "pode iniciar",
+            "comeca",
+            "comece",
+            "inicia",
+            "inicie",
+            "manda bala",
+            "vai",
+        )
+        return any(term in compact for term in continuation_terms)
+
+    def _payload_has_prior_file_change_request(self, payload: dict[str, Any]) -> bool:
+        user_texts: list[str] = []
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict) or str(message.get("role") or "").lower() != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and all(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in content
+            ):
+                continue
+            text = self._content_to_text(content)
+            if text:
+                user_texts.append(self._current_user_request_text({"messages": [{"role": "user", "content": text}]}))
+        for text in user_texts[:-1]:
+            if self._has_file_change_terms(text):
+                return True
+        return False
+
+    def _is_change_status_question(self, payload: dict[str, Any]) -> bool:
+        text = _strip_accents(" ".join(self._task_request_text(payload).lower().split()))
+        if not text:
+            return False
+        status_terms = (
+            "fez as alteracoes",
+            "fez a alteracao",
+            "alteracoes foram feitas",
+            "mudancas foram feitas",
+            "mudou os arquivos",
+            "mexeu nos arquivos",
+            "criou os arquivos",
+            "salvou os arquivos",
+            "aplicou",
+            "foi feito",
+            "ta feito",
+            "esta feito",
+        )
+        return any(term in text for term in status_terms)
 
     def _task_request_text(self, payload: dict[str, Any]) -> str:
         for message in reversed(payload.get("messages") or []):
@@ -1155,6 +1220,15 @@ class VPSAnthropicClient:
                 return
         if self._payload_has_tool_result(payload) and not _response_has_tool_use(response):
             response_text = self._response_text(response)
+            if self._is_change_status_question(payload):
+                response["content"] = [
+                    {
+                        "type": "text",
+                        "text": self._physical_change_status_text(payload),
+                    }
+                ]
+                response["stop_reason"] = "end_turn"
+                return
             if self._is_generic_help_response(response_text):
                 if self._is_file_change_request(payload):
                     fallback_tool = self._fallback_tool_use_for_required_action(payload)
@@ -1202,6 +1276,23 @@ class VPSAnthropicClient:
                 "VPS model ignored required Claude Code tool call.",
                 status_code=502,
             )
+
+    def _physical_change_status_text(self, payload: dict[str, Any]) -> str:
+        if self._payload_has_successful_mutating_tool_use(payload):
+            result_text = self._latest_tool_result_text(payload)
+            if result_text:
+                result_text = self._truncate_text_end(result_text, 1200)
+                return (
+                    "Sim, houve uma alteracao fisica confirmada por ferramenta de escrita/comando. "
+                    "Ultimo resultado:\n\n"
+                    f"```text\n{result_text}\n```"
+                )
+            return "Sim, houve uma alteracao fisica confirmada por ferramenta de escrita/comando."
+        return (
+            "Nao. Ate agora nao houve alteracao fisica confirmada nos arquivos. "
+            "A conversa mostra leitura/inspecao, mas nenhum Write, Edit, apply_patch ou comando Bash mutante "
+            "bem-sucedido."
+        )
 
     def _response_text(self, response: dict[str, Any]) -> str:
         parts: list[str] = []
@@ -1608,7 +1699,9 @@ class VPSAnthropicClient:
                     yield outgoing
 
         if post_tool_text_buffer and not tool_state.has_tool:
-            if self._is_generic_help_response(post_tool_text_buffer) and payload:
+            if payload and self._is_change_status_question(payload):
+                post_tool_text_buffer = self._physical_change_status_text(payload)
+            elif self._is_generic_help_response(post_tool_text_buffer) and payload:
                 post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
             elif (
                 payload

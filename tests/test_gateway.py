@@ -865,6 +865,35 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("nao apliquei nenhuma mudanca fisica", false_done_anthropic["content"][0]["text"])
         self.assertNotIn("tudo pronto", false_done_anthropic["content"][0]["text"])
 
+        status_after_only_reading = {
+            "id": "chatcmpl_status_after_only_reading",
+            "choices": [{"message": {"content": "Resumo do Sistema\nO sistema possui..."}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 8},
+        }
+        status_anthropic = client._anthropic_from_openai_chat(status_after_only_reading)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {"role": "user", "content": "crie uma calculadora em python"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_read", "name": "Read", "input": {"file_path": "README.md"}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_read", "content": "# Projeto"}],
+                    },
+                    {"role": "user", "content": "fez as alterações?"},
+                ],
+                "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+            },
+            status_anthropic,
+        )
+        self.assertEqual(status_anthropic["stop_reason"], "end_turn")
+        self.assertIn("Nao. Ate agora nao houve alteracao fisica", status_anthropic["content"][0]["text"])
+        self.assertNotIn("Resumo do Sistema", status_anthropic["content"][0]["text"])
+
         after_only_inspection_for_edit = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",
@@ -888,6 +917,24 @@ class GatewayTestCase(unittest.TestCase):
             stream=True,
         )
         self.assertEqual(after_only_inspection_for_edit["tool_choice"], "required")
+
+        after_confirmation_keeps_original_edit_goal = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {"role": "user", "content": "quero que vc fassa o site do neymar"},
+                    {"role": "assistant", "content": "Posso começar pela interface."},
+                    {"role": "user", "content": "concordo pode fazer"},
+                ],
+                "tools": [
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                    {"name": "Write", "input_schema": {"type": "object"}},
+                ],
+            },
+            stream=True,
+        )
+        self.assertEqual(after_confirmation_keeps_original_edit_goal["tool_choice"], "required")
 
         after_write_for_edit = client._openai_chat_payload(
             {
