@@ -5846,6 +5846,10 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(models.json()["object"], "list")
         self.assertIn("claude-code-pro", {item["id"] for item in models.json()["data"]})
 
+        model_count = self.client.get("/api/v1/models/count", headers=self.headers)
+        self.assertEqual(model_count.status_code, 200)
+        self.assertGreaterEqual(model_count.json()["data"]["count"], 1)
+
         token_count = self.client.post(
             "/api/v1/messages/count_tokens",
             headers=self.headers,
@@ -5873,6 +5877,23 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(messages.status_code, 200)
         self.assertEqual(messages.json()["type"], "message")
+
+    def test_openrouter_account_probe_endpoints_work(self) -> None:
+        key = self.client.get("/api/v1/key", headers=self.headers)
+        self.assertEqual(key.status_code, 200)
+        self.assertIn("data", key.json())
+        self.assertEqual(key.json()["data"]["limit_reset"], "daily")
+        self.assertIn("rate_limit", key.json()["data"])
+
+        credits = self.client.get("/api/v1/credits", headers=self.headers)
+        self.assertEqual(credits.status_code, 200)
+        self.assertIn("total_credits", credits.json()["data"])
+        self.assertIn("total_usage", credits.json()["data"])
+
+        generation = self.client.get("/api/v1/generation?id=gen_test", headers=self.headers)
+        self.assertEqual(generation.status_code, 200)
+        self.assertEqual(generation.json()["data"]["id"], "gen_test")
+        self.assertEqual(generation.json()["data"]["provider_name"], "Claude Gateway")
 
     def test_openai_chat_stream_can_include_usage_chunk(self) -> None:
         app = create_app(settings=make_settings(), client_factory=FakeUsageStreamingOpenRouterClient)

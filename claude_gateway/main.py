@@ -12,7 +12,7 @@ import os
 import re
 import statistics
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 from unicodedata import normalize
@@ -307,6 +307,49 @@ def create_app(
                 for profile in profiles
             ]
         }
+
+    @app.get("/v1/models/count")
+    @app.get("/api/v1/models/count", include_in_schema=False)
+    @app.get("/models/count", include_in_schema=False)
+    async def count_models(request: Request) -> dict[str, Any]:
+        auth: AuthContext | None = None
+        try:
+            auth = require_gateway_auth(request, app.state.settings)
+        except HTTPException as exc:
+            if exc.status_code not in {401, 403}:
+                raise
+        profiles = model_profiles(app.state.settings)
+        if auth and auth.customer and auth.customer.allowed_model != "*":
+            filtered = [profile for profile in profiles if profile.id == auth.customer.allowed_model]
+            profiles = filtered or profiles
+        return {"data": {"count": len(profiles)}}
+
+    @app.get("/v1/key")
+    @app.get("/api/v1/key", include_in_schema=False)
+    @app.get("/key", include_in_schema=False)
+    async def openrouter_key_info(request: Request) -> dict[str, Any]:
+        auth = require_gateway_auth(request, app.state.settings)
+        return {"data": await _openrouter_compat_key_data(app, auth)}
+
+    @app.get("/v1/credits")
+    @app.get("/api/v1/credits", include_in_schema=False)
+    @app.get("/credits", include_in_schema=False)
+    async def openrouter_credits(request: Request) -> dict[str, Any]:
+        auth = require_gateway_auth(request, app.state.settings)
+        key_data = await _openrouter_compat_key_data(app, auth)
+        total_credits = float(key_data.get("limit") or 0)
+        total_usage = float(key_data.get("usage") or 0)
+        return {"data": {"total_credits": total_credits, "total_usage": total_usage}}
+
+    @app.get("/v1/generation")
+    @app.get("/api/v1/generation", include_in_schema=False)
+    @app.get("/generation", include_in_schema=False)
+    async def openrouter_generation(request: Request) -> dict[str, Any]:
+        require_gateway_auth(request, app.state.settings)
+        generation_id = str(request.query_params.get("id") or "").strip()
+        if not generation_id:
+            raise HTTPException(status_code=400, detail="Generation id is required.")
+        return {"data": _openrouter_compat_generation_data(generation_id, app.state.settings)}
 
     @app.get("/v1/plans")
     async def list_public_plans() -> dict[str, Any]:
@@ -4142,6 +4185,82 @@ def _public_usage_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "output_tokens": int(total.get("output_tokens") or 0) if isinstance(total, dict) else 0,
             "modes": modes,
         }
+    }
+
+
+async def _openrouter_compat_key_data(app: FastAPI, auth: AuthContext) -> dict[str, Any]:
+    limit = 0.0
+    usage = 0.0
+    limit_remaining: float | None = None
+    expires_at: str | None = None
+    is_free_tier = False
+    if auth.customer:
+        snapshot = await _customer_usage_snapshot(app, auth)
+        customer = snapshot.get("customer") if isinstance(snapshot, dict) else {}
+        today = snapshot.get("today") if isinstance(snapshot, dict) else {}
+        if isinstance(today, dict):
+            limit = float(today.get("daily_cost_budget_usd") or 0)
+            usage = float(today.get("reserved_cost_usd") or 0)
+            remaining_cost = today.get("remaining_cost_usd")
+            limit_remaining = float(remaining_cost) if isinstance(remaining_cost, (int, float)) else None
+        if isinstance(customer, dict):
+            expires_at = str(customer.get("expires_at") or "") or None
+            is_free_tier = float(customer.get("monthly_price_brl") or 0) <= 0
+    return {
+        "label": _redacted_token_label(auth.token),
+        "usage": round(usage, 8),
+        "usage_daily": round(usage, 8),
+        "usage_weekly": round(usage, 8),
+        "usage_monthly": round(usage, 8),
+        "byok_usage": 0,
+        "byok_usage_daily": 0,
+        "byok_usage_weekly": 0,
+        "byok_usage_monthly": 0,
+        "limit": round(limit, 8),
+        "limit_remaining": round(limit_remaining, 8) if limit_remaining is not None else None,
+        "limit_reset": "daily",
+        "rate_limit": {
+            "requests": app.state.settings.api_rate_limit,
+            "interval": f"{app.state.settings.rate_limit_window_seconds}s",
+            "note": "OpenRouter-compatible local gateway rate limit.",
+        },
+        "is_free_tier": is_free_tier,
+        "is_management_key": not auth.is_customer,
+        "is_provisioning_key": False,
+        "include_byok_in_limit": False,
+        "expires_at": expires_at,
+    }
+
+
+def _redacted_token_label(token: str) -> str:
+    token = str(token or "")
+    if len(token) <= 12:
+        return token[:4] + "..." if token else ""
+    return f"{token[:8]}...{token[-4:]}"
+
+
+def _openrouter_compat_generation_data(generation_id: str, settings: Settings) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    model = _public_model_label(settings.auto_public_model, settings)
+    return {
+        "id": generation_id,
+        "model": model,
+        "router": "claude-gateway",
+        "provider_name": "Claude Gateway",
+        "api_type": "completions",
+        "created_at": now,
+        "finish_reason": None,
+        "native_finish_reason": None,
+        "tokens_prompt": 0,
+        "tokens_completion": 0,
+        "tokens_reasoning": 0,
+        "native_tokens_prompt": 0,
+        "native_tokens_completion": 0,
+        "native_tokens_reasoning": 0,
+        "total_cost": 0,
+        "usage": 0,
+        "streamed": None,
+        "cancelled": False,
     }
 
 
