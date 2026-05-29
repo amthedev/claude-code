@@ -683,6 +683,76 @@ class GatewayTestCase(unittest.TestCase):
 
         settings.vps_model_api_key = "vps-secret"
         self.assertEqual(client._headers()["Authorization"], "Bearer vps-secret")
+        self.assertEqual(client._headers()["x-api-key"], "vps-secret")
+
+    def test_vps_api_key_list_rotates_between_requests(self) -> None:
+        settings = make_settings()
+        settings.vps_model_base_url = "https://api.tokies.example/anthropic/v1"
+        settings.vps_model_api_format = "anthropic"
+        settings.vps_model_api_key = "key-one,key-two\nkey-three"
+        client = VPSAnthropicClient(settings)
+
+        first = client._headers()["x-api-key"]
+        second = client._headers()["x-api-key"]
+        third = client._headers()["x-api-key"]
+        fourth = client._headers()["x-api-key"]
+
+        self.assertEqual([first, second, third, fourth], ["key-one", "key-two", "key-three", "key-one"])
+
+    def test_vps_retries_next_api_key_for_auth_or_balance_errors(self) -> None:
+        class FakePostClient:
+            def __init__(self) -> None:
+                self.keys: list[str] = []
+
+            async def post(self, url: str, **kwargs: Any) -> FakeHttpResponse:
+                key = str(kwargs["headers"]["x-api-key"])
+                self.keys.append(key)
+                if key == "bad-key":
+                    return FakeHttpResponse(
+                        {"error": {"type": "authentication_error", "message": "Key not found"}},
+                        status_code=401,
+                    )
+                if key == "empty-key":
+                    return FakeHttpResponse(
+                        {
+                            "type": "error",
+                            "error": {
+                                "type": "invalid_request_error",
+                                "message": "Your credit balance is too low to access the Anthropic API.",
+                            },
+                        },
+                        status_code=400,
+                    )
+                return FakeHttpResponse(
+                    {
+                        "id": "msg_retry",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-test",
+                        "content": [{"type": "text", "text": "ok"}],
+                        "stop_reason": "end_turn",
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 1, "output_tokens": 1},
+                    }
+                )
+
+        settings = make_settings()
+        settings.vps_model_base_url = "https://api.tokies.example/anthropic"
+        settings.vps_model_api_format = "anthropic"
+        settings.vps_model_api_key = "bad-key,empty-key,good-key"
+        client = VPSAnthropicClient(settings)
+        fake_client = FakePostClient()
+        client._client = fake_client  # type: ignore[assignment]
+
+        response = asyncio.run(
+            client.complete_messages(
+                {"max_tokens": 8, "messages": [{"role": "user", "content": "Oi"}]},
+                settings.vps_model_id,
+            )
+        )
+
+        self.assertEqual(fake_client.keys, ["bad-key", "empty-key", "good-key"])
+        self.assertEqual(response["content"][0]["text"], "ok")
 
     def test_vps_routes_fast_and_strong_models_when_configured(self) -> None:
         settings = make_settings()

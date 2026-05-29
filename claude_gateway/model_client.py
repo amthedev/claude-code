@@ -83,6 +83,7 @@ class VPSAnthropicClient:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._api_key_cursors: dict[str, int] = {}
         self._client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
         )
@@ -156,17 +157,70 @@ class VPSAnthropicClient:
             return f"{base}{path[3:]}"
         return f"{base}{path}"
 
-    def _headers(self, target: VPSTarget | None = None) -> dict[str, str]:
+    def _api_keys_for_target(self, target: VPSTarget | None = None) -> list[str]:
+        target = target or self._default_target()
+        raw = target.api_key
+        if self._is_openrouter_target(target):
+            raw = raw or self.settings.openrouter_api_key
+        return [part.strip() for part in re.split(r"[,;\n]+", raw or "") if part.strip()]
+
+    def _next_api_key_for_target(self, target: VPSTarget | None = None) -> str:
+        target = target or self._default_target()
+        keys = self._api_keys_for_target(target)
+        if not keys:
+            return ""
+        if len(keys) == 1:
+            return keys[0]
+        cache_key = f"{target.base_url}|{target.model_id}|{target.api_format}|{target.api_key}"
+        index = self._api_key_cursors.get(cache_key, 0)
+        self._api_key_cursors[cache_key] = (index + 1) % len(keys)
+        return keys[index % len(keys)]
+
+    def _api_key_attempts_for_target(self, target: VPSTarget | None = None) -> list[str | None]:
+        target = target or self._default_target()
+        keys = self._api_keys_for_target(target)
+        if not keys:
+            return [None]
+        if len(keys) == 1:
+            return [keys[0]]
+        cache_key = f"{target.base_url}|{target.model_id}|{target.api_format}|{target.api_key}"
+        index = self._api_key_cursors.get(cache_key, 0) % len(keys)
+        self._api_key_cursors[cache_key] = (index + 1) % len(keys)
+        return keys[index:] + keys[:index]
+
+    def _should_retry_with_next_api_key(self, status_code: int, body_text: str) -> bool:
+        if int(status_code or 0) in {401, 403, 408, 409, 429, 500, 502, 503, 504, 529}:
+            return True
+        text = str(body_text or "").lower()
+        retry_terms = (
+            "balance is too low",
+            "credit balance",
+            "insufficient credit",
+            "insufficient balance",
+            "key not found",
+            "invalid x-api-key",
+            "invalid api key",
+            "invalid_api_key",
+            "authentication_error",
+            "rate limit",
+            "rate_limit",
+            "overloaded",
+            "temporarily unavailable",
+        )
+        return int(status_code or 0) == 400 and any(term in text for term in retry_terms)
+
+    def _headers(self, target: VPSTarget | None = None, api_key: str | None = None) -> dict[str, str]:
         target = target or self._default_target()
         headers = {"Content-Type": "application/json"}
-        api_key = target.api_key
+        resolved_api_key = api_key if api_key is not None else self._next_api_key_for_target(target)
         if self._is_openrouter_target(target):
-            api_key = api_key or self.settings.openrouter_api_key
             headers["HTTP-Referer"] = self.settings.openrouter_site_url
             headers["X-OpenRouter-Title"] = self.settings.openrouter_app_name
             headers["X-Title"] = self.settings.openrouter_app_name
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        if resolved_api_key:
+            headers["Authorization"] = f"Bearer {resolved_api_key}"
+            if self._api_format(target) == "anthropic":
+                headers["x-api-key"] = resolved_api_key
         return headers
 
     def _payload_for_model(self, payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
@@ -189,17 +243,30 @@ class VPSAnthropicClient:
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = False
         timeout = self._request_timeout(payload)
+        api_key_attempts = self._api_key_attempts_for_target(target)
+        response: httpx.Response | None = None
 
         try:
-            response = await self._client.post(
-                self._url("/v1/messages", target),
-                headers=self._headers(target),
-                json=outgoing,
-                timeout=timeout,
-            )
+            for attempt_index, api_key in enumerate(api_key_attempts):
+                response = await self._client.post(
+                    self._url("/v1/messages", target),
+                    headers=self._headers(target, api_key=api_key),
+                    json=outgoing,
+                    timeout=timeout,
+                )
+                if response.status_code < 400:
+                    break
+                if attempt_index < len(api_key_attempts) - 1 and self._should_retry_with_next_api_key(
+                    response.status_code,
+                    response.text,
+                ):
+                    continue
+                break
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
+        if response is None:
+            raise OpenRouterError("VPS model request was not sent.", status_code=502)
         if response.status_code >= 400:
             raise OpenRouterError(response.text, status_code=response.status_code)
 
@@ -221,26 +288,35 @@ class VPSAnthropicClient:
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = True
         timeout = self._stream_timeout(payload)
+        api_key_attempts = self._api_key_attempts_for_target(target)
         try:
-            async with self._client.stream(
+            for attempt_index, api_key in enumerate(api_key_attempts):
+                async with self._client.stream(
                     "POST",
                     self._url("/v1/messages", target),
-                    headers=self._headers(target),
+                    headers=self._headers(target, api_key=api_key),
                     json=outgoing,
                     timeout=timeout,
-            ) as response:
-                if response.status_code >= 400:
-                    body = await response.aread()
-                    if response.status_code == 404:
-                        async for chunk in _anthropic_stream_error_message(
-                            self._target_for_model(model).model_id,
-                            "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                ) as response:
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        body_text = body.decode("utf-8", "replace")
+                        if attempt_index < len(api_key_attempts) - 1 and self._should_retry_with_next_api_key(
+                            response.status_code,
+                            body_text,
                         ):
-                            yield chunk
+                            continue
+                        if response.status_code == 404:
+                            async for chunk in _anthropic_stream_error_message(
+                                self._target_for_model(model).model_id,
+                                "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                            ):
+                                yield chunk
+                            return
+                        raise OpenRouterError(body_text, response.status_code)
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
                         return
-                    raise OpenRouterError(body.decode("utf-8", "replace"), response.status_code)
-                async for chunk in response.aiter_bytes():
-                    yield chunk
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
@@ -1337,25 +1413,38 @@ class VPSAnthropicClient:
         target = self._target_for_model(model)
         outgoing = self._openai_chat_payload(payload, stream=False, model=model)
         timeout = self._request_timeout(payload)
+        api_key_attempts = self._api_key_attempts_for_target(target)
+        response: httpx.Response | None = None
 
         try:
-            response = await self._client.post(
-                self._url("/v1/chat/completions", target),
-                headers=self._headers(target),
-                json=outgoing,
-                timeout=timeout,
-            )
-            if self._should_retry_without_required_tool_choice(response.status_code, response.text, outgoing):
-                outgoing = self._without_required_tool_choice(outgoing)
+            for attempt_index, api_key in enumerate(api_key_attempts):
                 response = await self._client.post(
                     self._url("/v1/chat/completions", target),
-                    headers=self._headers(target),
+                    headers=self._headers(target, api_key=api_key),
                     json=outgoing,
                     timeout=timeout,
                 )
+                if self._should_retry_without_required_tool_choice(response.status_code, response.text, outgoing):
+                    retried = self._without_required_tool_choice(outgoing)
+                    response = await self._client.post(
+                        self._url("/v1/chat/completions", target),
+                        headers=self._headers(target, api_key=api_key),
+                        json=retried,
+                        timeout=timeout,
+                    )
+                if response.status_code < 400:
+                    break
+                if attempt_index < len(api_key_attempts) - 1 and self._should_retry_with_next_api_key(
+                    response.status_code,
+                    response.text,
+                ):
+                    continue
+                break
         except httpx.HTTPError as exc:
             raise OpenRouterError(f"VPS model request failed: {exc}", status_code=502) from exc
 
+        if response is None:
+            raise OpenRouterError("VPS model request was not sent.", status_code=502)
         if response.status_code >= 400:
             raise OpenRouterError(response.text, status_code=response.status_code)
         try:
@@ -1959,44 +2048,51 @@ class VPSAnthropicClient:
         attempts = [outgoing]
         if outgoing.get("tool_choice") == "required":
             attempts.append(self._without_required_tool_choice(outgoing))
+        api_key_attempts = self._api_key_attempts_for_target(target)
         try:
-            for attempt_index, attempt in enumerate(attempts):
-                async with self._client.stream(
-                    "POST",
-                    self._url("/v1/chat/completions", target),
-                    headers=self._headers(target),
-                    json=attempt,
-                    timeout=timeout,
-                ) as response:
-                    if response.status_code >= 400:
-                        body = await response.aread()
-                        body_text = body.decode("utf-8", "replace")
-                        if (
-                            attempt_index == 0
-                            and len(attempts) > 1
-                            and self._should_retry_without_required_tool_choice(
+            for api_key_index, api_key in enumerate(api_key_attempts):
+                for attempt_index, attempt in enumerate(attempts):
+                    async with self._client.stream(
+                        "POST",
+                        self._url("/v1/chat/completions", target),
+                        headers=self._headers(target, api_key=api_key),
+                        json=attempt,
+                        timeout=timeout,
+                    ) as response:
+                        if response.status_code >= 400:
+                            body = await response.aread()
+                            body_text = body.decode("utf-8", "replace")
+                            if (
+                                attempt_index == 0
+                                and len(attempts) > 1
+                                and self._should_retry_without_required_tool_choice(
+                                    response.status_code,
+                                    body_text,
+                                    attempt,
+                                )
+                            ):
+                                continue
+                            if api_key_index < len(api_key_attempts) - 1 and self._should_retry_with_next_api_key(
                                 response.status_code,
                                 body_text,
-                                attempt,
-                            )
-                        ):
-                            continue
-                        if response.status_code == 404:
-                            async for chunk in _anthropic_stream_error_message(
-                                target.model_id,
-                                "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
                             ):
-                                yield chunk
-                            return
-                        raise OpenRouterError(body_text, response.status_code)
-                    async for chunk in self._openai_sse_to_anthropic(
-                        response.aiter_bytes(),
-                        model=model,
-                        require_tool_call=self._should_force_tool_choice(payload),
-                        payload=payload,
-                    ):
-                        yield chunk
-                    return
+                                break
+                            if response.status_code == 404:
+                                async for chunk in _anthropic_stream_error_message(
+                                    target.model_id,
+                                    "Backend de IA nao encontrado. Confira o pod RunPod ativo e a URL VPS_MODEL_BASE_URL.",
+                                ):
+                                    yield chunk
+                                return
+                            raise OpenRouterError(body_text, response.status_code)
+                        async for chunk in self._openai_sse_to_anthropic(
+                            response.aiter_bytes(),
+                            model=model,
+                            require_tool_call=self._should_force_tool_choice(payload),
+                            payload=payload,
+                        ):
+                            yield chunk
+                        return
         except OpenRouterError:
             raise
         except httpx.HTTPError as exc:
