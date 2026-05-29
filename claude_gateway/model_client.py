@@ -392,7 +392,9 @@ class VPSAnthropicClient:
             return False
         if not self._payload_has_tool_result(payload):
             return True
-        return self._is_file_change_request(payload) and not self._payload_has_mutating_tool_use(payload)
+        if self._latest_tool_result_error_text(payload):
+            return True
+        return self._is_file_change_request(payload) and not self._payload_has_successful_mutating_tool_use(payload)
 
     def _should_force_claude_code_tool_choice(self, payload: dict[str, Any]) -> bool:
         return self._should_force_tool_choice(payload)
@@ -513,6 +515,67 @@ class VPSAnthropicClient:
                 if tool_name == "bash" and self._bash_command_can_mutate(str(tool_input.get("command") or "")):
                     return True
         return False
+
+    def _payload_has_successful_mutating_tool_use(self, payload: dict[str, Any]) -> bool:
+        mutating_tool_ids: set[str] = set()
+        successful_results: set[str] = set()
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, dict):
+                content = [content]
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and self._is_mutating_tool_block(block):
+                    tool_id = str(block.get("id") or "").strip()
+                    if tool_id:
+                        mutating_tool_ids.add(tool_id)
+                elif block.get("type") == "tool_result" and not self._is_tool_result_error(block):
+                    tool_id = str(block.get("tool_use_id") or block.get("id") or "").strip()
+                    if tool_id:
+                        successful_results.add(tool_id)
+        return bool(mutating_tool_ids & successful_results)
+
+    def _is_mutating_tool_block(self, block: dict[str, Any]) -> bool:
+        tool_name = str(block.get("name") or "").strip().lower()
+        tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+        if tool_name in {
+            "write",
+            "edit",
+            "multiedit",
+            "notebookedit",
+            "apply_patch",
+            "write_file",
+            "delete_file",
+            "replace_file",
+            "create_file",
+        }:
+            return True
+        return tool_name == "bash" and self._bash_command_can_mutate(str(tool_input.get("command") or ""))
+
+    def _latest_tool_result_error_text(self, payload: dict[str, Any]) -> str:
+        for message in reversed(payload.get("messages") or []):
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, dict):
+                content = [content]
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    return self._content_to_text(block) if self._is_tool_result_error(block) else ""
+        return ""
+
+    def _is_tool_result_error(self, block: dict[str, Any]) -> bool:
+        if bool(block.get("is_error")):
+            return True
+        text = self._content_to_text(block.get("content"))
+        return "<tool_use_error>" in text or "error:" in text.lower()
 
     def _bash_command_can_mutate(self, command: str) -> bool:
         compact = " ".join(str(command or "").lower().split())
@@ -1030,6 +1093,12 @@ class VPSAnthropicClient:
         return response_payload
 
     def _ensure_required_tool_call(self, payload: dict[str, Any], response: dict[str, Any]) -> None:
+        if self._latest_tool_result_needs_worktree(payload):
+            fallback_tool = self._fallback_tool_use_for_required_action(payload)
+            if fallback_tool and not self._response_has_valid_worktree_tool_use(response):
+                response["content"] = [fallback_tool]
+                response["stop_reason"] = "tool_use"
+                return
         if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
             fallback_tool = self._fallback_tool_use_for_required_action(payload)
             if fallback_tool:
@@ -1053,6 +1122,14 @@ class VPSAnthropicClient:
                     return tool_name
             return None
 
+        if self._latest_tool_result_needs_worktree(payload):
+            if tool_name := first_available("EnterWorktree"):
+                return {
+                    "type": "tool_use",
+                    "id": "call_gateway_worktree_0",
+                    "name": tool_name,
+                    "input": {"name": self._fallback_worktree_name(payload)},
+                }
         if tool_name := first_available("LS", "list_files"):
             return {
                 "type": "tool_use",
@@ -1086,6 +1163,30 @@ class VPSAnthropicClient:
                 "input": {"file_path": "README.md"},
             }
         return None
+
+    def _latest_tool_result_needs_worktree(self, payload: dict[str, Any]) -> bool:
+        error_text = self._latest_tool_result_error_text(payload).lower()
+        return "enterworktree" in error_text or "hasn't isolated its changes" in error_text
+
+    def _fallback_worktree_name(self, payload: dict[str, Any]) -> str:
+        text = self._task_request_text(payload).lower()
+        if "calculadora" in text or "calculator" in text:
+            return "calculadora-worktree"
+        if "site" in text:
+            return "site-worktree"
+        return "claude-code-worktree"
+
+    def _response_has_valid_worktree_tool_use(self, response: dict[str, Any]) -> bool:
+        for block in response.get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if str(block.get("name") or "").strip().lower() != "enterworktree":
+                continue
+            tool_input = block.get("input")
+            if not isinstance(tool_input, dict):
+                return False
+            return any(str(tool_input.get(key) or "").strip() for key in ("name", "path"))
+        return False
 
     def _available_tool_names(self, payload: dict[str, Any]) -> list[str]:
         names: list[str] = []

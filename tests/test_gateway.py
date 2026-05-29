@@ -752,6 +752,78 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertNotIn("tool_choice", after_write_for_edit)
 
+        failed_write_payload = {
+            "__gateway_client": "claude-code",
+            "__gateway_reasoning": "high",
+            "messages": [
+                {"role": "user", "content": "crie uma calculadora em python"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_failed",
+                            "name": "Write",
+                            "input": {"file_path": "calculadora.py", "content": "print('ok')"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_write_failed",
+                            "is_error": True,
+                            "content": "This background session hasn't isolated its changes yet. Call EnterWorktree first.",
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {"name": "EnterWorktree", "input_schema": {"type": "object"}},
+                {"name": "Write", "input_schema": {"type": "object"}},
+            ],
+        }
+        after_failed_write_requires_worktree = client._openai_chat_payload(
+            failed_write_payload,
+            stream=True,
+        )
+        self.assertEqual(after_failed_write_requires_worktree["tool_choice"], "required")
+
+        ignored_worktree_response = {
+            "id": "chatcmpl_worktree_retry",
+            "choices": [{"message": {"content": "Vou tentar novamente."}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+        }
+        worktree_anthropic = client._anthropic_from_openai_chat(ignored_worktree_response)
+        client._ensure_required_tool_call(
+            failed_write_payload,
+            worktree_anthropic,
+        )
+        self.assertEqual(worktree_anthropic["content"][0]["name"], "EnterWorktree")
+        self.assertEqual(worktree_anthropic["content"][0]["input"], {"name": "calculadora-worktree"})
+
+        broken_worktree_response = {
+            "id": "chatcmpl_worktree_retry_json",
+            "choices": [
+                {
+                    "message": {
+                        "content": '```json\n{"name":"EnterWorktree","arguments":{}}\n```',
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3},
+        }
+        broken_worktree_anthropic = client._anthropic_from_openai_chat(broken_worktree_response)
+        client._ensure_required_tool_call(
+            failed_write_payload,
+            broken_worktree_anthropic,
+        )
+        self.assertEqual(broken_worktree_anthropic["content"][0]["name"], "EnterWorktree")
+        self.assertEqual(broken_worktree_anthropic["content"][0]["input"], {"name": "calculadora-worktree"})
+
         edit_request = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",
