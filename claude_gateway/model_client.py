@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -903,7 +904,8 @@ class VPSAnthropicClient:
             "information to answer or finish the edit, give the final answer now in the user's language. "
             "Only call another tool when a concrete missing file, command, or edit is required. Do not repeat "
             "the same tool call, do not print a plain-text tool call, and do not ask permission to "
-            "continue.</system-reminder>"
+            "continue. Never answer with generic help text such as 'como posso ajudar' or 'em que posso "
+            "ajudar' after reading files; summarize the tool result or continue the requested task.</system-reminder>"
         )
         copied.append({"role": "user", "content": reminder})
         return copied
@@ -1187,16 +1189,23 @@ class VPSAnthropicClient:
         compact = " ".join(str(text or "").strip().lower().split())
         if not compact:
             return False
+        ascii_compact = _strip_accents(compact)
         generic_phrases = (
             "como posso ajudar",
             "como posso te ajudar",
             "em que posso ajudar",
             "em que posso te ajudar",
+            "em que posso ajuda-lo",
+            "em que posso ajuda-la",
+            "posso ajudar",
+            "posso ajuda-lo",
+            "posso ajuda-la",
+            "precisa de mais alguma coisa",
             "what can i help",
             "how can i help",
             "how may i help",
         )
-        if any(phrase in compact for phrase in generic_phrases):
+        if any(phrase in ascii_compact for phrase in generic_phrases):
             return True
         return compact in {
             "entendi.",
@@ -1817,6 +1826,14 @@ def _response_has_tool_use(response: dict[str, Any]) -> bool:
     return isinstance(content, list) and any(
         isinstance(block, dict) and block.get("type") == "tool_use"
         for block in content
+    )
+
+
+def _strip_accents(text: str) -> str:
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", str(text or ""))
+        if not unicodedata.combining(char)
     )
 
 

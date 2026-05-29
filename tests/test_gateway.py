@@ -809,6 +809,34 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("README.md", generic_anthropic["content"][0]["text"])
         self.assertNotIn("Como posso ajudar", generic_anthropic["content"][0]["text"])
 
+        generic_pt_after_reading = {
+            "id": "chatcmpl_generic_pt_after_tool",
+            "choices": [{"message": {"content": "Li 6 arquivos. Em que posso ajudá-lo agora?"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 8},
+        }
+        generic_pt_anthropic = client._anthropic_from_openai_chat(generic_pt_after_reading)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {"role": "user", "content": "me de um resumo"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_read", "name": "Read", "input": {"file_path": "README.md"}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_read", "content": "# Projeto\nResumo do repo."}],
+                    },
+                ],
+                "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+            },
+            generic_pt_anthropic,
+        )
+        self.assertEqual(generic_pt_anthropic["stop_reason"], "end_turn")
+        self.assertIn("Resumo do repo", generic_pt_anthropic["content"][0]["text"])
+        self.assertNotIn("ajudá-lo", generic_pt_anthropic["content"][0]["text"])
+
         after_only_inspection_for_edit = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",
@@ -1749,14 +1777,14 @@ class GatewayTestCase(unittest.TestCase):
         }
 
         async def chunks():
-            yield b'data: {"choices":[{"delta":{"content":"Entendi. Como posso ajudar voce hoje?"}}]}\n\n'
+            yield 'data: {"choices":[{"delta":{"content":"Li 6 arquivos. Em que posso ajudá-lo agora?"}}]}\n\n'.encode()
             yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
             yield b"data: [DONE]\n\n"
 
         body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks(), payload=payload))))
 
         self.assertIn(b"README.md", body)
-        self.assertNotIn(b"Como posso ajudar", body)
+        self.assertNotIn(b"posso", body)
         self.assertIn(b'"stop_reason": "end_turn"', body)
 
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
