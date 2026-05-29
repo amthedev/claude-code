@@ -76,6 +76,10 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1"
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK="1"
+export CLAUDE_CODE_MAX_RETRIES="2"
+export API_TIMEOUT_MS="60000"
 ```
 
 Para clientes OpenAI-compatible/Codex:

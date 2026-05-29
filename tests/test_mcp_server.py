@@ -79,6 +79,7 @@ class McpServerHelpersTestCase(unittest.TestCase):
             {
                 "MCP_GATEWAY_TOKEN": "",
                 "GATEWAY_API_KEY": "",
+                "CLAUDE_CUSTOMER_API_KEY": "",
                 "GATEWAY_API_KEYS": "admin-token",
                 "ANTHROPIC_AUTH_TOKEN": "oauth-token",
                 "ANTHROPIC_API_KEY": "customer-token",
@@ -93,17 +94,36 @@ class McpServerHelpersTestCase(unittest.TestCase):
             {
                 "MCP_GATEWAY_TOKEN": "customer-token",
                 "GATEWAY_API_KEY": "other-token",
+                "CLAUDE_CUSTOMER_API_KEY": "customer-env-token",
                 "ANTHROPIC_API_KEY": "anthropic-token",
             },
             clear=False,
         ):
             self.assertEqual(mcp_server.gateway_token(), "customer-token")
 
+    def test_gateway_token_uses_claude_customer_api_key_before_anthropic_api_key(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "MCP_GATEWAY_TOKEN": "",
+                "GATEWAY_API_KEY": "",
+                "CLAUDE_CUSTOMER_API_KEY": "customer-env-token",
+                "ANTHROPIC_API_KEY": "anthropic-token",
+            },
+            clear=False,
+        ):
+            self.assertEqual(mcp_server.gateway_token(), "customer-env-token")
+
     def test_claude_desktop_server_config_does_not_use_admin_gateway_api_keys(self) -> None:
         with TemporaryDirectory() as tmpdir:
             with patch.dict(
                 os.environ,
-                {"GATEWAY_API_KEYS": "admin-token", "MCP_GATEWAY_TOKEN": "", "GATEWAY_API_KEY": ""},
+                {
+                    "GATEWAY_API_KEYS": "admin-token",
+                    "MCP_GATEWAY_TOKEN": "",
+                    "GATEWAY_API_KEY": "",
+                    "CLAUDE_CUSTOMER_API_KEY": "",
+                },
                 clear=False,
             ):
                 config = mcp_server.claude_desktop_server_config(
@@ -114,6 +134,29 @@ class McpServerHelpersTestCase(unittest.TestCase):
                 )
 
         self.assertNotIn("MCP_GATEWAY_TOKEN", config["env"])
+
+    def test_claude_desktop_server_config_uses_claude_customer_api_key(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "MCP_GATEWAY_TOKEN": "",
+                    "GATEWAY_API_KEY": "",
+                    "CLAUDE_CUSTOMER_API_KEY": "customer-env-token",
+                },
+                clear=False,
+            ):
+                config = mcp_server.claude_desktop_server_config(
+                    repo_root=tmpdir,
+                    gateway_url="https://example.test",
+                    token=None,
+                    python_executable="/bin/python3",
+                )
+
+        self.assertEqual(config["env"]["MCP_GATEWAY_TOKEN"], "customer-env-token")
+        self.assertEqual(config["env"]["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"], "1")
+        self.assertEqual(config["env"]["CLAUDE_CODE_MAX_RETRIES"], "2")
+        self.assertEqual(config["env"]["API_TIMEOUT_MS"], "60000")
 
     def test_merge_claude_desktop_config_preserves_existing_preferences(self) -> None:
         merged = mcp_server.merge_claude_desktop_config(

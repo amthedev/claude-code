@@ -25,14 +25,14 @@ def _load_dotenv_token(path: Path) -> str:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, value = stripped.split("=", 1)
-        if key.strip() not in {"MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY"}:
+        if key.strip() not in {"MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY", "CLAUDE_CUSTOMER_API_KEY"}:
             continue
         values[key.strip()] = value.strip().strip('"').strip("'").split(",", 1)[0].strip()
-    for key in ("MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY"):
+    for key in ("MCP_GATEWAY_TOKEN", "GATEWAY_API_KEY", "CLAUDE_CUSTOMER_API_KEY"):
         value = values.get(key, "")
         if value not in LOCAL_DEV_TOKENS:
             return value
-    return values.get("MCP_GATEWAY_TOKEN") or values.get("GATEWAY_API_KEY") or ""
+    return values.get("MCP_GATEWAY_TOKEN") or values.get("GATEWAY_API_KEY") or values.get("CLAUDE_CUSTOMER_API_KEY") or ""
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -55,7 +55,10 @@ def main() -> None:
     parser.add_argument("--config", default=str(claude_desktop_config_path()))
     parser.add_argument("--repo-root", default=str(Path.cwd()))
     parser.add_argument("--gateway-url", default=os.getenv("MCP_GATEWAY_BASE_URL", HOSTED_GATEWAY_BASE_URL))
-    parser.add_argument("--gateway-token", default=os.getenv("MCP_GATEWAY_TOKEN", ""))
+    parser.add_argument(
+        "--gateway-token",
+        default=os.getenv("MCP_GATEWAY_TOKEN") or os.getenv("CLAUDE_CUSTOMER_API_KEY", ""),
+    )
     parser.add_argument("--python", dest="python_executable", default="")
     parser.add_argument("--enable-write-tools", action="store_true")
     parser.add_argument("--enable-commands", action="store_true")

@@ -60,6 +60,7 @@ def gateway_token() -> str:
     return (
         os.getenv("MCP_GATEWAY_TOKEN")
         or os.getenv("GATEWAY_API_KEY")
+        or os.getenv("CLAUDE_CUSTOMER_API_KEY")
         or os.getenv("ANTHROPIC_API_KEY")
         or "local-dev-token"
     )
@@ -97,6 +98,7 @@ def claude_desktop_server_config(
         resolved_token = (
             os.getenv("MCP_GATEWAY_TOKEN")
             or os.getenv("GATEWAY_API_KEY")
+            or os.getenv("CLAUDE_CUSTOMER_API_KEY")
         )
     resolved_url = (gateway_url or HOSTED_GATEWAY_BASE_URL).rstrip("/")
     if resolved_url == HOSTED_GATEWAY_BASE_URL and (resolved_token or "") in LOCAL_DEV_TOKENS:
@@ -111,6 +113,9 @@ def claude_desktop_server_config(
         "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
         "CLAUDE_CODE_SUBAGENT_MODEL": "claude-code-pro",
+        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+        "CLAUDE_CODE_MAX_RETRIES": "2",
+        "API_TIMEOUT_MS": "60000",
         "MCP_ENABLE_WRITE_TOOLS": "true" if enable_write_tools else "false",
         "MCP_ENABLE_COMMANDS": "true" if enable_commands else "false",
     }

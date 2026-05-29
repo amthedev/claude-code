@@ -86,14 +86,18 @@ Isso deixa a experiência muito próxima no terminal, mas modelos diferentes nã
 
 ```bash
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
-export ANTHROPIC_AUTH_TOKEN="local-dev-token"
-export ANTHROPIC_API_KEY="local-dev-token"
+export ANTHROPIC_AUTH_TOKEN="replace-with-a-customer-or-api-token"
+export ANTHROPIC_API_KEY=""
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 export CLAUDE_CODE_ENABLE_AWAY_SUMMARY="0"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="16000"
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1"
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK="1"
+export CLAUDE_CODE_MAX_RETRIES="2"
+export API_TIMEOUT_MS="60000"
 ```
 
 ## Fontes usadas

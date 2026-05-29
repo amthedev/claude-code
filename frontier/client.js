@@ -726,6 +726,10 @@ GATEWAY_KEYS = {{
     "CLAUDE_CODE_SUBAGENT_MODEL": SELECTED_MODEL,
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_MAX_RETRIES": "2",
+    "API_TIMEOUT_MS": "60000",
 }}
 CONFLICT_KEYS = ("ANTHROPIC_API_KEY",)
 
@@ -813,6 +817,10 @@ if ask("Quer configurar tambem a extensao em ~/.claude/settings.json?", True):
         "CLAUDE_CODE_SUBAGENT_MODEL": selected_model,
         "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+        "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+        "CLAUDE_CODE_MAX_RETRIES": "2",
+        "API_TIMEOUT_MS": "60000",
     })
     settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")
     print(f"Extensao configurada em {settings_path}")
@@ -839,6 +847,10 @@ function terminalCommand(config) {
       CLAUDE_CODE_SUBAGENT_MODEL: config.model,
       CLAUDE_CODE_ENABLE_AWAY_SUMMARY: "0",
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: "4096",
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
+      CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK: "1",
+      CLAUDE_CODE_MAX_RETRIES: "2",
+      API_TIMEOUT_MS: "60000",
     },
   };
   return `claude --settings ${shellQuote(JSON.stringify(settings))} --setting-sources local`;
@@ -868,6 +880,10 @@ env.update({
     "CLAUDE_CODE_SUBAGENT_MODEL": ${JSON.stringify(config.model)},
     "CLAUDE_CODE_ENABLE_AWAY_SUMMARY": "0",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "4096",
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+    "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK": "1",
+    "CLAUDE_CODE_MAX_RETRIES": "2",
+    "API_TIMEOUT_MS": "60000",
 })
 
 settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\\n")

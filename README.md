@@ -36,12 +36,16 @@ Configure Claude Code:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
-export ANTHROPIC_AUTH_TOKEN="local-dev-token"
+export ANTHROPIC_AUTH_TOKEN="replace-with-a-customer-or-api-token"
 export ANTHROPIC_API_KEY=""
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
+export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1"
+export CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK="1"
+export CLAUDE_CODE_MAX_RETRIES="2"
+export API_TIMEOUT_MS="60000"
 ```
 
 Open the web app:
@@ -410,6 +414,7 @@ VPS_MODEL_BASE_URL=https://your-vps.example.com
 VPS_MODEL_ID=local-model
 VPS_MODEL_API_FORMAT=anthropic
 VPS_MODEL_API_KEY=
+VPS_CODE_TIMEOUT_SECONDS=8
 OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 OPENAI_API_KEY=sk-proj-...
