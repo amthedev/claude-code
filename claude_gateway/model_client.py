@@ -905,7 +905,10 @@ class VPSAnthropicClient:
             "Only call another tool when a concrete missing file, command, or edit is required. Do not repeat "
             "the same tool call, do not print a plain-text tool call, and do not ask permission to "
             "continue. Never answer with generic help text such as 'como posso ajudar' or 'em que posso "
-            "ajudar' after reading files; summarize the tool result or continue the requested task.</system-reminder>"
+            "ajudar' after reading files; summarize the tool result or continue the requested task. If the "
+            "user asked you to create, edit, fix, save, patch, commit, or otherwise change files, do not say "
+            "it is done until a mutating tool such as Write, Edit, MultiEdit, apply_patch, write_file, or a "
+            "mutating Bash command has succeeded.</system-reminder>"
         )
         copied.append({"role": "user", "content": reminder})
         return copied
@@ -1167,6 +1170,28 @@ class VPSAnthropicClient:
                 ]
                 response["stop_reason"] = "end_turn"
                 return
+            if (
+                self._is_file_change_request(payload)
+                and not self._payload_has_successful_mutating_tool_use(payload)
+                and self._looks_like_completed_file_change_response(response_text)
+            ):
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool and self._is_mutating_tool_block(fallback_tool):
+                    response["content"] = [fallback_tool]
+                    response["stop_reason"] = "tool_use"
+                    return
+                response["content"] = [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Ainda nao apliquei nenhuma mudanca fisica nos arquivos. "
+                            "Eu so li/inspecionei o projeto ate agora; para alterar de verdade preciso executar "
+                            "Write, Edit, apply_patch ou um comando Bash que modifique arquivos."
+                        ),
+                    }
+                ]
+                response["stop_reason"] = "end_turn"
+                return
         if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
             fallback_tool = self._fallback_tool_use_for_required_action(payload)
             if fallback_tool:
@@ -1214,6 +1239,48 @@ class VPSAnthropicClient:
             "ok.",
             "certo.",
         }
+
+    def _looks_like_completed_file_change_response(self, text: str) -> bool:
+        compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
+        if not compact:
+            return False
+        completion_markers = (
+            "alterei",
+            "apliquei",
+            "atualizei",
+            "corrigi",
+            "criei",
+            "editei",
+            "fiz",
+            "implementei",
+            "modifiquei",
+            "salvei",
+            "subi",
+            "foi criado",
+            "foi alterado",
+            "foi atualizado",
+            "esta pronto",
+            "tudo certo",
+            "done",
+            "created",
+            "updated",
+            "changed",
+            "fixed",
+            "implemented",
+            "saved",
+        )
+        future_markers = (
+            "vou ",
+            "irei ",
+            "posso ",
+            "preciso ",
+            "devo ",
+            "seria ",
+            "recomendo ",
+        )
+        return any(marker in compact for marker in completion_markers) and not any(
+            marker in compact for marker in future_markers
+        )
 
     def _latest_tool_result_text(self, payload: dict[str, Any]) -> str:
         for message in reversed(payload.get("messages") or []):
@@ -1543,6 +1610,17 @@ class VPSAnthropicClient:
         if post_tool_text_buffer and not tool_state.has_tool:
             if self._is_generic_help_response(post_tool_text_buffer) and payload:
                 post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
+            elif (
+                payload
+                and self._is_file_change_request(payload)
+                and not self._payload_has_successful_mutating_tool_use(payload)
+                and self._looks_like_completed_file_change_response(post_tool_text_buffer)
+            ):
+                post_tool_text_buffer = (
+                    "Ainda nao apliquei nenhuma mudanca fisica nos arquivos. "
+                    "Eu so li/inspecionei o projeto ate agora; para alterar de verdade preciso executar "
+                    "Write, Edit, apply_patch ou um comando Bash que modifique arquivos."
+                )
             for outgoing in state.feed(post_tool_text_buffer):
                 yield outgoing
 
