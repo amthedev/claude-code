@@ -343,6 +343,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertNotIn("cacheId", serialized)
         self.assertNotIn("container", serialized)
 
+    def test_vps_anthropic_openrouter_target_reuses_openrouter_credentials(self) -> None:
+        settings = make_settings()
+        settings.openrouter_api_key = "sk-or-test"
+        settings.openrouter_site_url = "https://example.com"
+        settings.openrouter_app_name = "Gateway Test"
+        settings.vps_model_base_url = "https://openrouter.ai/api"
+        settings.vps_model_api_key = ""
+
+        client = VPSAnthropicClient(settings)
+
+        headers = client._headers(client._default_target())
+
+        self.assertEqual(headers["Authorization"], "Bearer sk-or-test")
+        self.assertEqual(headers["HTTP-Referer"], "https://example.com")
+        self.assertEqual(headers["X-Title"], "Gateway Test")
+        self.assertEqual(client.messages_url, "https://openrouter.ai/api/v1/messages")
+
     def test_x_api_key_takes_priority_over_stale_authorization_header(self) -> None:
         response = self.client.get(
             "/v1/models",

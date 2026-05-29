@@ -75,6 +75,22 @@ OPENROUTER_EMERGENCY_FALLBACK=false
 OPENROUTER_API_KEY=
 ```
 
+For OpenRouter's Anthropic-compatible endpoint, prefer the native `/v1/messages`
+path instead of the OpenAI-chat adapter:
+
+```env
+VPS_MODEL_BASE_URL=https://openrouter.ai/api
+VPS_MODEL_ID=~anthropic/claude-sonnet-latest
+VPS_MODEL_API_FORMAT=anthropic
+OPENROUTER_API_KEY=sk-or-v1...
+VPS_MODEL_API_KEY=
+```
+
+When `VPS_MODEL_BASE_URL` points to OpenRouter and `VPS_MODEL_API_KEY` is empty,
+the gateway reuses `OPENROUTER_API_KEY` and sends the OpenRouter attribution
+headers. Use `VPS_MODEL_API_FORMAT=openai-chat` only for providers that expose
+OpenAI Chat Completions, such as vLLM/RunPod/Ollama-compatible servers.
+
 ### Same-GPU fast + strong VPS models
 
 To keep everything on one RunPod GPU, run two vLLM servers in the same pod:

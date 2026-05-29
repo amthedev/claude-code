@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -143,6 +144,11 @@ class VPSAnthropicClient:
             return "openai-chat"
         return "anthropic"
 
+    def _is_openrouter_target(self, target: VPSTarget | None = None) -> bool:
+        target = target or self._default_target()
+        host = (urlparse(target.base_url).hostname or "").lower()
+        return host == "openrouter.ai" or host.endswith(".openrouter.ai")
+
     def _url(self, path: str, target: VPSTarget | None = None) -> str:
         target = target or self._default_target()
         base = target.base_url.rstrip("/")
@@ -153,8 +159,13 @@ class VPSAnthropicClient:
     def _headers(self, target: VPSTarget | None = None) -> dict[str, str]:
         target = target or self._default_target()
         headers = {"Content-Type": "application/json"}
-        if target.api_key:
-            headers["Authorization"] = f"Bearer {target.api_key}"
+        api_key = target.api_key
+        if self._is_openrouter_target(target):
+            api_key = api_key or self.settings.openrouter_api_key
+            headers["HTTP-Referer"] = self.settings.openrouter_site_url
+            headers["X-Title"] = self.settings.openrouter_app_name
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
     def _payload_for_model(self, payload: dict[str, Any], model: str | None = None) -> dict[str, Any]:
