@@ -175,7 +175,7 @@ class VPSAnthropicClient:
 
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = False
-        timeout = httpx.Timeout(self.settings.vps_model_timeout_seconds)
+        timeout = self._request_timeout(payload)
 
         try:
             response = await self._client.post(
@@ -207,12 +207,7 @@ class VPSAnthropicClient:
 
         outgoing = self._payload_for_model(payload, model)
         outgoing["stream"] = True
-        timeout = httpx.Timeout(
-            connect=10.0,
-            read=self.settings.vps_model_timeout_seconds,
-            write=30.0,
-            pool=30.0,
-        )
+        timeout = self._stream_timeout(payload)
         try:
             async with self._client.stream(
                     "POST",
@@ -1196,7 +1191,7 @@ class VPSAnthropicClient:
     async def _complete_openai_chat(self, payload: dict[str, Any], model: str) -> dict[str, Any]:
         target = self._target_for_model(model)
         outgoing = self._openai_chat_payload(payload, stream=False, model=model)
-        timeout = httpx.Timeout(self.settings.vps_model_timeout_seconds)
+        timeout = self._request_timeout(payload)
 
         try:
             response = await self._client.post(
@@ -1646,12 +1641,7 @@ class VPSAnthropicClient:
     async def _stream_openai_chat(self, payload: dict[str, Any], model: str) -> AsyncIterator[bytes]:
         target = self._target_for_model(model)
         outgoing = self._openai_chat_payload(payload, stream=True, model=model)
-        timeout = httpx.Timeout(
-            connect=10.0,
-            read=self.settings.vps_model_timeout_seconds,
-            write=30.0,
-            pool=30.0,
-        )
+        timeout = self._stream_timeout(payload)
         attempts = [outgoing]
         if outgoing.get("tool_choice") == "required":
             attempts.append(self._without_required_tool_choice(outgoing))
@@ -1727,6 +1717,26 @@ class VPSAnthropicClient:
         if retried.get("tool_choice") == "required":
             retried.pop("tool_choice", None)
         return retried
+
+    def _request_timeout(self, payload: dict[str, Any]) -> httpx.Timeout:
+        seconds = self._timeout_seconds_for_payload(payload)
+        return httpx.Timeout(seconds)
+
+    def _stream_timeout(self, payload: dict[str, Any]) -> httpx.Timeout:
+        seconds = self._timeout_seconds_for_payload(payload)
+        return httpx.Timeout(
+            connect=min(10.0, seconds),
+            read=seconds,
+            write=min(30.0, seconds),
+            pool=min(30.0, seconds),
+        )
+
+    def _timeout_seconds_for_payload(self, payload: dict[str, Any]) -> float:
+        default_timeout = max(1.0, float(self.settings.vps_model_timeout_seconds or 55.0))
+        if not (self._is_claude_code_client(payload) or payload.get("tools") or payload.get("tool_choice")):
+            return default_timeout
+        code_timeout = float(getattr(self.settings, "vps_code_timeout_seconds", 8.0) or 8.0)
+        return max(1.0, min(default_timeout, code_timeout))
 
     async def _openai_sse_to_anthropic(
         self,

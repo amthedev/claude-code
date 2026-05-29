@@ -1518,6 +1518,29 @@ class GatewayTestCase(unittest.TestCase):
         self.assertLessEqual(estimated_input + outgoing["max_tokens"], 24576 - 512)
         self.assertEqual(outgoing["tool_choice"], "none")
 
+    def test_vps_code_tool_requests_use_short_backend_timeout(self) -> None:
+        settings = make_settings()
+        settings.vps_model_timeout_seconds = 55
+        settings.vps_code_timeout_seconds = 8
+        client = VPSAnthropicClient(settings)
+
+        code_timeout = client._stream_timeout(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [{"role": "user", "content": "leia o projeto"}],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            }
+        )
+        text_timeout = client._stream_timeout(
+            {
+                "messages": [{"role": "user", "content": "explique arquitetura"}],
+            }
+        )
+
+        self.assertEqual(code_timeout.read, 8)
+        self.assertEqual(code_timeout.connect, 8)
+        self.assertEqual(text_timeout.read, 55)
+
     def test_vps_openai_chat_respects_configured_context_window(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
