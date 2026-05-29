@@ -156,10 +156,10 @@ OPENAI_HELPER_MODEL=gpt-5.5
 
 ## Optional Web Search
 
-When `OPENAI_API_KEY` is configured, Claude can run a lightweight OpenAI Responses API `web_search` pass before the main model only when fresh information is needed or when the request sets `gateway_web_search` to `required`.
+Web search is disabled by default to avoid unexpected provider credits. When `ENABLE_WEB_SEARCH=true` and either `OPENAI_API_KEY` or `OPENROUTER_API_KEY` is configured, Claude can run a lightweight search pass before the main model only when fresh information is needed or when the request sets `gateway_web_search` to `required`.
 
 ```env
-ENABLE_WEB_SEARCH=true
+ENABLE_WEB_SEARCH=false
 WEB_SEARCH_MODEL=gpt-5.5
 WEB_SEARCH_CONTEXT_SIZE=low
 WEB_SEARCH_FOR_CUSTOMERS=true
@@ -417,7 +417,7 @@ MERCADO_PAGO_WEBHOOK_SECRET=secret-from-mercado-pago-webhooks-panel
 MERCADO_PAGO_PUBLIC_URL=https://your-subdomain.squareweb.app
 OPENROUTER_SITE_URL=https://your-subdomain.squareweb.app
 OPENROUTER_APP_NAME=Claude Code
-ENABLE_WEB_SEARCH=true
+ENABLE_WEB_SEARCH=false
 MAX_COST_RATIO_VS_CLAUDE=0.50
 ALLOW_PREMIUM_FALLBACK=false
 ALLOW_DIRECT_EXTERNAL_MODELS=false
