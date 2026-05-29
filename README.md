@@ -389,7 +389,12 @@ The gateway also exposes OpenAI-compatible entry points for tools that accept a 
 ```http
 POST /v1/responses
 POST /v1/chat/completions
+GET  /v1/models
 ```
+
+For desktop apps that append paths inconsistently, the same compatibility routes
+also work without the `/v1` prefix: `/responses`, `/chat/completions`,
+`/messages`, `/messages/count_tokens`, and `/models`.
 
 For Codex CLI, configure a user-level `~/.codex/config.toml` provider that uses the Responses API:
 
@@ -417,6 +422,46 @@ Base URL: https://your-subdomain.squareweb.app/v1
 API Key: sk-...
 Model: claude-code-pro
 ```
+
+OpenClaw custom provider example:
+
+```json
+{
+  "models": {
+    "providers": {
+      "claude-gateway": {
+        "baseUrl": "https://your-subdomain.squareweb.app/v1",
+        "apiKey": "sk-...",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "claude-code-pro",
+            "name": "Claude Code Pro",
+            "reasoning": true,
+            "input": ["text"],
+            "contextWindow": 128000,
+            "contextTokens": 96000,
+            "maxTokens": 16000
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+OpenCode local provider example:
+
+```bash
+export LOCAL_ENDPOINT="https://your-subdomain.squareweb.app/v1"
+export OPENAI_API_KEY="sk-..."
+```
+
+If coding apps time out before the first streamed token, raise
+`VPS_CODE_TIMEOUT_SECONDS`. The default is intentionally the full
+`VPS_MODEL_TIMEOUT_SECONDS` window so Claude Desktop, Claude Code, OpenClaw,
+OpenCode, Codex, Cursor, and Windsurf do not get cut off during slower tool-heavy
+turns.
 
 ## Square Cloud
 

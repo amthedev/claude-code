@@ -280,6 +280,7 @@ def create_app(
         }
 
     @app.get("/v1/models")
+    @app.get("/models", include_in_schema=False)
     async def list_models(request: Request) -> dict[str, Any]:
         auth: AuthContext | None = None
         try:
@@ -314,6 +315,7 @@ def create_app(
         }
 
     @app.post("/v1/responses")
+    @app.post("/responses", include_in_schema=False)
     async def create_openai_response(
         request: Request,
         payload: dict[str, Any] = Body(...),
@@ -337,6 +339,7 @@ def create_app(
         return JSONResponse(openai_response)
 
     @app.post("/v1/chat/completions")
+    @app.post("/chat/completions", include_in_schema=False)
     async def create_chat_completion(
         request: Request,
         payload: dict[str, Any] = Body(...),
@@ -353,7 +356,13 @@ def create_app(
         if stream:
             anthropic_payload["stream"] = True
             chunks, public_model = await _stream_gateway_message_chunks(request, app, anthropic_payload)
-            return _sse_response(_anthropic_stream_to_chat_sse(chunks, _public_model_label(public_model, app.state.settings)))
+            return _sse_response(
+                _anthropic_stream_to_chat_sse(
+                    chunks,
+                    _public_model_label(public_model, app.state.settings),
+                    include_usage=_openai_stream_include_usage(payload),
+                )
+            )
         anthropic_payload["stream"] = False
         response, public_model = await _complete_gateway_message(request, app, anthropic_payload)
         completion = anthropic_to_chat_completion(response, payload, public_model)
@@ -402,6 +411,7 @@ def create_app(
         }
 
     @app.post("/v1/messages")
+    @app.post("/messages", include_in_schema=False)
     async def messages(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         auth = _require_model_access(request, app.state.settings)
@@ -509,6 +519,7 @@ def create_app(
         return JSONResponse(response)
 
     @app.post("/v1/messages/count_tokens")
+    @app.post("/messages/count_tokens", include_in_schema=False)
     async def count_message_tokens(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
         _require_model_access(request, app.state.settings)
@@ -2004,11 +2015,12 @@ async def _stream_gateway_message_chunks(
     )
 
 
-async def _anthropic_stream_to_chat_sse(chunks: Any, model: str):
+async def _anthropic_stream_to_chat_sse(chunks: Any, model: str, *, include_usage: bool = False):
     chunk_id = f"chatcmpl-{int(time.time() * 1000)}"
     created = int(time.time())
     final_reason = "stop"
     yielded_final = False
+    usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     yield _chat_sse_chunk(chunk_id, created, model, {"role": "assistant"}, None)
 
     buffer = ""
@@ -2016,6 +2028,9 @@ async def _anthropic_stream_to_chat_sse(chunks: Any, model: str):
         buffer += chunk.decode("utf-8", "replace")
         while "\n\n" in buffer:
             event, buffer = buffer.split("\n\n", 1)
+            next_usage = _chat_usage_from_anthropic_event(event)
+            if next_usage:
+                usage = next_usage
             async for outgoing in _chat_sse_from_anthropic_event(event, chunk_id, created, model):
                 if outgoing[0]:
                     final_reason = outgoing[0]
@@ -2024,9 +2039,14 @@ async def _anthropic_stream_to_chat_sse(chunks: Any, model: str):
             if _anthropic_event_type(event) == "message_stop":
                 yielded_final = True
                 yield _chat_sse_chunk(chunk_id, created, model, {}, final_reason)
+                if include_usage:
+                    yield _chat_sse_usage_chunk(chunk_id, created, model, usage)
                 yield b"data: [DONE]\n\n"
 
     if buffer:
+        next_usage = _chat_usage_from_anthropic_event(buffer)
+        if next_usage:
+            usage = next_usage
         async for outgoing in _chat_sse_from_anthropic_event(buffer, chunk_id, created, model):
             if outgoing[0]:
                 final_reason = outgoing[0]
@@ -2034,6 +2054,8 @@ async def _anthropic_stream_to_chat_sse(chunks: Any, model: str):
                 yield outgoing[1]
     if not yielded_final:
         yield _chat_sse_chunk(chunk_id, created, model, {}, final_reason)
+        if include_usage:
+            yield _chat_sse_usage_chunk(chunk_id, created, model, usage)
         yield b"data: [DONE]\n\n"
 
 
@@ -2320,6 +2342,48 @@ def _chat_sse_chunk(
         "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
     return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+def _chat_sse_usage_chunk(
+    chunk_id: str,
+    created: int,
+    model: str,
+    usage: dict[str, int],
+) -> bytes:
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [],
+        "usage": usage,
+    }
+    return f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+
+
+def _chat_usage_from_anthropic_event(event: str) -> dict[str, int] | None:
+    payload = _anthropic_event_payload(event)
+    if not payload:
+        return None
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        message = payload.get("message")
+        if isinstance(message, dict):
+            usage = message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    prompt_tokens = int(usage.get("input_tokens") or 0)
+    completion_tokens = int(usage.get("output_tokens") or 0)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+
+
+def _openai_stream_include_usage(payload: dict[str, Any]) -> bool:
+    stream_options = payload.get("stream_options")
+    return isinstance(stream_options, dict) and stream_options.get("include_usage") is True
 
 
 def _elapsed_ms(start: float) -> int:

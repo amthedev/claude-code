@@ -27,7 +27,7 @@ DEFAULT_ALLOWED_COMMANDS = (
 HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-subdomain.squareweb.app")
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
 COWORK_MAX_OUTPUT_TOKENS = 420
-COWORK_TIMEOUT_SECONDS = 15.0
+COWORK_TIMEOUT_SECONDS = 60.0
 GatewayModel = Literal["claude-code-pro", "claude-sonnet-4.6"]
 _GATEWAY_HTTP_CLIENT: httpx.AsyncClient | None = None
 
@@ -278,7 +278,7 @@ async def ask_gateway(
     model: GatewayModel = "claude-code-pro",
     max_tokens: int = 1200,
     reasoning_mode: str = "fast",
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = 60.0,
     system: str = "",
     temperature: float | None = None,
 ) -> dict[str, Any]:

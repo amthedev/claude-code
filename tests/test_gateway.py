@@ -5737,6 +5737,57 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.head("/")
         self.assertEqual(response.status_code, 200)
 
+    def test_unversioned_compatibility_aliases_work_for_desktop_clients(self) -> None:
+        models = self.client.get("/models", headers=self.headers)
+        self.assertEqual(models.status_code, 200)
+        self.assertIn("claude-code-pro", {item["id"] for item in models.json()["data"]})
+
+        response = self.client.post(
+            "/messages/count_tokens",
+            headers=self.headers,
+            json={"model": "claude-code-pro", "messages": [{"role": "user", "content": "oi"}]},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.json()["input_tokens"], 1)
+
+    def test_openai_chat_stream_can_include_usage_chunk(self) -> None:
+        app = create_app(settings=make_settings(), client_factory=FakeUsageStreamingOpenRouterClient)
+        client = TestClient(app)
+
+        with client.stream(
+            "POST",
+            "/chat/completions",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "stream": True,
+                "stream_options": {"include_usage": True},
+                "messages": [{"role": "user", "content": "Explique"}],
+            },
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            body = b"".join(response.iter_bytes())
+
+        self.assertIn(b'"choices": []', body)
+        self.assertIn(b'"usage": {"prompt_tokens": 3, "completion_tokens": 5, "total_tokens": 8}', body)
+        self.assertTrue(body.rstrip().endswith(b"data: [DONE]"))
+
+    def test_code_requests_use_full_upstream_timeout_by_default(self) -> None:
+        settings = make_settings()
+        client = VPSAnthropicClient(settings)
+        try:
+            timeout = client._timeout_seconds_for_payload(
+                {
+                    "__gateway_client": "claude-code",
+                    "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+                    "messages": [{"role": "user", "content": "analise o projeto"}],
+                }
+            )
+        finally:
+            asyncio.run(client.aclose())
+
+        self.assertEqual(timeout, settings.vps_model_timeout_seconds)
+
     def test_gateway_preserves_long_chat_history_before_upstream(self) -> None:
         messages = [
             {"role": "user", "content": f"pergunta {index} " + ("contexto " * 200)}

@@ -202,7 +202,7 @@ class Settings:
     vps_strong_model_api_format: str = ""
     vps_strong_model_api_key: str = ""
     vps_model_timeout_seconds: float = 55.0
-    vps_code_timeout_seconds: float = 8.0
+    vps_code_timeout_seconds: float = 55.0
     vps_model_slow_fallback_seconds: float = 6.0
     vps_openai_chat_context_tokens: int = 24_576
     runpod_api_key: str = ""
@@ -334,7 +334,7 @@ class Settings:
             vps_strong_model_api_format=model_backend["vps_strong_model_api_format"],
             vps_strong_model_api_key=os.getenv("VPS_STRONG_MODEL_API_KEY", ""),
             vps_model_timeout_seconds=float(os.getenv("VPS_MODEL_TIMEOUT_SECONDS", "55")),
-            vps_code_timeout_seconds=float(os.getenv("VPS_CODE_TIMEOUT_SECONDS", "8")),
+            vps_code_timeout_seconds=float(os.getenv("VPS_CODE_TIMEOUT_SECONDS", "55")),
             vps_model_slow_fallback_seconds=float(
                 os.getenv("VPS_MODEL_SLOW_FALLBACK_SECONDS", "6")
             ),
