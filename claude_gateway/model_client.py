@@ -856,6 +856,19 @@ class VPSAnthropicClient:
                 return self._content_to_text(message.get("content"))
         return ""
 
+    def _latest_user_message_has_visible_text(self, payload: dict[str, Any]) -> bool:
+        for message in reversed(payload.get("messages") or []):
+            if not isinstance(message, dict) or str(message.get("role") or "").lower() != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and all(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in content
+            ):
+                return False
+            return bool(self._content_to_text(content).strip())
+        return False
+
     def _current_user_request_text(self, payload: dict[str, Any]) -> str:
         text = self._last_user_text(payload)
         if not text:
@@ -1317,6 +1330,15 @@ class VPSAnthropicClient:
                         response["content"] = [fallback_tool]
                         response["stop_reason"] = "tool_use"
                         return
+                if self._latest_user_message_has_visible_text(payload) and self._is_tool_action_request(
+                    payload,
+                    aggressive=False,
+                ):
+                    fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                    if fallback_tool:
+                        response["content"] = [fallback_tool]
+                        response["stop_reason"] = "tool_use"
+                        return
                 response["content"] = [
                     {
                         "type": "text",
@@ -1416,6 +1438,13 @@ class VPSAnthropicClient:
             "what can i help",
             "how can i help",
             "how may i help",
+            "please provide the specific task",
+            "please provide the specific question",
+            "provide the specific task",
+            "provide the task or question",
+            "you'd like assistance with",
+            "you would like assistance with",
+            "use the appropriate tools to help",
         )
         if any(phrase in ascii_compact for phrase in generic_phrases):
             return True
@@ -1440,9 +1469,11 @@ class VPSAnthropicClient:
             "i'll follow",
             "i'll get started",
             "i'll start",
+            "i'll use the appropriate tools",
             "ill follow",
             "ill get started",
             "ill start",
+            "ill use the appropriate tools",
             "let's get started",
             "lets get started",
             "understood! i'll",

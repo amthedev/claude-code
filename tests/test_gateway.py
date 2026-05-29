@@ -1011,6 +1011,66 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(english_non_executing_anthropic["content"][0]["type"], "tool_use")
         self.assertEqual(english_non_executing_anthropic["content"][0]["name"], "LS")
 
+        english_generic_after_tools = {
+            "id": "chatcmpl_english_generic_after_tools",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Understood! Let's proceed with the task you've requested. Please provide the "
+                            "specific task or question you'd like assistance with, and I'll use the "
+                            "appropriate tools to help you."
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 24},
+        }
+        english_generic_anthropic = client._anthropic_from_openai_chat(english_generic_after_tools)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Aqui temos a pasta, voce tem as orientacoes certo? trabalhe",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_ls", "name": "LS", "input": {"path": "."}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_ls", "content": "README.md"}],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_bash", "name": "Bash", "input": {"command": "pwd"}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_bash", "content": "/repo"}],
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "execute as etapas: analise as frentes, proponha arquitetura do bot e liste "
+                            "arquivos para modificar."
+                        ),
+                    },
+                ],
+                "tools": [
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Bash", "input_schema": {"type": "object"}},
+                ],
+            },
+            english_generic_anthropic,
+        )
+        self.assertEqual(english_generic_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(english_generic_anthropic["content"][0]["name"], "LS")
+
         false_done_after_reading = {
             "id": "chatcmpl_false_done_after_reading",
             "choices": [{"message": {"content": "Criei os arquivos e esta tudo pronto."}, "finish_reason": "stop"}],
