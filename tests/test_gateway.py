@@ -1688,6 +1688,38 @@ class GatewayTestCase(unittest.TestCase):
         self.assertNotIn(b"Vamos criar index.html", body)
         self.assertIn(b'"stop_reason": "tool_use"', body)
 
+    def test_vps_openai_chat_stream_blocks_generic_reply_after_tool_result(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [
+                {"role": "user", "content": "me de um resumo"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_glob", "name": "Glob", "input": {"pattern": "**/*.md"}}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "toolu_glob", "content": "README.md\ndocs/BENCHMARK.md"}],
+                },
+            ],
+            "tools": [{"name": "Glob", "input_schema": {"type": "object"}}],
+        }
+
+        async def chunks():
+            yield b'data: {"choices":[{"delta":{"content":"Entendi. Como posso ajudar voce hoje?"}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        body = b"".join(asyncio.run(_collect_async_bytes(client._openai_sse_to_anthropic(chunks(), payload=payload))))
+
+        self.assertIn(b"README.md", body)
+        self.assertNotIn(b"Como posso ajudar", body)
+        self.assertIn(b'"stop_reason": "end_turn"', body)
+
     def test_vps_openai_chat_stream_converts_tool_calls_to_anthropic_sse(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"

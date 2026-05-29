@@ -40,7 +40,7 @@ export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 export ANTHROPIC_API_KEY=""
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 

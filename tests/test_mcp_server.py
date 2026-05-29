@@ -59,6 +59,8 @@ class McpServerHelpersTestCase(unittest.TestCase):
         self.assertEqual(config["env"]["MCP_GATEWAY_BASE_URL"], "https://example.test")
         self.assertEqual(config["env"]["MCP_GATEWAY_TOKEN"], "sk-test")
         self.assertEqual(config["env"]["ANTHROPIC_AUTH_TOKEN"], "")
+        self.assertEqual(config["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-code-pro")
+        self.assertEqual(config["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-code-ultra")
 
     def test_claude_desktop_server_config_omits_local_dev_token_for_hosted_gateway(self) -> None:
         with TemporaryDirectory() as tmpdir:

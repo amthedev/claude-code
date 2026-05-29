@@ -1443,6 +1443,7 @@ class VPSAnthropicClient:
         state = _QwenThinkingStreamState()
         tool_state = _OpenAIToolCallStreamState(state)
         textual_tool_buffer = "" if require_tool_call else None
+        post_tool_text_buffer = "" if payload and self._payload_has_tool_result(payload) else None
         stop_reason = "end_turn"
 
         buffer = ""
@@ -1457,11 +1458,14 @@ class VPSAnthropicClient:
                     stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
                 if text_delta and textual_tool_buffer is not None and not tool_state.has_tool:
                     textual_tool_buffer += text_delta
+                elif text_delta and post_tool_text_buffer is not None and not tool_state.has_tool:
+                    post_tool_text_buffer += text_delta
                 elif text_delta:
                     for outgoing in state.feed(text_delta):
                         yield outgoing
                 if tool_calls:
                     textual_tool_buffer = "" if textual_tool_buffer is not None else None
+                    post_tool_text_buffer = "" if post_tool_text_buffer is not None else None
                     for outgoing in tool_state.feed(tool_calls):
                         yield outgoing
 
@@ -1473,11 +1477,14 @@ class VPSAnthropicClient:
                 stop_reason = "max_tokens" if finish_reason == "length" else "end_turn"
             if text_delta and textual_tool_buffer is not None and not tool_state.has_tool:
                 textual_tool_buffer += text_delta
+            elif text_delta and post_tool_text_buffer is not None and not tool_state.has_tool:
+                post_tool_text_buffer += text_delta
             elif text_delta:
                 for outgoing in state.feed(text_delta):
                     yield outgoing
             if tool_calls:
                 textual_tool_buffer = "" if textual_tool_buffer is not None else None
+                post_tool_text_buffer = "" if post_tool_text_buffer is not None else None
                 for outgoing in tool_state.feed(tool_calls):
                     yield outgoing
 
@@ -1494,6 +1501,12 @@ class VPSAnthropicClient:
             else:
                 for outgoing in state.feed(textual_tool_buffer):
                     yield outgoing
+
+        if post_tool_text_buffer and not tool_state.has_tool:
+            if self._is_generic_help_response(post_tool_text_buffer) and payload:
+                post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
+            for outgoing in state.feed(post_tool_text_buffer):
+                yield outgoing
 
         for outgoing in state.finish():
             yield outgoing
