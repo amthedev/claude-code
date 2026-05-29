@@ -303,7 +303,9 @@ p {
 }
 
 .panel-heading.inline {
+  align-items: center;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
 }
@@ -329,6 +331,12 @@ p {
 
 .checkbox-field input {
   width: auto;
+}
+
+.compact-danger {
+  color: #b42318;
+  font-weight: 700;
+  min-height: 0;
 }
 
 .limit-box,

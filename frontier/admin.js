@@ -1136,16 +1136,26 @@ document.querySelector("#accountsTable").addEventListener("click", async (event)
 });
 
 document.querySelector("#purgeAccounts").addEventListener("click", async () => {
-  const confirmation = prompt('Digite APAGAR para remover todas as contas e API tokens.');
+  const includeGiftCards = Boolean(document.querySelector("#purgeGiftCards")?.checked);
+  const targetLabel = includeGiftCards
+    ? "todas as contas, API tokens e gift cards"
+    : "todas as contas e API tokens";
+  const confirmation = prompt(`Digite APAGAR para remover ${targetLabel}.`);
   if (confirmation !== "APAGAR") return;
   try {
-    await adminRequest("/v1/admin/accounts/purge", {
+    const result = await adminRequest("/v1/admin/accounts/purge", {
       method: "POST",
-      body: JSON.stringify({ includeGiftCards: false }),
+      body: JSON.stringify({ includeGiftCards }),
     });
     ClaudeApp.clearAccounts();
+    if (includeGiftCards) ClaudeApp.saveGiftCards([]);
     await refreshFromServer();
     renderAll();
+    alert(
+      includeGiftCards
+        ? `Limpeza concluída: ${result.accounts || 0} contas/APIs e ${result.gift_cards || 0} gift cards apagados.`
+        : `Limpeza concluída: ${result.accounts || 0} contas/APIs apagadas.`,
+    );
   } catch (error) {
     alert(error.fallback ? "API admin indisponível." : error.message);
   }
