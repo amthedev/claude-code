@@ -1071,6 +1071,59 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(english_generic_anthropic["stop_reason"], "tool_use")
         self.assertEqual(english_generic_anthropic["content"][0]["name"], "LS")
 
+        portuguese_detail_request_after_worktree = {
+            "id": "chatcmpl_portuguese_detail_request_after_worktree",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Vou analisar seu projeto agora. Por favor, forneça mais detalhes sobre os "
+                            "aspectos específicos que você gostaria de melhorar, exceto pela calculadora."
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 24},
+        }
+        portuguese_detail_anthropic = client._anthropic_from_openai_chat(
+            portuguese_detail_request_after_worktree
+        )
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "analise meu projeto e veja oq eu preciso melhorrar analise tudo menos a parte da claculadora",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_worktree",
+                                "name": "EnterWorktree",
+                                "input": {"name": "analysis-worktree"},
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_worktree", "content": "Switched."}],
+                    },
+                ],
+                "tools": [
+                    {"name": "LS", "input_schema": {"type": "object"}},
+                    {"name": "Read", "input_schema": {"type": "object"}},
+                    {"name": "EnterWorktree", "input_schema": {"type": "object"}},
+                ],
+            },
+            portuguese_detail_anthropic,
+        )
+        self.assertEqual(portuguese_detail_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(portuguese_detail_anthropic["content"][0]["name"], "LS")
+
         false_done_after_reading = {
             "id": "chatcmpl_false_done_after_reading",
             "choices": [{"message": {"content": "Criei os arquivos e esta tudo pronto."}, "finish_reason": "stop"}],

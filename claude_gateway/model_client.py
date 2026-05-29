@@ -1379,6 +1379,15 @@ class VPSAnthropicClient:
                 ]
                 response["stop_reason"] = "end_turn"
                 return
+            if self._looks_like_unneeded_detail_request(response_text) and self._is_tool_action_request(
+                payload,
+                aggressive=False,
+            ):
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool:
+                    response["content"] = [fallback_tool]
+                    response["stop_reason"] = "tool_use"
+                    return
             if self._is_generic_help_response(response_text):
                 if self._is_file_change_request(payload):
                     fallback_tool = self._fallback_tool_use_for_required_action(payload)
@@ -1498,6 +1507,11 @@ class VPSAnthropicClient:
             "please provide the specific question",
             "provide the specific task",
             "provide the task or question",
+            "forneca mais detalhes",
+            "forneça mais detalhes",
+            "aspectos especificos",
+            "aspectos específicos",
+            "detalhes sobre os aspectos",
             "you'd like assistance with",
             "you would like assistance with",
             "use the appropriate tools to help",
@@ -1511,6 +1525,21 @@ class VPSAnthropicClient:
             "ok.",
             "certo.",
         }
+
+    def _looks_like_unneeded_detail_request(self, text: str) -> bool:
+        compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
+        if not compact:
+            return False
+        markers = (
+            "forneca mais detalhes",
+            "aspectos especificos",
+            "detalhes sobre os aspectos",
+            "please provide more details",
+            "please provide the specific task",
+            "provide the specific task",
+            "provide the task or question",
+        )
+        return any(marker in compact for marker in markers)
 
     def _looks_like_non_executing_action_response(self, text: str) -> bool:
         compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
@@ -2076,6 +2105,15 @@ class VPSAnthropicClient:
                         yield outgoing
             elif payload and self._is_change_status_question(payload):
                 post_tool_text_buffer = self._physical_change_status_text(payload)
+            elif (
+                payload
+                and self._looks_like_unneeded_detail_request(post_tool_text_buffer)
+                and self._is_tool_action_request(payload, aggressive=False)
+            ):
+                fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                if fallback_tool:
+                    for outgoing in tool_state.feed([_openai_tool_call_from_anthropic_tool_use(fallback_tool, 0)]):
+                        yield outgoing
             elif self._is_generic_help_response(post_tool_text_buffer) and payload:
                 post_tool_text_buffer = self._fallback_summary_from_latest_tool_result(payload)
             elif (
