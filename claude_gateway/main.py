@@ -2284,6 +2284,7 @@ def _prepare_payload(
     limited["max_tokens"] = _safe_max_tokens(limited, settings)
     if auth.customer:
         limited = clamp_customer_payload(limited, settings, auth.customer)
+        limited["max_tokens"] = _safe_max_tokens(limited, settings)
     return limited
 
 
@@ -3837,7 +3838,10 @@ def _safe_max_tokens(payload: dict[str, Any], settings: Settings) -> int:
             requested = int(payload.get("max_tokens") or settings.max_request_output_tokens)
     except (TypeError, ValueError):
         requested = min(4096, settings.max_request_output_tokens)
-    return max(1, min(requested, settings.max_request_output_tokens))
+    cap = settings.max_request_output_tokens
+    if payload_has_tool_contract(payload) or _is_claude_code_payload(payload):
+        cap = min(cap, max(256, int(settings.tool_request_output_tokens or 4096)))
+    return max(1, min(requested, cap))
 
 
 async def _reserve_customer_budget(

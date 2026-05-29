@@ -236,7 +236,7 @@ class Settings:
     allow_direct_external_models: bool = False
     max_request_input_chars: int = 120_000
     max_request_output_tokens: int = 16_000
-    tool_request_output_tokens: int = 16_000
+    tool_request_output_tokens: int = 4_096
     customer_accounts: str = ""
     quota_data_file: str = "data/gateway.sqlite3"
     account_data_file: str = "data/gateway.sqlite3"
@@ -372,7 +372,7 @@ class Settings:
             allow_direct_external_models=_bool_env("ALLOW_DIRECT_EXTERNAL_MODELS", False),
             max_request_input_chars=int(os.getenv("MAX_REQUEST_INPUT_CHARS", "120000")),
             max_request_output_tokens=int(os.getenv("MAX_REQUEST_OUTPUT_TOKENS", "16000")),
-            tool_request_output_tokens=int(os.getenv("TOOL_REQUEST_OUTPUT_TOKENS", "16000")),
+            tool_request_output_tokens=int(os.getenv("TOOL_REQUEST_OUTPUT_TOKENS", "4096")),
             customer_accounts=os.getenv("CUSTOMER_ACCOUNTS", ""),
             quota_data_file=os.getenv("QUOTA_DATA_FILE", "data/gateway.sqlite3"),
             account_data_file=os.getenv("ACCOUNT_DATA_FILE", "data/gateway.sqlite3"),

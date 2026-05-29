@@ -4921,6 +4921,23 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(payload["__gateway_client"], "claude-code")
         self.assertEqual(payload["max_tokens"], 256)
 
+    def test_claude_code_tool_requests_are_capped_to_latency_budget(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 16000,
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+                "messages": [{"role": "user", "content": "Corrija o bug e rode os testes"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.app.state.openrouter.calls[-1][1]
+        self.assertEqual(payload["max_tokens"], 4096)
+        self.assertEqual(payload["__gateway_reasoning"], "none")
+
     def test_public_identity_prompt_includes_current_date_context(self) -> None:
         response = self.client.post(
             "/v1/messages",
