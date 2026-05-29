@@ -781,6 +781,34 @@ class GatewayTestCase(unittest.TestCase):
         self.assertIn("Use the latest tool result exactly once", after_tool["messages"][-1]["content"])
         self.assertIn("Do not repeat the same tool call", after_tool["messages"][-1]["content"])
 
+        generic_after_tool = {
+            "id": "chatcmpl_generic_after_tool",
+            "choices": [{"message": {"content": "Entendi. Como posso ajudar você hoje?"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 6},
+        }
+        generic_anthropic = client._anthropic_from_openai_chat(generic_after_tool)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {"role": "user", "content": "Analise meu projeto."},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_glob", "name": "Glob", "input": {"pattern": "**/*.md"}}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_glob", "content": "README.md\ndocs/BENCHMARK.md"}],
+                    },
+                ],
+                "tools": [{"name": "Glob", "input_schema": {"type": "object"}}],
+            },
+            generic_anthropic,
+        )
+        self.assertEqual(generic_anthropic["stop_reason"], "end_turn")
+        self.assertIn("README.md", generic_anthropic["content"][0]["text"])
+        self.assertNotIn("Como posso ajudar", generic_anthropic["content"][0]["text"])
+
         after_only_inspection_for_edit = client._openai_chat_payload(
             {
                 "__gateway_client": "claude-code",

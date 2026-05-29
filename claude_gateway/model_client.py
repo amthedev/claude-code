@@ -1148,6 +1148,23 @@ class VPSAnthropicClient:
                 response["content"] = [fallback_tool]
                 response["stop_reason"] = "tool_use"
                 return
+        if self._payload_has_tool_result(payload) and not _response_has_tool_use(response):
+            response_text = self._response_text(response)
+            if self._is_generic_help_response(response_text):
+                if self._is_file_change_request(payload):
+                    fallback_tool = self._fallback_tool_use_for_required_action(payload)
+                    if fallback_tool:
+                        response["content"] = [fallback_tool]
+                        response["stop_reason"] = "tool_use"
+                        return
+                response["content"] = [
+                    {
+                        "type": "text",
+                        "text": self._fallback_summary_from_latest_tool_result(payload),
+                    }
+                ]
+                response["stop_reason"] = "end_turn"
+                return
         if self._should_force_claude_code_tool_choice(payload) and not _response_has_tool_use(response):
             fallback_tool = self._fallback_tool_use_for_required_action(payload)
             if fallback_tool:
@@ -1158,6 +1175,60 @@ class VPSAnthropicClient:
                 "VPS model ignored required Claude Code tool call.",
                 status_code=502,
             )
+
+    def _response_text(self, response: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for block in response.get("content") or []:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "\n".join(parts).strip()
+
+    def _is_generic_help_response(self, text: str) -> bool:
+        compact = " ".join(str(text or "").strip().lower().split())
+        if not compact:
+            return False
+        generic_phrases = (
+            "como posso ajudar",
+            "como posso te ajudar",
+            "em que posso ajudar",
+            "em que posso te ajudar",
+            "what can i help",
+            "how can i help",
+            "how may i help",
+        )
+        if any(phrase in compact for phrase in generic_phrases):
+            return True
+        return compact in {
+            "entendi.",
+            "entendido.",
+            "claro.",
+            "ok.",
+            "certo.",
+        }
+
+    def _latest_tool_result_text(self, payload: dict[str, Any]) -> str:
+        for message in reversed(payload.get("messages") or []):
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, dict):
+                content = [content]
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    return self._content_to_text(block.get("content")).strip()
+        return ""
+
+    def _fallback_summary_from_latest_tool_result(self, payload: dict[str, Any]) -> str:
+        result_text = self._latest_tool_result_text(payload)
+        if not result_text:
+            return "Usei a ferramenta, mas ela não retornou conteúdo útil para resumir."
+        result_text = self._truncate_text_end(result_text, 1800)
+        return (
+            "Usei a ferramenta e obtive este resultado. Vou seguir a partir dele se você mandar a próxima ordem:\n\n"
+            f"```text\n{result_text}\n```"
+        )
 
     def _fallback_tool_use_for_required_action(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         tool_names = self._available_tool_names(payload)
