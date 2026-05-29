@@ -30,8 +30,6 @@ class CostEstimate:
 # OpenRouter price strings are dollars per token. These defaults were checked against
 # OpenRouter's public models API on 2026-05-26.
 DEFAULT_PRICES: dict[str, ModelPrice] = {
-    "anthropic/claude-opus-4.7": ModelPrice(prompt=0.000005, completion=0.000025),
-    "anthropic/claude-opus-4.7-fast": ModelPrice(prompt=0.00003, completion=0.00015),
     "anthropic/claude-sonnet-4.6": ModelPrice(prompt=0.000003, completion=0.000015),
     "deepseek/deepseek-v4-pro": ModelPrice(prompt=0.000000435, completion=0.00000087),
     "deepseek/deepseek-v4-flash": ModelPrice(prompt=0.0000001, completion=0.0000002),
@@ -50,7 +48,7 @@ DEFAULT_PRICES: dict[str, ModelPrice] = {
     "tencent/hy3-preview": ModelPrice(prompt=0.000000066, completion=0.00000026),
 }
 
-CLAUDE_BASELINE_MODEL = "anthropic/claude-opus-4.7"
+CLAUDE_BASELINE_MODEL = "anthropic/claude-sonnet-4.6"
 
 
 class CostPolicy:
@@ -88,7 +86,7 @@ class CostPolicy:
             cost_ratio_vs_claude=ratio,
             savings_vs_claude=savings,
             within_budget=ratio <= self.max_ratio_vs_claude,
-            note="priced against Claude Opus 4.7 blended input/output cost",
+            note="priced against Claude Sonnet 4.6 blended input/output cost",
         )
 
     def estimate_pipeline(self, label: str, models: list[str]) -> CostEstimate:
@@ -99,7 +97,7 @@ class CostPolicy:
         if unknowns:
             note = f"pipeline includes over-budget or unknown model(s): {', '.join(unknowns)}"
         else:
-            note = "conservative sum of each internal call against one Claude Opus 4.7 call"
+            note = "conservative sum of each internal call against one Claude Sonnet 4.6 call"
         return CostEstimate(
             model=label,
             cost_ratio_vs_claude=ratio,

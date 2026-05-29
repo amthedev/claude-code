@@ -217,7 +217,7 @@ class Settings:
     enable_openai_decision_director: bool = True
     enable_web_search: bool = False
     legacy_public_model_label: str = "Claude Sonnet 4.5"
-    public_model_label: str = "Claude Opus 4.7"
+    public_model_label: str = "Claude Sonnet 4.6"
     web_search_model: str = "gpt-5.5"
     web_search_openrouter_model: str = ""
     web_search_context_size: str = "low"
@@ -271,7 +271,7 @@ class Settings:
 
     economy_public_model: str = "claude-code-pro"
     pro_public_model: str = "claude-code-pro"
-    ultra_public_model: str = "claude-code-ultra"
+    ultra_public_model: str = "claude-sonnet-4.6"
     ui_public_model: str = "claude-code-pro"
     auto_public_model: str = "claude-code-pro"
 
@@ -353,7 +353,7 @@ class Settings:
                 and _bool_env("ALLOW_WEB_SEARCH_CREDITS", False)
             ),
             legacy_public_model_label=os.getenv("LEGACY_PUBLIC_MODEL_LABEL", "Claude Sonnet 4.5"),
-            public_model_label=os.getenv("PUBLIC_MODEL_LABEL", "Claude Opus 4.7"),
+            public_model_label=os.getenv("PUBLIC_MODEL_LABEL", "Claude Sonnet 4.6"),
             web_search_model=os.getenv("WEB_SEARCH_MODEL", "gpt-5.5"),
             web_search_openrouter_model=os.getenv("WEB_SEARCH_OPENROUTER_MODEL", ""),
             web_search_context_size=os.getenv("WEB_SEARCH_CONTEXT_SIZE", "low"),
@@ -408,7 +408,7 @@ class Settings:
             public_trial_label=os.getenv("PUBLIC_TRIAL_LABEL", "Teste grátis 24h"),
             economy_public_model=os.getenv("ECONOMY_PUBLIC_MODEL", public_model_id),
             pro_public_model=os.getenv("PRO_PUBLIC_MODEL", public_model_id),
-            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-code-ultra"),
+            ultra_public_model=os.getenv("ULTRA_PUBLIC_MODEL", "claude-sonnet-4.6"),
             ui_public_model=os.getenv("UI_PUBLIC_MODEL", public_model_id),
             auto_public_model=os.getenv("AUTO_PUBLIC_MODEL", public_model_id),
             router_agent="tencent/hy3-preview",

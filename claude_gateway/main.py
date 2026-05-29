@@ -2533,7 +2533,7 @@ def _command_model(value: str, settings: Settings) -> str:
         return public_models[raw.lower()]
     if "auto" in normalized or "automatico" in normalized:
         return settings.auto_public_model
-    if "4 7" in normalized or "4.7" in raw or "opus 4 7" in normalized:
+    if "4 6" in normalized or "4.6" in raw or "sonnet 4 6" in normalized:
         return settings.ultra_public_model
     if "4 5" in normalized or "4.5" in raw:
         return settings.pro_public_model
@@ -2628,7 +2628,11 @@ async def _with_customer_latency_policy(
     outgoing = dict(payload)
     outgoing["__gateway_customer_requests_today"] = requests_today
     outgoing["__gateway_heavy_allowed"] = heavy_allowed
-    if str(payload.get("model") or "").strip().lower() == app.state.settings.ultra_public_model.lower():
+    if str(payload.get("model") or "").strip().lower() in {
+        app.state.settings.ultra_public_model.lower(),
+        "claude-code-ultra",
+        "claude-sonnet-4.6",
+    }:
         outgoing["__gateway_heavy_allowed"] = True
         return outgoing
     if heavy_allowed:
@@ -2648,7 +2652,7 @@ async def _with_customer_latency_policy(
 
 def _requested_heavy_model(payload: dict[str, Any]) -> bool:
     requested = str(payload.get("model") or "").strip().lower()
-    return any(marker in requested for marker in ("opus", "ultra", "4.7", "strong", "xstrong"))
+    return any(marker in requested for marker in ("opus", "ultra", "4.6", "strong", "xstrong"))
 
 
 def _payload_requires_heavy_mode(payload: dict[str, Any]) -> bool:
@@ -3811,6 +3815,7 @@ def _public_model_label(public_model: str, settings: Settings) -> str:
         "claude-code-economy": legacy_label,
         "claude-code-pro": legacy_label,
         "claude-code-ultra": advanced_label,
+        "claude-sonnet-4.6": advanced_label,
         "claude-code-ui": legacy_label,
         "claude-code-auto": legacy_label,
         "qwen-14b": legacy_label,
@@ -3819,7 +3824,7 @@ def _public_model_label(public_model: str, settings: Settings) -> str:
         return labels[lowered]
     if "qwen" in lowered:
         return legacy_label
-    if "ultra" in lowered or "opus" in lowered or "4.7" in lowered:
+    if "ultra" in lowered or "opus" in lowered or "claude-sonnet-4.6" in lowered or "4.6" in lowered:
         return advanced_label
     return public if public.startswith("claude-code-") else legacy_label
 

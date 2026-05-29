@@ -367,10 +367,10 @@ class RoutePlanner:
         lower = requested_model.lower()
         if "claude-code-economy" in lower or "haiku" in lower:
             return "economy"
+        if "claude-code-ultra" in lower or "claude-sonnet-4.6" in lower or "4.6" in lower or "opus" in lower:
+            return "ultra"
         if "claude-code-pro" in lower or "sonnet" in lower:
             return "pro"
-        if "claude-code-ultra" in lower or "opus" in lower:
-            return "ultra"
         if "claude-code-ui" in lower:
             return "ui"
 

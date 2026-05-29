@@ -1994,7 +1994,7 @@ class GatewayTestCase(unittest.TestCase):
         response = self.client.get("/v1/models", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.json()["data"]}
-        self.assertEqual(model_ids, {"claude-code-pro", "claude-code-ultra"})
+        self.assertEqual(model_ids, {"claude-code-pro", "claude-sonnet-4.6"})
         self.assertEqual({model["object"] for model in response.json()["data"]}, {"model"})
         self.assertNotIn("cost_target", response.json()["data"][0])
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
@@ -2583,7 +2583,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
         self.assertIn("Configuração aplicada", response.json()["content"][0]["text"])
         self.assertEqual(self.app.state.openrouter.calls, [])
 
@@ -3295,7 +3295,7 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "ultra")
         self.assertEqual(data["complexity"], "critical")
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.6")
         self.assertNotIn("agents", data)
 
     def test_tool_calls_are_proxied_without_orchestration(self) -> None:
@@ -3363,7 +3363,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
         final_payload = self.app.state.openrouter.calls[-1][1]
         self.assertEqual(final_payload["__gateway_reasoning"], "high")
 
@@ -3379,7 +3379,7 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 5)
 
     def test_simple_pro_request_uses_single_fast_call_and_smaller_default_output(self) -> None:
@@ -3437,11 +3437,11 @@ class GatewayTestCase(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
         called_models = [model for model, _payload in self.app.state.openrouter.calls]
         self.assertGreaterEqual(len(called_models), 6)
         self.assertNotIn("anthropic/claude-sonnet-4.6", called_models)
-        self.assertNotIn("anthropic/claude-opus-4.7", called_models)
+        self.assertNotIn("anthropic/claude-sonnet-4.6", called_models)
 
     def test_budget_endpoint_reports_default_models_under_target(self) -> None:
         response = self.client.get("/v1/budget", headers=self.headers)
@@ -3773,7 +3773,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/router/debug",
             headers=self.headers,
             json={
-                "model": "anthropic/claude-opus-4.7",
+                "model": "anthropic/claude-sonnet-4.6",
                 "max_tokens": 256,
                 "messages": [{"role": "user", "content": "Implemente uma API"}],
             },
@@ -3793,7 +3793,7 @@ class GatewayTestCase(unittest.TestCase):
             "/v1/router/debug",
             headers=self.headers,
             json={
-                "model": "anthropic/claude-opus-4.7",
+                "model": "anthropic/claude-sonnet-4.6",
                 "max_tokens": 256,
                 "messages": [{"role": "user", "content": "Implemente uma API"}],
             },
@@ -3802,7 +3802,7 @@ class GatewayTestCase(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["mode"], "direct")
         self.assertNotIn("selected_openrouter_model", data)
-        self.assertEqual(data["model_label"], "Claude Opus 4.7")
+        self.assertEqual(data["model_label"], "Claude Sonnet 4.6")
 
     def test_customer_token_forces_allowed_model_and_reports_own_usage(self) -> None:
         with TemporaryDirectory() as tmpdir:
@@ -3819,7 +3819,7 @@ class GatewayTestCase(unittest.TestCase):
                 "/v1/messages",
                 headers=customer_headers,
                 json={
-                    "model": "claude-opus-4.7",
+                    "model": "claude-sonnet-4.6",
                     "max_tokens": 128,
                     "messages": [{"role": "user", "content": "Explique este trecho"}],
                 },
@@ -4891,7 +4891,7 @@ class GatewayTestCase(unittest.TestCase):
 
         payload = self.app.state.openrouter.calls[-1][1]
         self.assertTrue(payload["stream"])
-        self.assertIn("Claude Opus 4.7", payload["system"])
+        self.assertIn("Claude Sonnet 4.6", payload["system"])
         self.assertIn("Keep Anthropic-compatible API behavior", payload["system"])
         self.assertIn("Respond in the same language as the user's latest message", payload["system"])
         self.assertIn("Do not mention internal routing providers", payload["system"])
@@ -5028,8 +5028,8 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
-        self.assertEqual(response.json()["content"][0]["text"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
+        self.assertEqual(response.json()["content"][0]["text"], "Claude Sonnet 4.6")
         self.assertEqual(self.app.state.openrouter.calls, [])
 
     def test_previous_model_identity_question_does_not_override_next_request(self) -> None:
@@ -5043,7 +5043,7 @@ class GatewayTestCase(unittest.TestCase):
                     {"role": "user", "content": "qual modelo e voce?"},
                     {
                         "role": "assistant",
-                        "content": "Eu sou o Claude Opus 4.7, o modo selecionado neste chat.",
+                        "content": "Eu sou o Claude Sonnet 4.6, o modo selecionado neste chat.",
                     },
                     {"role": "user", "content": "apague o squarecloud.app do meu projeto"},
                 ],
@@ -5051,7 +5051,7 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model"], "Claude Opus 4.7")
+        self.assertEqual(response.json()["model"], "Claude Sonnet 4.6")
         self.assertNotIn("modo selecionado neste chat", response.json()["content"][0]["text"])
         self.assertGreaterEqual(len(self.app.state.openrouter.calls), 1)
 

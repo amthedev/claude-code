@@ -39,8 +39,8 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 export ANTHROPIC_API_KEY=""
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-ultra"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
 
@@ -123,7 +123,7 @@ Use [docs/BENCHMARK.md](docs/BENCHMARK.md) to run the no-credit router benchmark
 ## Public Model
 
 - `claude-code-pro`: Claude Sonnet 4.5 public identity, backed by `VPS_MODEL_ID`.
-- `claude-code-ultra`: Claude Opus 4.7 public identity with stronger reasoning and thinking defaults. It reserves/charges 1.5x tokens.
+- `claude-sonnet-4.6`: Claude Sonnet 4.6 public identity with stronger reasoning and thinking defaults. It reserves/charges 1.5x tokens.
 
 The visible model name stays stable for clients. The VPS receives `VPS_MODEL_ID`.
 
@@ -137,7 +137,7 @@ export ALLOW_PREMIUM_FALLBACK=false
 export ALLOW_DIRECT_EXTERNAL_MODELS=false
 ```
 
-`claude-code-pro` and `claude-code-ultra` are the public models exposed to clients. OpenRouter is disabled for production requests.
+`claude-code-pro` and `claude-sonnet-4.6` are the public models exposed to clients. OpenRouter is disabled for production requests.
 
 ## Optional ChatGPT Helper
 

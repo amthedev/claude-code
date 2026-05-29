@@ -100,7 +100,7 @@ def reasoning_token_multiplier(mode: str, decision: RouteDecision | None = None)
 def model_token_multiplier(payload: dict[str, Any], decision: RouteDecision | None = None) -> float:
     public_model = str(getattr(decision, "public_model", "") or payload.get("model") or "").strip().lower()
     mode = str(getattr(decision, "mode", "") or "").strip().lower()
-    if mode == "ultra" or "claude-code-ultra" in public_model or "4.7" in public_model:
+    if mode == "ultra" or "claude-code-ultra" in public_model or "claude-sonnet-4.6" in public_model or "4.6" in public_model:
         return ADVANCED_MODEL_TOKEN_MULTIPLIER
     return 1.0
 

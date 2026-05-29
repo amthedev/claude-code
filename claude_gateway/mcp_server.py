@@ -28,7 +28,7 @@ HOSTED_GATEWAY_BASE_URL = os.getenv("HOSTED_GATEWAY_BASE_URL", "https://your-sub
 LOCAL_DEV_TOKENS = {"", "local-dev-token"}
 COWORK_MAX_OUTPUT_TOKENS = 420
 COWORK_TIMEOUT_SECONDS = 15.0
-GatewayModel = Literal["claude-code-pro", "claude-code-ultra"]
+GatewayModel = Literal["claude-code-pro", "claude-sonnet-4.6"]
 _GATEWAY_HTTP_CLIENT: httpx.AsyncClient | None = None
 
 
@@ -108,8 +108,8 @@ def claude_desktop_server_config(
         "MCP_GATEWAY_BASE_URL": resolved_url,
         "ANTHROPIC_AUTH_TOKEN": "",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-code-pro",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-code-pro",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-ultra",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4.6",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-code-pro",
         "CLAUDE_CODE_SUBAGENT_MODEL": "claude-code-pro",
         "MCP_ENABLE_WRITE_TOOLS": "true" if enable_write_tools else "false",
         "MCP_ENABLE_COMMANDS": "true" if enable_commands else "false",

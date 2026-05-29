@@ -14,14 +14,14 @@ Precos confirmados na API publica do OpenRouter em 2026-05-17. Os valores abaixo
 
 | Papel | Modelo atual | Entrada | Saida | Uso |
 | --- | --- | ---: | ---: | --- |
-| Baseline de comparacao | `anthropic/claude-opus-4.7` | 0.000005 | 0.000025 | So para calcular economia |
+| Baseline de comparacao | `anthropic/claude-sonnet-4.6` | 0.000005 | 0.000025 | So para calcular economia |
 | Roteador | `tencent/hy3-preview` | 0.000000066 | 0.00000026 | Classificar/planejar barato |
 | Economico | `deepseek/deepseek-v4-flash` | 0.000000112 | 0.000000224 | Tarefas simples e clientes baratos |
 | Codigo/raciocinio | `deepseek/deepseek-v4-pro` | 0.000000435 | 0.00000087 | Caminho principal de codigo |
 | UI/front | `moonshotai/kimi-k2.6` | 0.00000073 | 0.00000349 | Frontend, layout e escrita visual |
 | Rapido/testes | `stepfun/step-3.5-flash` | 0.0000001 | 0.0000003 | Agente auxiliar barato |
 
-Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
+Comparado ao Claude Sonnet 4.6 por custo misto entrada+saida:
 
 - DeepSeek V4 Pro fica em torno de 4.35% do custo.
 - DeepSeek V4 Flash fica em torno de 1.12% do custo.
@@ -31,7 +31,7 @@ Comparado ao Claude Opus 4.7 por custo misto entrada+saida:
 ## O que foi fechado para evitar prejuizo
 
 1. `ALLOW_DIRECT_EXTERNAL_MODELS=false` por padrao.
-   Antes, uma chamada direta para `anthropic/claude-opus-4.7` podia virar modo `direct`. Agora nomes externos com `/` entram no roteador seguro, a menos que voce habilite explicitamente para uso admin.
+   Antes, uma chamada direta para `anthropic/claude-sonnet-4.6` podia virar modo `direct`. Agora nomes externos com `/` entram no roteador seguro, a menos que voce habilite explicitamente para uso admin.
 
 2. `MAX_REQUEST_OUTPUT_TOKENS=4096`.
    O backend limita `max_tokens` antes de enviar ao OpenRouter.
@@ -73,7 +73,7 @@ export ANTHROPIC_BASE_URL="https://SEU-SUBDOMINIO.squareweb.app"
 export ANTHROPIC_AUTH_TOKEN="TOKEN_DO_CLIENTE"
 export ANTHROPIC_API_KEY=""
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-code-pro"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-code-pro"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-code-pro"
 export CLAUDE_CODE_SUBAGENT_MODEL="claude-code-pro"
 ```
