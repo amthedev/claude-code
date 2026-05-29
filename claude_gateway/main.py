@@ -2626,6 +2626,7 @@ async def _with_customer_latency_policy(
         return outgoing
 
     outgoing["model"] = app.state.settings.economy_public_model
+    outgoing["__gateway_hidden_reasoning_mode"] = outgoing.get("__gateway_reasoning_mode")
     outgoing["__gateway_reasoning_mode"] = "fast"
     outgoing["__gateway_latency_fast_locked"] = True
     outgoing["__gateway_latency_policy"] = (
@@ -3277,10 +3278,11 @@ def _with_gateway_reasoning(payload: dict[str, Any], decision: Any) -> dict[str,
 def _reasoning_effort_for_request(payload: dict[str, Any], decision: Any) -> str:
     if payload_has_tool_contract(payload) or _is_claude_code_payload(payload):
         return "none"
-    if payload.get("__gateway_latency_fast_locked"):
-        return "none"
 
-    mode = normalize_reasoning_mode(payload.get("__gateway_reasoning_mode"))
+    mode = normalize_reasoning_mode(
+        payload.get("__gateway_hidden_reasoning_mode")
+        or payload.get("__gateway_reasoning_mode")
+    )
     auto_default = bool(payload.get("__gateway_reasoning_auto_default"))
     if mode == "fast" and not auto_default:
         return "none"
