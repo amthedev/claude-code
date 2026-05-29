@@ -3412,9 +3412,15 @@ def _quick_local_answer(payload: dict[str, Any]) -> str | None:
     }:
         return "Oi! Estou aqui. O que vamos resolver?"
     if prompt in {
+        "quem e o presidente",
+        "quem e o presidente atual",
         "quem e o presidente do brasil",
         "presidente do brasil",
+        "qual e o presidente",
+        "qual e o presidente atual",
         "qual e o presidente do brasil",
+        "qual o presidente",
+        "qual o presidente atual",
         "qual o presidente do brasil",
     }:
         return "O presidente do Brasil é Luiz Inácio Lula da Silva (Lula)."

@@ -1342,6 +1342,71 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(site_request["tool_choice"], "required")
 
+        delete_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [{"role": "user", "content": "apague a calculadora"}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+        self.assertEqual(delete_request["tool_choice"], "required")
+
+        continuation_all_request = client._openai_chat_payload(
+            {
+                "__gateway_client": "claude-code",
+                "__gateway_reasoning": "high",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "agora eu quero que voce analise todo meu projeto e diga oq vc acha dele atualmente",
+                    },
+                    {"role": "assistant", "content": "Claro. Quais arquivos voce quer que eu examine?"},
+                    {"role": "user", "content": "todos"},
+                ],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            stream=True,
+        )
+        self.assertEqual(continuation_all_request["tool_choice"], "required")
+
+        guessed_analysis = {
+            "id": "chatcmpl_guessed_analysis",
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Vou começar analisando diretório atual. Vejo .gitignore, .claude, "
+                            "calculadora.py e index.html."
+                        )
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 16},
+        }
+        guessed_analysis_anthropic = client._anthropic_from_openai_chat(guessed_analysis)
+        client._ensure_required_tool_call(
+            {
+                "__gateway_client": "claude-code",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "agora eu quero que voce analise todo meu projeto e diga oq vc acha dele atualmente",
+                    },
+                    {"role": "assistant", "content": "Claro. Quais arquivos voce quer que eu examine?"},
+                    {"role": "user", "content": "todos"},
+                ],
+                "tools": [{"name": "LS", "input_schema": {"type": "object"}}],
+            },
+            guessed_analysis_anthropic,
+        )
+        self.assertEqual(guessed_analysis_anthropic["stop_reason"], "tool_use")
+        self.assertEqual(guessed_analysis_anthropic["content"][0]["name"], "LS")
+
     def test_vps_openai_chat_guides_desktop_workspace_tools_for_file_edits(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"
@@ -2593,6 +2658,21 @@ class GatewayTestCase(unittest.TestCase):
                 "model": "claude-code-pro",
                 "max_tokens": 128,
                 "messages": [{"role": "user", "content": "quem é o presidente do brasil"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Luiz Inácio Lula da Silva", response.json()["content"][0]["text"])
+        self.assertEqual(self.app.state.openrouter.calls, [])
+
+    def test_generic_portuguese_president_question_returns_local_answer_without_upstream(self) -> None:
+        response = self.client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 128,
+                "messages": [{"role": "user", "content": "quem e o presidente"}],
             },
         )
 

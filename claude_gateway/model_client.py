@@ -309,12 +309,25 @@ class VPSAnthropicClient:
         text = self._current_user_request_text(payload).lower()
         if not text:
             return False
+        if self._looks_like_tool_action_continuation(text):
+            return self._payload_has_prior_tool_action_request(payload)
         if self._looks_like_workspace_access_question(text):
             return True
+        if self._has_tool_action_terms(text):
+            return True
+        if self._looks_like_question(text):
+            return False
+        if self._looks_like_smalltalk(text):
+            return False
+        return aggressive
+
+    def _has_tool_action_terms(self, text: str) -> bool:
+        compact = str(text or "").lower()
         action_terms = (
             "analis",
             "analise",
             "analyze",
+            "apag",
             "estrutura",
             "project",
             "projeto",
@@ -333,6 +346,8 @@ class VPSAnthropicClient:
             "crie",
             "criar",
             "debug",
+            "delete",
+            "delet",
             "edite",
             "editar",
             "envie",
@@ -357,6 +372,9 @@ class VPSAnthropicClient:
             "mexer",
             "modifique",
             "monte",
+            "remova",
+            "remove",
+            "remover",
             "read",
             "rode",
             "rodar",
@@ -388,13 +406,46 @@ class VPSAnthropicClient:
             "trabalhe",
             "trabalhar",
         )
-        if any(term in text for term in action_terms):
-            return True
-        if self._looks_like_question(text):
+        return any(term in compact for term in action_terms)
+
+    def _looks_like_tool_action_continuation(self, text: str) -> bool:
+        compact = _strip_accents(" ".join(str(text or "").strip().lower().split()))
+        if not compact:
             return False
-        if self._looks_like_smalltalk(text):
-            return False
-        return aggressive
+        continuation_terms = (
+            "todos",
+            "tudo",
+            "isso",
+            "sim",
+            "pode",
+            "pode sim",
+            "continua",
+            "continue",
+            "vai",
+            "ok",
+            "certo",
+        )
+        return compact in continuation_terms
+
+    def _payload_has_prior_tool_action_request(self, payload: dict[str, Any]) -> bool:
+        user_texts: list[str] = []
+        for message in payload.get("messages") or []:
+            if not isinstance(message, dict) or str(message.get("role") or "").lower() != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and all(
+                isinstance(block, dict) and block.get("type") == "tool_result"
+                for block in content
+            ):
+                continue
+            text = self._content_to_text(content)
+            if text:
+                user_texts.append(self._current_user_request_text({"messages": [{"role": "user", "content": text}]}))
+        for text in user_texts[:-1]:
+            lowered = text.lower()
+            if self._looks_like_workspace_access_question(lowered) or self._has_tool_action_terms(lowered):
+                return True
+        return False
 
     def _should_force_tool_choice(self, payload: dict[str, Any]) -> bool:
         is_action_request = self._is_claude_code_action_request(payload) or self._is_tool_action_request(
@@ -690,6 +741,7 @@ class VPSAnthropicClient:
         compact = str(text or "").lower()
         change_terms = (
             "alter",
+            "apag",
             "aplicar patch",
             "build",
             "conserte",
@@ -699,6 +751,8 @@ class VPSAnthropicClient:
             "cria",
             "crie",
             "criar",
+            "delete",
+            "delet",
             "edite",
             "editar",
             "faca",
@@ -712,6 +766,9 @@ class VPSAnthropicClient:
             "modifique",
             "monte",
             "patch",
+            "remova",
+            "remove",
+            "remover",
             "salve",
             "site",
             "write",
