@@ -280,6 +280,7 @@ def create_app(
         }
 
     @app.get("/v1/models")
+    @app.get("/api/v1/models", include_in_schema=False)
     @app.get("/models", include_in_schema=False)
     async def list_models(request: Request) -> dict[str, Any]:
         auth: AuthContext | None = None
@@ -315,6 +316,7 @@ def create_app(
         }
 
     @app.post("/v1/responses")
+    @app.post("/api/v1/responses", include_in_schema=False)
     @app.post("/responses", include_in_schema=False)
     async def create_openai_response(
         request: Request,
@@ -339,6 +341,7 @@ def create_app(
         return JSONResponse(openai_response)
 
     @app.post("/v1/chat/completions")
+    @app.post("/api/v1/chat/completions", include_in_schema=False)
     @app.post("/chat/completions", include_in_schema=False)
     async def create_chat_completion(
         request: Request,
@@ -411,6 +414,7 @@ def create_app(
         }
 
     @app.post("/v1/messages")
+    @app.post("/api/v1/messages", include_in_schema=False)
     @app.post("/messages", include_in_schema=False)
     async def messages(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)
@@ -519,6 +523,7 @@ def create_app(
         return JSONResponse(response)
 
     @app.post("/v1/messages/count_tokens")
+    @app.post("/api/v1/messages/count_tokens", include_in_schema=False)
     @app.post("/messages/count_tokens", include_in_schema=False)
     async def count_message_tokens(request: Request, payload: dict[str, Any] = Body(...)) -> JSONResponse:
         _rate_limit(request, app, "api", app.state.settings.api_rate_limit)

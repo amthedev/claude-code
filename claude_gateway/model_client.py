@@ -163,6 +163,7 @@ class VPSAnthropicClient:
         if self._is_openrouter_target(target):
             api_key = api_key or self.settings.openrouter_api_key
             headers["HTTP-Referer"] = self.settings.openrouter_site_url
+            headers["X-OpenRouter-Title"] = self.settings.openrouter_app_name
             headers["X-Title"] = self.settings.openrouter_app_name
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

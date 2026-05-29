@@ -129,6 +129,7 @@ class WebSearchClient:
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": self.settings.openrouter_site_url,
+            "X-OpenRouter-Title": self.settings.openrouter_app_name,
             "X-Title": self.settings.openrouter_app_name,
         }
         timeout_seconds = max(0.05, float(self.settings.web_search_timeout_seconds or 8.0))

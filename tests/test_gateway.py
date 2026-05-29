@@ -357,6 +357,7 @@ class GatewayTestCase(unittest.TestCase):
 
         self.assertEqual(headers["Authorization"], "Bearer sk-or-test")
         self.assertEqual(headers["HTTP-Referer"], "https://example.com")
+        self.assertEqual(headers["X-OpenRouter-Title"], "Gateway Test")
         self.assertEqual(headers["X-Title"], "Gateway Test")
         self.assertEqual(client.messages_url, "https://openrouter.ai/api/v1/messages")
 
@@ -5838,6 +5839,40 @@ class GatewayTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertGreaterEqual(response.json()["input_tokens"], 1)
+
+    def test_openrouter_style_api_v1_aliases_work(self) -> None:
+        models = self.client.get("/api/v1/models", headers=self.headers)
+        self.assertEqual(models.status_code, 200)
+        self.assertEqual(models.json()["object"], "list")
+        self.assertIn("claude-code-pro", {item["id"] for item in models.json()["data"]})
+
+        token_count = self.client.post(
+            "/api/v1/messages/count_tokens",
+            headers=self.headers,
+            json={"model": "claude-code-pro", "messages": [{"role": "user", "content": "oi"}]},
+        )
+        self.assertEqual(token_count.status_code, 200)
+        self.assertGreaterEqual(token_count.json()["input_tokens"], 1)
+
+        chat = self.client.post(
+            "/api/v1/chat/completions",
+            headers=self.headers,
+            json={"model": "claude-code-pro", "messages": [{"role": "user", "content": "oi"}]},
+        )
+        self.assertEqual(chat.status_code, 200)
+        self.assertEqual(chat.json()["object"], "chat.completion")
+
+        messages = self.client.post(
+            "/api/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-pro",
+                "max_tokens": 32,
+                "messages": [{"role": "user", "content": "oi"}],
+            },
+        )
+        self.assertEqual(messages.status_code, 200)
+        self.assertEqual(messages.json()["type"], "message")
 
     def test_openai_chat_stream_can_include_usage_chunk(self) -> None:
         app = create_app(settings=make_settings(), client_factory=FakeUsageStreamingOpenRouterClient)
