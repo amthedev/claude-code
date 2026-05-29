@@ -2130,6 +2130,51 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(response["content"][0]["input"]["path"], "calculadora.py")
         self.assertIn("def somar", response["content"][0]["input"]["content"])
 
+    def test_vps_openai_chat_converts_chatty_file_draft_to_write_tool(self) -> None:
+        settings = make_settings()
+        settings.vps_model_id = "qwen3-32b"
+        settings.vps_model_api_format = "openai-chat"
+        client = VPSAnthropicClient(settings)
+
+        payload = {
+            "__gateway_client": "claude-code",
+            "messages": [{"role": "user", "content": "pegue o Calculadora.py e transforme em uma lista de tarefas"}],
+            "tools": [{"name": "Write", "input_schema": {"type": "object"}}],
+        }
+        response = client._anthropic_from_openai_chat(
+            {
+                "id": "chatcmpl_chatty_file_draft",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "Calculadora.py\n\n"
+                                "```python\n"
+                                "import json\n\n"
+                                "def main():\n"
+                                "    tarefas = []\n"
+                                "    print('Lista de tarefas')\n\n"
+                                "if __name__ == '__main__':\n"
+                                "    main()\n"
+                                "```\n\n"
+                                "Este código cria uma aplicação de lista de tarefas funcional editável. "
+                                "Você pode adicionar, remover e listar tarefas."
+                            )
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        )
+
+        client._ensure_required_tool_call(payload, response)
+
+        self.assertEqual(response["stop_reason"], "tool_use")
+        self.assertEqual(response["content"][0]["name"], "Write")
+        self.assertEqual(response["content"][0]["input"]["file_path"], "Calculadora.py")
+        self.assertIn("Lista de tarefas", response["content"][0]["input"]["content"])
+        self.assertNotIn("Este código cria", response["content"][0]["input"]["content"])
+
     def test_vps_openai_chat_preserves_tool_history_as_native_openai_messages(self) -> None:
         settings = make_settings()
         settings.vps_model_id = "qwen3-32b"

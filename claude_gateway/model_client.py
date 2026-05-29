@@ -406,6 +406,9 @@ class VPSAnthropicClient:
             "quero",
             "trabalhe",
             "trabalhar",
+            "transforma",
+            "transforme",
+            "transformar",
         )
         return any(term in compact for term in action_terms)
 
@@ -772,6 +775,9 @@ class VPSAnthropicClient:
             "remover",
             "salve",
             "site",
+            "transforma",
+            "transforme",
+            "transformar",
             "write",
         )
         return any(term in compact for term in change_terms)
@@ -2442,6 +2448,10 @@ def _file_contents_from_text(text: str) -> list[tuple[str, str]]:
         fenced = _FENCED_CODE_RE.match(content)
         if fenced:
             content = fenced.group("code")
+        else:
+            fenced_blocks = list(re.finditer(r"```[A-Za-z0-9_-]*\s*\n(.*?)\n```", content, re.DOTALL))
+            if fenced_blocks:
+                content = fenced_blocks[0].group(1)
         content = content.strip("\n")
         if not content or path in seen:
             continue
