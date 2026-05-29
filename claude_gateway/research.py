@@ -71,10 +71,18 @@ class WebSearchClient:
     def responses_url(self) -> str:
         return f"{self.settings.openai_base_url.rstrip('/')}/responses"
 
-    async def search(self, query: str, *, required: bool = True) -> WebSearchResult:
-        if not self.settings.openai_api_key:
-            raise WebSearchError("OPENAI_API_KEY is not configured.")
+    @property
+    def openrouter_chat_url(self) -> str:
+        return f"{self.settings.openrouter_base_url.rstrip('/')}/v1/chat/completions"
 
+    async def search(self, query: str, *, required: bool = True) -> WebSearchResult:
+        if self.settings.openai_api_key:
+            return await self._search_openai(query, required=required)
+        if self.settings.openrouter_api_key:
+            return await self._search_openrouter(query, required=required)
+        raise WebSearchError("OPENAI_API_KEY or OPENROUTER_API_KEY is not configured.")
+
+    async def _search_openai(self, query: str, *, required: bool) -> WebSearchResult:
         body: dict[str, Any] = {
             "model": self.settings.web_search_model,
             "instructions": WEB_SEARCH_PROMPT,
@@ -103,6 +111,41 @@ class WebSearchClient:
 
         return parse_web_search_response(response.json())
 
+    async def _search_openrouter(self, query: str, *, required: bool) -> WebSearchResult:
+        instruction = WEB_SEARCH_PROMPT
+        if required:
+            instruction += "\nYou must use web search for this request before summarizing."
+
+        body: dict[str, Any] = {
+            "model": self.settings.web_search_openrouter_model or self.settings.fast_agent,
+            "messages": [
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": query[:12000]},
+            ],
+            "max_tokens": self.settings.web_search_max_output_tokens,
+            "tools": [self._openrouter_web_search_tool()],
+        }
+        headers = {
+            "Authorization": f"Bearer {self.settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": self.settings.openrouter_site_url,
+            "X-Title": self.settings.openrouter_app_name,
+        }
+        timeout_seconds = max(0.05, float(self.settings.web_search_timeout_seconds or 8.0))
+        timeout = httpx.Timeout(
+            connect=min(5.0, timeout_seconds),
+            read=timeout_seconds,
+            write=min(10.0, timeout_seconds),
+            pool=min(10.0, timeout_seconds),
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(self.openrouter_chat_url, headers=headers, json=body)
+
+        if response.status_code >= 400:
+            raise WebSearchError(response.text)
+
+        return parse_openrouter_web_search_response(response.json())
+
     def _web_search_tool(self) -> dict[str, Any]:
         tool: dict[str, Any] = {
             "type": "web_search",
@@ -115,6 +158,19 @@ class WebSearchClient:
             filters["blocked_domains"] = list(self.settings.web_search_blocked_domains[:100])
         if filters:
             tool["filters"] = filters
+        return tool
+
+    def _openrouter_web_search_tool(self) -> dict[str, Any]:
+        parameters: dict[str, Any] = {}
+        if self.settings.web_search_context_size:
+            parameters["search_context_size"] = self.settings.web_search_context_size
+        if self.settings.web_search_allowed_domains:
+            parameters["allowed_domains"] = list(self.settings.web_search_allowed_domains[:100])
+        if self.settings.web_search_blocked_domains:
+            parameters["excluded_domains"] = list(self.settings.web_search_blocked_domains[:100])
+        tool: dict[str, Any] = {"type": "openrouter:web_search"}
+        if parameters:
+            tool["parameters"] = parameters
         return tool
 
 
@@ -185,6 +241,20 @@ def parse_web_search_response(response: dict[str, Any]) -> WebSearchResult:
     return WebSearchResult(summary=summary, sources=tuple(sources), searched=searched)
 
 
+def parse_openrouter_web_search_response(response: dict[str, Any]) -> WebSearchResult:
+    message = (((response.get("choices") or [{}])[0] or {}).get("message") or {})
+    summary = _message_text(message).strip()
+    sources = _extract_openrouter_sources(message)
+    usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+    server_tool_use = (
+        usage.get("server_tool_use")
+        if isinstance(usage.get("server_tool_use"), dict)
+        else {}
+    )
+    searched = bool(sources or int(server_tool_use.get("web_search_requests") or 0) > 0)
+    return WebSearchResult(summary=summary, sources=tuple(sources), searched=searched)
+
+
 def _extract_output_text(response: dict[str, Any]) -> str:
     output_text = response.get("output_text")
     if isinstance(output_text, str) and output_text.strip():
@@ -235,6 +305,47 @@ def _extract_sources(response: dict[str, Any]) -> list[WebSource]:
             add(source.get("url"), source.get("title"))
 
     return sources
+
+
+def _extract_openrouter_sources(message: dict[str, Any]) -> list[WebSource]:
+    sources: list[WebSource] = []
+    seen: set[str] = set()
+
+    def add(url: Any, title: Any = "") -> None:
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            return
+        if url in seen:
+            return
+        seen.add(url)
+        sources.append(WebSource(title=str(title or url), url=url))
+
+    for annotation in _as_list(message.get("annotations")):
+        if not isinstance(annotation, dict):
+            continue
+        if annotation.get("type") == "url_citation":
+            citation = annotation.get("url_citation")
+            if isinstance(citation, dict):
+                add(citation.get("url"), citation.get("title"))
+            else:
+                add(annotation.get("url"), annotation.get("title"))
+
+    return sources
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text") or part.get("content")
+            if isinstance(text, str):
+                chunks.append(text)
+        return "\n".join(chunks)
+    return ""
 
 
 def _has_web_search_call(response: dict[str, Any]) -> bool:

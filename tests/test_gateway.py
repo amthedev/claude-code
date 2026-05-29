@@ -24,7 +24,12 @@ from claude_gateway.customers import _today, daily_cost_budget_usd, estimate_res
 from claude_gateway.main import _public_model_stream, create_app
 from claude_gateway.model_client import VPSAnthropicClient
 from claude_gateway.openrouter import OpenRouterClient, OpenRouterError
-from claude_gateway.research import WebSearchResult, WebSource, parse_web_search_response
+from claude_gateway.research import (
+    WebSearchResult,
+    WebSource,
+    parse_openrouter_web_search_response,
+    parse_web_search_response,
+)
 from claude_gateway.skills import SKILL_CATALOG, select_skills
 
 
@@ -3515,7 +3520,12 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(app.state.web_search.calls, [])
 
     def test_required_web_search_without_openai_key_falls_back_safely(self) -> None:
-        response = self.client.post(
+        settings = make_settings()
+        settings.openrouter_api_key = ""
+        app = create_app(settings=settings, client_factory=FakeOpenRouterClient)
+        client = TestClient(app)
+
+        response = client.post(
             "/v1/messages",
             headers=self.headers,
             json={
@@ -3527,8 +3537,34 @@ class GatewayTestCase(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        payload = self.app.state.openrouter.calls[-1][1]
+        payload = app.state.openrouter.calls[-1][1]
         self.assertIn("web search was needed", payload["system"])
+
+    def test_web_search_can_use_openrouter_when_openai_key_is_missing(self) -> None:
+        settings = make_settings()
+        settings.openai_api_key = ""
+        app = create_app(
+            settings=settings,
+            client_factory=FakeOpenRouterClient,
+            web_search_factory=FakeWebSearchClient,
+        )
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/messages",
+            headers=self.headers,
+            json={
+                "model": "claude-code-economy",
+                "max_tokens": 128,
+                "gateway_web_search": "required",
+                "messages": [{"role": "user", "content": "Pesquise notícias atuais de IA"}],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(app.state.web_search.calls), 1)
+        payload = app.state.openrouter.calls[-1][1]
+        self.assertIn("Internal web research context", payload["system"])
 
     def test_web_search_timeout_falls_back_to_model_quickly(self) -> None:
         settings = make_settings()
@@ -3590,6 +3626,34 @@ class GatewayTestCase(unittest.TestCase):
         self.assertTrue(result.searched)
         self.assertEqual(result.summary, "Resumo atual.")
         self.assertEqual({source.url for source in result.sources}, {"https://example.com/cited", "https://example.com/all"})
+
+    def test_openrouter_web_search_response_extracts_citations_and_sources(self) -> None:
+        result = parse_openrouter_web_search_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "Resumo via OpenRouter.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url_citation": {
+                                        "title": "Fonte OpenRouter",
+                                        "url": "https://example.com/openrouter",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"server_tool_use": {"web_search_requests": 1}},
+            }
+        )
+
+        self.assertTrue(result.searched)
+        self.assertEqual(result.summary, "Resumo via OpenRouter.")
+        self.assertEqual(result.sources[0].title, "Fonte OpenRouter")
+        self.assertEqual(result.sources[0].url, "https://example.com/openrouter")
 
     def test_over_budget_internal_model_is_replaced(self) -> None:
         settings = make_settings()

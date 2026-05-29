@@ -217,6 +217,7 @@ class Settings:
     enable_openai_decision_director: bool = True
     enable_web_search: bool = True
     web_search_model: str = "gpt-5.5"
+    web_search_openrouter_model: str = ""
     web_search_context_size: str = "low"
     web_search_for_customers: bool = True
     web_search_max_output_tokens: int = 900
@@ -347,6 +348,7 @@ class Settings:
             enable_openai_decision_director=_bool_env("ENABLE_OPENAI_DECISION_DIRECTOR", True),
             enable_web_search=_bool_env("ENABLE_WEB_SEARCH", True),
             web_search_model=os.getenv("WEB_SEARCH_MODEL", "gpt-5.5"),
+            web_search_openrouter_model=os.getenv("WEB_SEARCH_OPENROUTER_MODEL", ""),
             web_search_context_size=os.getenv("WEB_SEARCH_CONTEXT_SIZE", "low"),
             web_search_for_customers=_bool_env("WEB_SEARCH_FOR_CUSTOMERS", True),
             web_search_max_output_tokens=int(os.getenv("WEB_SEARCH_MAX_OUTPUT_TOKENS", "900")),

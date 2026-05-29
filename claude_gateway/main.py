@@ -185,7 +185,8 @@ def create_app(
     search_factory = web_search_factory or WebSearchClient
     app.state.web_search = (
         search_factory(resolved_settings)
-        if resolved_settings.enable_web_search and resolved_settings.openai_api_key
+        if resolved_settings.enable_web_search
+        and (resolved_settings.openai_api_key or resolved_settings.openrouter_api_key)
         else None
     )
     app.state.orchestrator = MessageOrchestrator(
@@ -2926,8 +2927,10 @@ def _web_search_debug(payload: dict[str, Any], settings: Settings, auth: AuthCon
 def _web_search_status(settings: Settings) -> dict[str, Any]:
     return {
         "enabled": settings.enable_web_search,
-        "configured": bool(settings.openai_api_key),
+        "configured": bool(settings.openai_api_key or settings.openrouter_api_key),
+        "provider": "openai" if settings.openai_api_key else "openrouter" if settings.openrouter_api_key else "",
         "model": settings.web_search_model,
+        "openrouter_model": settings.web_search_openrouter_model or settings.fast_agent,
         "context_size": settings.web_search_context_size,
         "for_customers": settings.web_search_for_customers,
         "max_output_tokens": settings.web_search_max_output_tokens,
@@ -2947,7 +2950,9 @@ def _production_readiness(app: FastAPI) -> dict[str, Any]:
         "external_fallback": bool(
             settings.openrouter_emergency_fallback and settings.openrouter_api_key
         ),
-        "web_search": bool(settings.enable_web_search and settings.openai_api_key),
+        "web_search": bool(
+            settings.enable_web_search and (settings.openai_api_key or settings.openrouter_api_key)
+        ),
         "openai_helper": bool(settings.openai_api_key),
         "mercado_pago": bool(settings.mercado_pago_access_token),
         "mercado_pago_webhook_secret": bool(settings.mercado_pago_webhook_secret),
@@ -3013,7 +3018,7 @@ def _benchmark_system_rows(app: FastAPI) -> list[dict[str, Any]]:
             "Pesquisa web configurada",
             readiness["web_search"],
             "warning",
-            "Sem OPENAI_API_KEY a opcao Web avisa fallback e nao busca fontes atuais.",
+            "Configure uma chave de busca web para buscar fontes atuais.",
         ),
         (
             "mercado_pago",
